@@ -8,7 +8,8 @@ StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes conca
 StructuredBuffer<uint> instances;   // 16 words: vertex offset, index offset, material, emitter base + 1 (0 = not emissive), 12 floats (row-major 3x4)
 StructuredBuffer<float> materials;  // 16 words: base color rgb, emission rgb, metallic, roughness, transmission, ior,
                                     // base color / metallic-roughness / emission / normal texture + 1 (0 = none), normal scale, 1 pad
-StructuredBuffer<uint> lights;      // 8 words: kind (0 point, 1 directional), color rgb, intensity, position or travel direction xyz (floats as bits)
+StructuredBuffer<uint> lights;      // 16 words: kind (0 point, 1 directional, 2 spot), color rgb, intensity, position or travel direction xyz,
+                                    // spot axis xyz, spot falloff scale, spot falloff offset, 3 pad (floats as bits)
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
                                     // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
@@ -501,25 +502,31 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         // reflective lobes only; rough transmission of a delta light is not evaluated.
         for (uint li = 0; li < lightCount; li++)
         {
-            uint o = li * 8;
+            uint o = li * 16;
             float3 col = float3(asfloat(lights[o + 1]), asfloat(lights[o + 2]), asfloat(lights[o + 3])) * asfloat(lights[o + 4]);
             float3 vec = float3(asfloat(lights[o + 5]), asfloat(lights[o + 6]), asfloat(lights[o + 7]));
             float3 wi;
             float dist;
             float3 li_;
-            if (lights[o] == 0)
+            if (lights[o] == 1)
+            {
+                wi = -normalize(vec);
+                dist = 1.0e30;
+                li_ = col;
+            }
+            else
             {
                 float3 toL = vec - p;
                 float d2 = dot(toL, toL);
                 dist = sqrt(d2);
                 wi = toL / dist;
                 li_ = col / d2;
-            }
-            else
-            {
-                wi = -normalize(vec);
-                dist = 1.0e30;
-                li_ = col;
+                if (lights[o] == 2)
+                {
+                    float3 axis = float3(asfloat(lights[o + 8]), asfloat(lights[o + 9]), asfloat(lights[o + 10]));
+                    float att = saturate(dot(axis, -wi) * asfloat(lights[o + 11]) + asfloat(lights[o + 12]));
+                    li_ *= att * att;
+                }
             }
             float c = dot(n, wi);
             if (c > 0.0 && !occluded(p, wi, dist - 1.0e-3))
