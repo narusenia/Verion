@@ -1,11 +1,14 @@
 #!/bin/sh
 # Renders each benchmarks/*.gltf and the generated scale scene at a fixed size and spp, and compares gpu_s with the baseline recorded
-# for this machine (benchmarks/baseline/<chip>.json); exits 1 when any scene is more than 10% slower.
+# for this chip and power source (benchmarks/baseline/<chip>-<ac|battery>.json; battery runs ~25% slower); exits 1 when any scene is more than 10% slower.
 # `bench.sh record` writes the baseline instead. Needs a Metal GPU; not run in CI.
 set -eu
 out=target/bench
 runs=5
 chip=$(sysctl -n machdep.cpu.brand_string | tr 'A-Z ' 'a-z-')
+# GPU clocks differ with the power source, so each source has its own baseline.
+pmset -g batt | grep -q "AC Power" && power=ac || power=battery
+chip=$chip-$power
 base=benchmarks/baseline/$chip.json
 mkdir -p "$out" benchmarks/baseline
 cargo build --release -q -p verion-render-cli
