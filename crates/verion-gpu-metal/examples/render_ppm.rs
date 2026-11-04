@@ -1,5 +1,6 @@
 //! Dev tool: renders a small test scene (Cornell-style box, metal and glass spheres) to PPM and EXR files.
-//! Usage: cargo run --release -p verion-gpu-metal --example render_ppm -- [out_dir] [width] [height] [spp]
+//! Usage: cargo run --release -p verion-gpu-metal --example render_ppm -- [out_dir] [width] [height] [spp] [walls]
+//! `walls` leaves out the spheres (diffuse walls, area light and point light only).
 #[cfg(target_os = "macos")]
 mod imp {
     use std::{collections::HashMap, fs, io::Write, path::Path};
@@ -115,7 +116,7 @@ mod imp {
         [[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, y], [0.0, 0.0, 1.0, z]]
     }
 
-    fn scene() -> Scene {
+    fn scene(walls_only: bool) -> Scene {
         let mut s = Scene::new();
         let add = |s: &mut Scene, mesh: Mesh, material: Material, transform| {
             let (mesh, material) = (s.add_mesh(mesh), s.add_material(material));
@@ -169,37 +170,39 @@ mod imp {
             emissive([14.0; 3]),
             IDENTITY,
         );
-        let ball = sphere(0.7);
-        let gold = BaseBsdf {
-            base_color: [1.0, 0.78, 0.34],
-            metallic: 1.0,
-            roughness: 0.2,
-            ..BaseBsdf::default()
-        };
-        let glass = BaseBsdf {
-            base_color: [1.0; 3],
-            roughness: 0.0,
-            transmission: 1.0,
-            ..BaseBsdf::default()
-        };
-        add(
-            &mut s,
-            ball.clone(),
-            Material {
-                base: gold,
-                ..Material::default()
-            },
-            translate(-0.9, -1.3, -0.6),
-        );
-        add(
-            &mut s,
-            ball,
-            Material {
-                base: glass,
-                ..Material::default()
-            },
-            translate(0.9, -1.3, 0.3),
-        );
+        if !walls_only {
+            let ball = sphere(0.7);
+            let gold = BaseBsdf {
+                base_color: [1.0, 0.78, 0.34],
+                metallic: 1.0,
+                roughness: 0.2,
+                ..BaseBsdf::default()
+            };
+            let glass = BaseBsdf {
+                base_color: [1.0; 3],
+                roughness: 0.0,
+                transmission: 1.0,
+                ..BaseBsdf::default()
+            };
+            add(
+                &mut s,
+                ball.clone(),
+                Material {
+                    base: gold,
+                    ..Material::default()
+                },
+                translate(-0.9, -1.3, -0.6),
+            );
+            add(
+                &mut s,
+                ball,
+                Material {
+                    base: glass,
+                    ..Material::default()
+                },
+                translate(0.9, -1.3, 0.3),
+            );
+        }
         let mut cam = Camera {
             vertical_fov: 0.9,
             ..Camera::default()
@@ -227,7 +230,7 @@ mod imp {
         let mut num = |default: u32| args.next().map_or(default, |a| a.parse().expect("number"));
         let (w, h, spp) = (num(512), num(384), num(256));
 
-        let scene = scene();
+        let scene = scene(args.next().as_deref() == Some("walls"));
         let ctx = MetalContext::new().expect("Metal ray tracing is required");
         let renderer = Renderer::new(&ctx, &scene).expect("renderer");
         let dir = Path::new(&dir);
