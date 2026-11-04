@@ -118,7 +118,6 @@ Verion は、Blender / Cinema 4D / Maya などの DCC から使える GPU レン
 | Metal 向けデノイザーの選定（OIDN / MetalFX） | M2 |
 | M1/M2 チップ（RT 非搭載）の扱い | M7 まで保留。M3 以降のみ対象 |
 | Linux 対応 | M4 以降 |
-| GPU を使う CI の実行環境 | M1 中 |
 
 ## 用語集
 
