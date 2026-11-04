@@ -1,12 +1,13 @@
 //! Dev tool: renders a small test scene (Cornell-style box, metal and glass spheres) to PPM and EXR files.
-//! Usage: cargo run --release -p verion-gpu-metal --example render_ppm -- [out_dir] [width] [height] [spp] [walls]
-//! `walls` leaves out the spheres (diffuse walls, area light and point light only).
+//! Usage: cargo run --release -p verion-gpu-metal --example render_ppm -- [out_dir] [width] [height] [spp] [walls|hdri]
+//! `walls` leaves out the spheres (diffuse walls, area light and point light only). `hdri` renders
+//! the spheres on a large floor lit by a procedural environment map (written to env.exr).
 #[cfg(target_os = "macos")]
 mod imp {
     use std::{collections::HashMap, fs, io::Write, path::Path};
 
     use verion_gpu_metal::{MetalContext, Renderer};
-    use verion_render_io::{ExrFrame, RenderInfo, write_exr};
+    use verion_render_io::{ExrFrame, RenderInfo, load_hdri, write_exr};
     use verion_scene::{
         BaseBsdf, Camera, IDENTITY, Instance, Light, Material, Mesh, OutputTransform, Scene,
     };
@@ -116,7 +117,8 @@ mod imp {
         [[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, y], [0.0, 0.0, 1.0, z]]
     }
 
-    fn scene(walls_only: bool) -> Scene {
+    fn scene(mode: &str) -> Scene {
+        let (walls_only, hdri) = (mode == "walls", mode == "hdri");
         let mut s = Scene::new();
         let add = |s: &mut Scene, mesh: Mesh, material: Material, transform| {
             let (mesh, material) = (s.add_mesh(mesh), s.add_material(material));
@@ -129,47 +131,50 @@ mod imp {
         };
         let (lo, hi) = (-2.0, 2.0);
         let grey = [0.75; 3];
+        let f = if hdri { 20.0 } else { 2.0 };
         add(
             &mut s,
-            quad([lo, lo, lo], [hi, lo, lo], [hi, lo, hi], [lo, lo, hi]),
+            quad([-f, lo, -f], [f, lo, -f], [f, lo, f], [-f, lo, f]),
             diffuse(grey),
             IDENTITY,
         ); // floor
-        add(
-            &mut s,
-            quad([lo, hi, lo], [hi, hi, lo], [hi, hi, hi], [lo, hi, hi]),
-            diffuse(grey),
-            IDENTITY,
-        ); // ceiling
-        add(
-            &mut s,
-            quad([lo, lo, lo], [hi, lo, lo], [hi, hi, lo], [lo, hi, lo]),
-            diffuse(grey),
-            IDENTITY,
-        ); // back
-        add(
-            &mut s,
-            quad([lo, lo, lo], [lo, lo, hi], [lo, hi, hi], [lo, hi, lo]),
-            diffuse([0.75, 0.15, 0.15]),
-            IDENTITY,
-        ); // left
-        add(
-            &mut s,
-            quad([hi, lo, lo], [hi, lo, hi], [hi, hi, hi], [hi, hi, lo]),
-            diffuse([0.15, 0.6, 0.15]),
-            IDENTITY,
-        ); // right
-        add(
-            &mut s,
-            quad(
-                [-0.6, 1.99, -0.6],
-                [0.6, 1.99, -0.6],
-                [0.6, 1.99, 0.6],
-                [-0.6, 1.99, 0.6],
-            ),
-            emissive([14.0; 3]),
-            IDENTITY,
-        );
+        if !hdri {
+            add(
+                &mut s,
+                quad([lo, hi, lo], [hi, hi, lo], [hi, hi, hi], [lo, hi, hi]),
+                diffuse(grey),
+                IDENTITY,
+            ); // ceiling
+            add(
+                &mut s,
+                quad([lo, lo, lo], [hi, lo, lo], [hi, hi, lo], [lo, hi, lo]),
+                diffuse(grey),
+                IDENTITY,
+            ); // back
+            add(
+                &mut s,
+                quad([lo, lo, lo], [lo, lo, hi], [lo, hi, hi], [lo, hi, lo]),
+                diffuse([0.75, 0.15, 0.15]),
+                IDENTITY,
+            ); // left
+            add(
+                &mut s,
+                quad([hi, lo, lo], [hi, lo, hi], [hi, hi, hi], [hi, hi, lo]),
+                diffuse([0.15, 0.6, 0.15]),
+                IDENTITY,
+            ); // right
+            add(
+                &mut s,
+                quad(
+                    [-0.6, 1.99, -0.6],
+                    [0.6, 1.99, -0.6],
+                    [0.6, 1.99, 0.6],
+                    [-0.6, 1.99, 0.6],
+                ),
+                emissive([14.0; 3]),
+                IDENTITY,
+            );
+        }
         if !walls_only {
             let ball = sphere(0.7);
             let gold = BaseBsdf {
@@ -209,12 +214,42 @@ mod imp {
         };
         cam.transform[2][3] = 6.0;
         s.set_camera(cam);
-        s.add_light(Light::Point {
-            position: [0.0, 1.0, 1.5],
-            color: [1.0, 0.95, 0.9],
-            intensity: 1.5,
-        });
+        if !hdri {
+            s.add_light(Light::Point {
+                position: [0.0, 1.0, 1.5],
+                color: [1.0, 0.95, 0.9],
+                intensity: 1.5,
+            });
+        }
         s
+    }
+
+    /// Smooth sky gradient plus a wide sun lobe, so nearest and bilinear lookups agree closely.
+    fn env_pixels(w: u32, h: u32) -> Vec<[f32; 3]> {
+        let sun = [0.5f32, 0.6, 0.3];
+        let sun_len = (sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]).sqrt();
+        let mut px = Vec::with_capacity((w * h) as usize);
+        for j in 0..h {
+            let theta = (j as f32 + 0.5) / h as f32 * std::f32::consts::PI;
+            for i in 0..w {
+                let phi = ((i as f32 + 0.5) / w as f32 - 0.5) * 2.0 * std::f32::consts::PI;
+                // Inverse of the renderer's u = atan2(x, -z) / 2pi + 0.5, v = acos(y) / pi.
+                let d = [
+                    theta.sin() * phi.sin(),
+                    theta.cos(),
+                    -theta.sin() * phi.cos(),
+                ];
+                let t = 0.5 + 0.5 * d[1];
+                let cos_sun = (d[0] * sun[0] + d[1] * sun[1] + d[2] * sun[2]) / sun_len;
+                let lobe = (-(1.0 - cos_sun) / 0.03).exp();
+                px.push([
+                    0.25 + 0.35 * t + 8.0 * lobe,
+                    0.3 + 0.4 * t + 7.0 * lobe,
+                    0.5 + 0.5 * t + 5.0 * lobe,
+                ]);
+            }
+        }
+        px
     }
 
     fn write_ppm(path: &Path, w: u32, h: u32, pixels: &[[f32; 3]], encode: impl Fn(f32) -> u8) {
@@ -230,11 +265,32 @@ mod imp {
         let mut num = |default: u32| args.next().map_or(default, |a| a.parse().expect("number"));
         let (w, h, spp) = (num(512), num(384), num(256));
 
-        let scene = scene(args.next().as_deref() == Some("walls"));
-        let ctx = MetalContext::new().expect("Metal ray tracing is required");
-        let renderer = Renderer::new(&ctx, &scene).expect("renderer");
+        let mode = args.next().unwrap_or_default();
+        let mut scene = scene(&mode);
         let dir = Path::new(&dir);
         fs::create_dir_all(dir).unwrap();
+        if mode == "hdri" {
+            let (ew, eh) = (256, 128);
+            let env = ExrFrame {
+                width: ew,
+                height: eh,
+                working_space: scene.working_space(),
+                beauty: &env_pixels(ew, eh),
+                normal: None,
+                info: RenderInfo {
+                    physical: true,
+                    samples: 0,
+                },
+            };
+            let path = dir.join("env.exr");
+            let linear = OutputTransform::linear(scene.working_space());
+            write_exr(&path, &env, &linear).expect("write env");
+            let image = load_hdri(&path, scene.working_space()).expect("load env");
+            let image = scene.add_image(image);
+            scene.add_light(Light::EnvironmentMap { image, scale: 1.0 });
+        }
+        let ctx = MetalContext::new().expect("Metal ray tracing is required");
+        let renderer = Renderer::new(&ctx, &scene).expect("renderer");
 
         let beauty = renderer.render(w, h, spp).expect("render");
         let display = OutputTransform::display();

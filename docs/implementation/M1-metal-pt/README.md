@@ -10,13 +10,13 @@
 | 3 | Metal の Device / Queue / BLAS / TLAS | REQ-GPU-001 / 003 | 進行中（M5 で動作確認済み。別環境での確認が未了） |
 | 4 | Scene IR と revision | REQ-CORE-001 | 済 |
 | 5 | glTF 入力 | REQ-IO-001 | 進行中（BaseColor・MetallicRoughness・Emissive テクスチャは読める。Normal テクスチャ・spot ライトも対応済み。残りは未対応の拡張のみ） |
-| 6 | BSDF・Integrator・テクスチャ・HDRI・ライト | REQ-CORE-002 / 003 / 004 | 進行中（HDRI の `.hdr` / `.exr` 読み込みは実装済み。Mitsuba 3 照合は項目 12） |
+| 6 | BSDF・Integrator・テクスチャ・HDRI・ライト | REQ-CORE-002 / 003 / 004 | 進行中（HDRI の `.hdr` / `.exr` 読み込みは実装済み。Cornell Box・球 + 手続き生成 HDRI は Mitsuba 3 照合済み、Spot・法線マップは未。項目 12） |
 | 7 | カラーマネジメント | REQ-CORE-005 | 進行中（作業色空間 Linear Rec.709 / ACEScg、glTF 取り込み時の入力変換、表示変換 = 目標色空間+Reinhard+sRGB OETF は実装済み。EXR 側の変換は項目 8 で接続） |
 | 8 | EXR 多チャンネル出力 | REQ-IO-003 | 進行中（Beauty + Normal AOV、物理/非物理・spp・作業色空間のメタデータ、chromaticities、`exr` crate による書き出しは実装済み。外部ビューアでの目視確認も済み。Albedo・Depth・ObjectId は未） |
 | 9 | render-cli | REQ-VIEW-001 | 未着手 |
 | 10 | GPU 計測 | REQ-GPU-004 | 未着手 |
 | 11 | Reference モード | REQ-CORE-006 | 未着手 |
-| 12 | Mitsuba 3 照合・白炉テスト・テストシーン管理 | REQ-QA-001 / 002 / 004 | 進行中（Cornell Box（拡散・金属・ガラス・点光源・面光源）は `scripts/mitsuba_cornell.py` で照合済み。平均輝度の最悪チャンネル偏差 ±1% 以内で合格とし、実測は 0.19%。球 + HDRI・Spot・法線マップ・画素単位の FLIP / PSNR・白炉・CI 組み込みは未） |
+| 12 | Mitsuba 3 照合・白炉テスト・テストシーン管理 | REQ-QA-001 / 002 / 004 | 進行中（Cornell Box（拡散・金属・ガラス・点光源・面光源）は `scripts/mitsuba_cornell.py` で照合済み。平均輝度の最悪チャンネル偏差 ±1% 以内で合格とし、実測は 0.19%。球 + 手続き生成 HDRI も `scripts/mitsuba_cornell.py hdri` で照合済みで、最悪チャンネル偏差 0.07%、4x4 ブロック平均の最悪 0.19%。実物の HDRI・Spot・法線マップ・画素単位の FLIP / PSNR・白炉・CI 組み込みは未） |
 | 13 | ベンチ基盤・ベースライン記録（規模下限の仮置きを見直す） | REQ-PERF-001 / 002 / 003 | 未着手 |
 
 ## 完了条件

@@ -1,10 +1,11 @@
 """Renders the render_ppm example scene with Mitsuba 3 and compares it with Verion's render.exr.
 
 Usage: mise exec -- ~/.local/share/mise/installs/pipx-mitsuba/3.7.1/mitsuba/bin/python \
-           scripts/mitsuba_cornell.py [out_dir] [width] [height] [spp] [walls]
+           scripts/mitsuba_cornell.py [out_dir] [width] [height] [spp] [walls|hdri]
 out_dir must hold the render.exr written by the example (cargo run --release -p verion-gpu-metal
 --example render_ppm -- out_dir w h spp). Writes out_dir/mitsuba.exr.
-`walls` leaves out the spheres (pass it to the example too).
+`walls` leaves out the spheres, `hdri` swaps the box for a floor under out_dir/env.exr (pass the same
+mode to the example, which writes env.exr).
 Differences from Verion: Mitsuba's analytic spheres versus Verion's icospheres.
 """
 
@@ -77,8 +78,16 @@ desc = (
                   "intensity": {"type": "rgb", "value": [1.5, 1.425, 1.35]}},
     }
 )
-if len(sys.argv) > 5 and sys.argv[5] == "walls":
+mode = sys.argv[5] if len(sys.argv) > 5 else ""
+if mode == "walls":
     del desc["gold"], desc["glass"]
+elif mode == "hdri":
+    for k in ("ceiling", "back", "left", "right", "light", "light_back", "point"):
+        del desc[k]
+    desc["floor"] = quad(grey, [0, -2, 0], [1, 0, 0], -90, half=20.0)
+    # Mitsuba's lat-long mapping is Verion's turned 180 degrees about +y (found by rendering a sun).
+    desc["env"] = {"type": "envmap", "filename": str(out / "env.exr"),
+                   "to_world": T().rotate([0, 1, 0], 180)}
 scene = mi.load_dict(desc)
 
 image = mi.render(scene)
@@ -101,3 +110,15 @@ abs_err = mean([abs(a - b) for m, r in zip(mine, ref) for a, b in zip(m, r)])
 print(f"mean abs error / mean radiance: {abs_err / mean(mm):.4f} (noise floor falls with 1/sqrt(spp))")
 worst = max(abs(b / a - 1) for a, b in zip(mm, mv))
 print(f"worst channel deviation {worst:.2%}: {'PASS' if worst <= 0.01 else 'FAIL'} (limit 1%)")
+
+# Block means catch what the global mean hides, e.g. a mirrored or rotated environment map.
+n = 4
+bw, bh = w // n, h // n
+worst_block = 0.0
+for by in range(n):
+    for bx in range(n):
+        idx = [(by * bh + y) * w + bx * bw + x for y in range(bh) for x in range(bw)]
+        a = mean([c[i] for c in mine for i in idx])
+        b = mean([c[i] for c in ref for i in idx])
+        worst_block = max(worst_block, abs(b / a - 1))
+print(f"worst {n}x{n} block mean deviation {worst_block:.2%}")
