@@ -110,9 +110,11 @@ mi.util.write_bitmap(str(out / "mitsuba.exr"), image)
 
 
 def beauty(path):
-    # Flat [r, g, b, ...] of the root layer (Verion's EXR also carries the N layer).
-    root = dict(mi.Bitmap(str(path)).split())["<root>"]
-    return list(mi.TensorXf(root).array)
+    # Flat [r, g, b, ...] of the root layer. Verion's EXR also carries Z and ObjectId there (more
+    # than 3 channels), plus the N and Albedo layers, so take only the first three channels.
+    t = mi.TensorXf(dict(mi.Bitmap(str(path)).split())["<root>"])
+    n, data = t.shape[2], list(t.array)
+    return [data[i + c] for i in range(0, len(data), n) for c in range(3)]
 
 
 verion = beauty(out / "render.exr")
