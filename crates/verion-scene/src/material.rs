@@ -25,6 +25,10 @@ pub struct BaseBsdf {
     /// Roughness in green, metallic in blue.
     pub metallic_roughness_texture: Option<ImageId>,
     pub emission_texture: Option<ImageId>,
+    /// Tangent-space normal map (+Y up, glTF convention). Tangents are derived from the UVs.
+    pub normal_texture: Option<ImageId>,
+    /// Scales the map's x and y before normalizing.
+    pub normal_scale: f32,
 }
 
 impl Default for BaseBsdf {
@@ -39,6 +43,8 @@ impl Default for BaseBsdf {
             base_color_texture: None,
             metallic_roughness_texture: None,
             emission_texture: None,
+            normal_texture: None,
+            normal_scale: 1.0,
         }
     }
 }

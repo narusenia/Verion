@@ -228,17 +228,44 @@ impl Importer<'_> {
 
         let name = m.index().map_or("default".to_string(), |i| i.to_string());
         let mut base = base;
-        base.base_color_texture = pbr
-            .base_color_texture()
-            .and_then(|t| self.texture(&name, "base color", &t, true));
-        base.metallic_roughness_texture = pbr
-            .metallic_roughness_texture()
-            .and_then(|t| self.texture(&name, "metallic-roughness", &t, false));
-        base.emission_texture = m
-            .emissive_texture()
-            .and_then(|t| self.texture(&name, "emissive", &t, true));
+        base.base_color_texture = pbr.base_color_texture().and_then(|t| {
+            self.texture(
+                &name,
+                "base color",
+                t.tex_coord(),
+                t.texture().source().index(),
+                true,
+            )
+        });
+        base.metallic_roughness_texture = pbr.metallic_roughness_texture().and_then(|t| {
+            self.texture(
+                &name,
+                "metallic-roughness",
+                t.tex_coord(),
+                t.texture().source().index(),
+                false,
+            )
+        });
+        base.emission_texture = m.emissive_texture().and_then(|t| {
+            self.texture(
+                &name,
+                "emissive",
+                t.tex_coord(),
+                t.texture().source().index(),
+                true,
+            )
+        });
+        if let Some(t) = m.normal_texture() {
+            base.normal_scale = t.scale();
+            base.normal_texture = self.texture(
+                &name,
+                "normal",
+                t.tex_coord(),
+                t.texture().source().index(),
+                false,
+            );
+        }
         let ignored = [
-            ("normal", m.normal_texture().is_some()),
             ("occlusion", m.occlusion_texture().is_some()),
             (
                 "transmission",
@@ -272,17 +299,16 @@ impl Importer<'_> {
         &mut self,
         material: &str,
         slot: &str,
-        info: &gltf::texture::Info,
+        tex_coord: u32,
+        source: usize,
         srgb: bool,
     ) -> Option<ImageId> {
-        if info.tex_coord() != 0 {
+        if tex_coord != 0 {
             self.warnings.push(format!(
-                "material {material}: {slot} texture uses UV set {}; only set 0 is supported",
-                info.tex_coord()
+                "material {material}: {slot} texture uses UV set {tex_coord}; only set 0 is supported"
             ));
             return None;
         }
-        let source = info.texture().source().index();
         if let Some(&cached) = self.image_cache.get(&(source, srgb)) {
             return cached;
         }
@@ -537,6 +563,7 @@ mod tests {
             base.base_color_texture.unwrap(),
             base.metallic_roughness_texture.unwrap(),
         );
+        let mr_id = mr;
         assert_ne!(
             color, mr,
             "sRGB and linear uses of one file are separate images"
@@ -555,9 +582,12 @@ mod tests {
         let mr = &scene.images()[mr.index()];
         assert!((mr.pixels()[3][0] - 128.0 / 255.0).abs() < 1e-6);
         assert_eq!(
-            warnings,
-            ["material 0: normal textures are not supported yet and were ignored"]
+            base.normal_texture,
+            Some(mr_id),
+            "normal maps are linear data"
         );
+        assert_eq!(base.normal_scale, 1.0);
+        assert!(warnings.is_empty(), "{warnings:?}");
     }
 
     #[test]

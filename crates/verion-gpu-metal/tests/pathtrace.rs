@@ -279,6 +279,70 @@ fn vertex_normals_follow_a_non_uniform_scale() {
     assert!((got - 0.894_427).abs() < 0.01, "{got}");
 }
 
+/// Textured floor (u to +x, v to -y) with a 1x1 normal map, lit by a sun shining from `to_light`.
+fn normal_mapped_floor(
+    ctx: &MetalContext,
+    tangent_normal: [f32; 3],
+    scale: f32,
+    to_light: [f32; 3],
+) -> f32 {
+    let mut s = Scene::new();
+    let h = 5.0;
+    let mesh = Mesh::new(
+        vec![[-h, -h, 0.0], [h, -h, 0.0], [h, h, 0.0], [-h, h, 0.0]],
+        None,
+        Some(vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]),
+        vec![0, 1, 2, 0, 2, 3],
+    )
+    .unwrap();
+    let mesh = s.add_mesh(mesh);
+    let texel = tangent_normal.map(|c| c * 0.5 + 0.5);
+    let map = s.add_image(Image::new(1, 1, vec![texel]).unwrap());
+    let mat = s.add_material(bsdf(BaseBsdf {
+        base_color: [1.0; 3],
+        ior: 1.0,
+        normal_texture: Some(map),
+        normal_scale: scale,
+        ..BaseBsdf::default()
+    }));
+    s.add_instance(Instance {
+        mesh,
+        material: mat,
+        transform: IDENTITY,
+    })
+    .unwrap();
+    s.add_light(Light::Directional {
+        direction: to_light.map(|c| -c),
+        color: [1.0; 3],
+        intensity: std::f32::consts::PI,
+    });
+    s.set_camera(camera_at_z(3.0));
+    center_pixel(ctx, &s)
+}
+
+#[test]
+fn normal_map_tilts_the_shading_normal() {
+    let Some(ctx) = context() else { return };
+    let tilt = [0.866_025_4, 0.5];
+    // Sun 60 degrees off the surface normal. Matching the map's tilt lights the texel fully;
+    // a flat surface would get cos(60) = 0.5. Green is up the image, which is +y in the world.
+    let x = normal_mapped_floor(&ctx, [tilt[0], 0.0, tilt[1]], 1.0, [tilt[0], 0.0, tilt[1]]);
+    let y = normal_mapped_floor(&ctx, [0.0, tilt[0], tilt[1]], 1.0, [0.0, tilt[0], tilt[1]]);
+    assert!((x - 1.0).abs() < 0.01, "x {x}");
+    assert!((y - 1.0).abs() < 0.01, "y {y}");
+    // Tilted the other way in y the normal faces away from the sun (cos = -0.5): no light.
+    let away = normal_mapped_floor(&ctx, [0.0, -tilt[0], tilt[1]], 1.0, [0.0, tilt[0], tilt[1]]);
+    assert!(away < 0.01, "away {away}");
+}
+
+#[test]
+fn normal_scale_flattens_the_tilt() {
+    let Some(ctx) = context() else { return };
+    // Scale 0 leaves the geometric normal: sun straight above gives L = 1.
+    let flat = normal_mapped_floor(&ctx, [0.866_025_4, 0.0, 0.5], 0.0, [0.0, 0.0, 1.0]);
+    assert!((flat - 1.0).abs() < 0.01, "{flat}");
+}
+
 #[test]
 fn thin_lens_keeps_the_focal_plane_sharp() {
     let Some(ctx) = context() else { return };
