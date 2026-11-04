@@ -106,7 +106,9 @@ mod imp {
                 f.swap(1, 2);
             }
         }
-        Mesh::new(v, None, None, faces.concat()).unwrap()
+        // Centred on the origin, so the outward normal is the normalised position.
+        let normals = v.iter().map(|p| p.map(|c| c / radius)).collect();
+        Mesh::new(v, Some(normals), None, faces.concat()).unwrap()
     }
 
     fn translate(x: f32, y: f32, z: f32) -> [[f32; 4]; 3] {
