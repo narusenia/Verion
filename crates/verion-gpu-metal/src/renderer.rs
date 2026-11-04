@@ -18,7 +18,7 @@ const PATHTRACE_MSL: &str = include_str!("../shaders/pathtrace.metal");
 /// Path length limit. Radiance beyond it is dropped, so closed furnaces read slightly dark.
 const MAX_DEPTH: u32 = 8;
 const MATERIAL_WORDS: usize = 16;
-const LIGHT_WORDS: usize = 8;
+const LIGHT_WORDS: usize = 16;
 /// Words per emissive triangle; must match `shaders/pathtrace.slang`.
 const EMITTER_WORDS: usize = 16;
 
@@ -378,6 +378,8 @@ impl Renderer {
         let mut sky = [0.0f32; 3];
         let mut lights = Vec::new();
         for light in scene.lights() {
+            let mut cone = [0.0f32; 4]; // axis xyz and the angular falloff scale, for spot lights
+            let mut offset = 0.0;
             let (kind, color, intensity, vector) = match *light {
                 Light::Point {
                     position,
@@ -389,22 +391,37 @@ impl Renderer {
                     color,
                     intensity,
                 } => (1, color, intensity, direction),
+                Light::Spot {
+                    position,
+                    direction,
+                    color,
+                    intensity,
+                    inner_cone,
+                    outer_cone,
+                } => {
+                    let len = direction.iter().map(|c| c * c).sum::<f32>().sqrt();
+                    let axis = direction.map(|c| c / len);
+                    // glTF falloff: saturate(cos * scale + offset), squared in the shader.
+                    let scale = 1.0 / (inner_cone.cos() - outer_cone.cos()).max(1.0e-3);
+                    cone = [axis[0], axis[1], axis[2], scale];
+                    offset = -outer_cone.cos() * scale;
+                    (2, color, intensity, position)
+                }
                 Light::EnvironmentMap { .. } => continue, // see `build_env`
                 Light::Environment { color } => {
                     sky.iter_mut().zip(color).for_each(|(s, c)| *s += c);
                     continue;
                 }
             };
-            let words: [u32; LIGHT_WORDS] = [
-                kind,
-                color[0].to_bits(),
-                color[1].to_bits(),
-                color[2].to_bits(),
-                intensity.to_bits(),
-                vector[0].to_bits(),
-                vector[1].to_bits(),
-                vector[2].to_bits(),
-            ];
+            let words: [u32; LIGHT_WORDS] = std::array::from_fn(|i| match i {
+                0 => kind,
+                1..=3 => color[i - 1].to_bits(),
+                4 => intensity.to_bits(),
+                5..=7 => vector[i - 5].to_bits(),
+                8..=11 => cone[i - 8].to_bits(),
+                12 => offset.to_bits(),
+                _ => 0,
+            });
             lights.extend(words);
         }
 

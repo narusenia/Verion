@@ -217,6 +217,34 @@ fn point_light_direct_lighting_matches_lambert() {
     assert!(shadowed < 1e-3, "shadowed {shadowed}");
 }
 
+/// Spot at (1, 0, 1) whose axis is `off` radians away from the direction to the floor origin.
+fn spot_at(off: f32) -> Light {
+    let a = std::f32::consts::FRAC_PI_4 + off;
+    Light::Spot {
+        position: [1.0, 0.0, 1.0],
+        // Deliberately not unit length.
+        direction: [-3.0 * a.sin(), 0.0, -3.0 * a.cos()],
+        color: [1.0; 3],
+        intensity: std::f32::consts::PI * 2.0 * 2.0f32.sqrt(),
+        inner_cone: 0.1,
+        outer_cone: 0.5,
+    }
+}
+
+#[test]
+fn spot_light_falls_off_between_its_cone_angles() {
+    let Some(ctx) = context() else { return };
+    let lit = |off| center_pixel(&ctx, &floor_scene(spot_at(off), false));
+    // Same geometry as the point light test, so inside the inner cone L = 1.
+    assert!((lit(0.0) - 1.0).abs() < 0.01);
+    // 0.3 rad off axis: glTF falloff is saturate((cos - cos outer) / (cos inner - cos outer)), squared.
+    let (c, i, o) = (0.3f32.cos(), 0.1f32.cos(), 0.5f32.cos());
+    let expected = ((c - o) / (i - o)).powi(2);
+    let got = lit(0.3);
+    assert!((got - expected).abs() < 0.01, "{got} vs {expected}");
+    assert!(lit(0.6) < 1e-3, "outside the cone");
+}
+
 #[test]
 fn directional_light_direct_lighting_matches_lambert() {
     let Some(ctx) = context() else { return };

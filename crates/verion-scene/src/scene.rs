@@ -47,6 +47,17 @@ pub enum Light {
         color: [f32; 3],
         intensity: f32,
     },
+    /// Cone light. `direction` is the axis the light shines along (need not be normalized);
+    /// the cone angles are half-angles in radians with `inner < outer <= pi / 2`, and intensity
+    /// falls off smoothly between them (glTF KHR_lights_punctual).
+    Spot {
+        position: [f32; 3],
+        direction: [f32; 3],
+        color: [f32; 3],
+        intensity: f32,
+        inner_cone: f32,
+        outer_cone: f32,
+    },
     /// Uniform sky.
     Environment { color: [f32; 3] },
     /// Latitude-longitude HDRI. +y is up and the image center faces -z. The image id must come from
