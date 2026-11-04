@@ -12,7 +12,7 @@
 | 5 | glTF 入力 | REQ-IO-001 | 進行中（BaseColor・MetallicRoughness・Emissive テクスチャは読める。Normal テクスチャ・spot ライトも対応済み。残りは未対応の拡張のみ） |
 | 6 | BSDF・Integrator・テクスチャ・HDRI・ライト | REQ-CORE-002 / 003 / 004 | 進行中（HDRI の `.hdr` / `.exr` 読み込みは実装済み。Cornell Box・球 + 手続き生成 HDRI・Spot・法線マップは Mitsuba 3 照合済み。項目 12） |
 | 7 | カラーマネジメント | REQ-CORE-005 | 進行中（作業色空間 Linear Rec.709 / ACEScg、glTF 取り込み時の入力変換、表示変換 = 目標色空間+Reinhard+sRGB OETF は実装済み。EXR 側の変換は項目 8 で接続） |
-| 8 | EXR 多チャンネル出力 | REQ-IO-003 | 進行中（Beauty + Normal AOV、物理/非物理・spp・作業色空間のメタデータ、chromaticities、`exr` crate による書き出しは実装済み。外部ビューアでの目視確認は Beauty・Normal のみ済み。Albedo・Depth（カメラ前方軸の距離）・ObjectId（インスタンス番号 + 1、32bit 整数）は実装済みで目視確認は未） |
+| 8 | EXR 多チャンネル出力 | REQ-IO-003 | 済（Beauty + Normal AOV、物理/非物理・spp・作業色空間のメタデータ、chromaticities、`exr` crate による書き出しは実装済み。Albedo・Depth（カメラ前方軸の距離）・ObjectId（インスタンス番号 + 1、32bit 整数）も実装済み。外部ビューアでの目視確認も済み） |
 | 9 | render-cli | REQ-VIEW-001 | 未着手 |
 | 10 | GPU 計測 | REQ-GPU-004 | 未着手 |
 | 11 | Reference モード | REQ-CORE-006 | 未着手 |
