@@ -1,7 +1,9 @@
 //! Metal ray-tracing backend (ADR-0001). Empty on non-macOS targets.
 #![cfg(target_os = "macos")]
 
+mod accel;
 
+pub use accel::{Blas, Instance, Tlas};
 
 use std::fmt;
 
