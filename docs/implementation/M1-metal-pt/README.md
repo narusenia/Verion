@@ -12,7 +12,7 @@
 | 5 | glTF 入力 | REQ-IO-001 | 進行中（BaseColor・MetallicRoughness・Emissive テクスチャは読める。Normal テクスチャ・spot ライトも対応済み。残りは未対応の拡張のみ） |
 | 6 | BSDF・Integrator・テクスチャ・HDRI・ライト | REQ-CORE-002 / 003 / 004 | 進行中（HDRI の `.hdr` / `.exr` 読み込みは実装済み。Cornell Box・球 + 手続き生成 HDRI・Spot・法線マップは Mitsuba 3 照合済み。項目 12） |
 | 7 | カラーマネジメント | REQ-CORE-005 | 進行中（作業色空間 Linear Rec.709 / ACEScg、glTF 取り込み時の入力変換、表示変換 = 目標色空間+Reinhard+sRGB OETF は実装済み。EXR 側の変換は項目 8 で接続） |
-| 8 | EXR 多チャンネル出力 | REQ-IO-003 | 進行中（Beauty + Normal AOV、物理/非物理・spp・作業色空間のメタデータ、chromaticities、`exr` crate による書き出しは実装済み。外部ビューアでの目視確認も済み。Albedo・Depth・ObjectId は未） |
+| 8 | EXR 多チャンネル出力 | REQ-IO-003 | 進行中（Beauty + Normal AOV、物理/非物理・spp・作業色空間のメタデータ、chromaticities、`exr` crate による書き出しは実装済み。外部ビューアでの目視確認は Beauty・Normal のみ済み。Albedo・Depth（カメラ前方軸の距離）・ObjectId（インスタンス番号 + 1、32bit 整数）は実装済みで目視確認は未） |
 | 9 | render-cli | REQ-VIEW-001 | 未着手 |
 | 10 | GPU 計測 | REQ-GPU-004 | 未着手 |
 | 11 | Reference モード | REQ-CORE-006 | 未着手 |
@@ -39,6 +39,6 @@
 - 色空間は Linear Rec.709 と ACEScg の 2 つのみ。OCIO 連携、ACES RRT/ODT、Display P3 などは未対応（OCIO は同じ API の裏へ後から差し替える想定）
 - シーン内の色はすべて作業色空間の値。glTF は取り込み時に変換するが、コードで直接作るシーン・sky・HDRI は呼び出し側が作業色空間の値を渡す。`Scene::set_working_space` は既存の色を変換しない
 - ACEScg での描画は RGB 3 チャンネルの計算で、スペクトル計算とは結果が異なる。表示用トーンマップ（Reinhard）は物理ベースではなく、Reference の物理値は `OutputTransform::linear` で取り出す
-- EXR 出力の AOV は Beauty と Normal のみ。`exr` crate は `pulp` 経由で `paste`（メンテ終了、RUSTSEC-2024-0436）を引くため `deny.toml` で理由付きの例外にしている。`exr` 側の更新時に見直す
+- EXR 出力の AOV は Beauty・Normal・Albedo・Depth・ObjectId。Albedo・Depth・ObjectId は画素中心の 1 サンプルでアンチエイリアスしない（ID と深度を混ぜないため）。Albedo はベースカラー係数 × ベースカラーテクスチャ（レベル 0 のみ）で、発光・透過は反映しない。`exr` crate は `pulp` 経由で `paste`（メンテ終了、RUSTSEC-2024-0436）を引くため `deny.toml` で理由付きの例外にしている。`exr` 側の更新時に見直す
 - GPU テストは M5 のみで確認。M4 Pro と、GPU を持たない CI 上でのスキップ以外の確認は未了
 - 生成 MSL と `.slang` の一致は、ローカルの pre-commit（`mise run shaders:check`）でのみ検査する。CI は対象外
