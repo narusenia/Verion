@@ -13,6 +13,10 @@ allow = [
   "CC0-1.0",
 ]
 
+# Our own crates have no license yet (ADR-0004) and are `publish = false`.
+[licenses.private]
+ignore = true
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
