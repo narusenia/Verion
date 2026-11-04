@@ -13,6 +13,7 @@ use verion_scene::{Image, Light, Scene, Transform};
 use crate::{Blas, Error, Instance, MetalContext, Obj, Tlas};
 
 const NORMALS_MSL: &str = include_str!("../shaders/normals.metal");
+const AOV_MSL: &str = include_str!("../shaders/aov.metal");
 const PATHTRACE_MSL: &str = include_str!("../shaders/pathtrace.metal");
 
 /// Path length limit. Radiance beyond it is dropped, so closed furnaces read slightly dark.
@@ -188,6 +189,16 @@ fn mip_chain(image: &Image) -> (Vec<f32>, u32) {
     }
 }
 
+/// Primary-ray AOVs, row-major from the top-left. Misses are zero in every field.
+pub struct Aovs {
+    /// Base color factor times the base color texture at the hit.
+    pub albedo: Vec<[f32; 3]>,
+    /// Distance along the camera's forward axis (not along the ray).
+    pub depth: Vec<f32>,
+    /// Instance index plus one.
+    pub object_id: Vec<u32>,
+}
+
 /// A scene snapshot ready to trace. Later scene edits are not reflected.
 pub struct Renderer {
     ctx: MetalContext,
@@ -212,6 +223,7 @@ pub struct Renderer {
     focus: f32,
     camera: [f32; 16],
     normals: Obj<dyn MTLComputePipelineState>,
+    aov: Obj<dyn MTLComputePipelineState>,
     pathtrace: Obj<dyn MTLComputePipelineState>,
 }
 
@@ -448,6 +460,7 @@ impl Renderer {
             focus: cam.focus_distance,
             camera,
             normals: pipeline(ctx, NORMALS_MSL, "normals")?,
+            aov: pipeline(ctx, AOV_MSL, "aov")?,
             pathtrace: pipeline(ctx, PATHTRACE_MSL, "pathtrace")?,
         })
     }
@@ -516,6 +529,88 @@ impl Renderer {
             std::slice::from_raw_parts(out.contents().as_ptr().cast::<f32>(), pixels * 3)
         };
         Ok(data.as_chunks::<3>().0.to_vec())
+    }
+
+    /// Albedo, depth and instance id of the first hit through each pixel centre (one sample, so ids
+    /// and depth are never blended).
+    pub fn render_aovs(&self, width: u32, height: u32) -> Result<Aovs, Error> {
+        if width == 0 || height == 0 {
+            return Err(Error::Scene("image size must be non-zero".into()));
+        }
+        let mut camera = self.camera;
+        camera[0] = width as f32;
+        camera[1] = height as f32;
+        let camera = upload(&self.ctx, &camera)?;
+
+        let pixels = width as usize * height as usize;
+        let buffer = |bytes: usize| {
+            self.ctx
+                .device
+                .newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+                .ok_or(Error::Resource("output buffer"))
+        };
+        let albedo_depth = buffer(pixels * size_of::<[f32; 4]>())?;
+        let ids = buffer(pixels * size_of::<u32>())?;
+
+        let cb = self
+            .ctx
+            .queue
+            .commandBuffer()
+            .ok_or(Error::Resource("command buffer"))?;
+        let enc = cb
+            .computeCommandEncoder()
+            .ok_or(Error::Resource("compute encoder"))?;
+        enc.setComputePipelineState(&self.aov);
+        for blas in self.tlas.blases() {
+            enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
+        }
+        // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
+        // indices, instances, camera, materials, uvs, texInfo, texels, albedoDepth, objectIds).
+        unsafe {
+            enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
+            enc.setBuffer_offset_atIndex(Some(&self.positions), 0, 1);
+            enc.setBuffer_offset_atIndex(Some(&self.indices), 0, 2);
+            enc.setBuffer_offset_atIndex(Some(&self.instances), 0, 3);
+            enc.setBuffer_offset_atIndex(Some(&camera), 0, 4);
+            enc.setBuffer_offset_atIndex(Some(&self.materials), 0, 5);
+            enc.setBuffer_offset_atIndex(Some(&self.uvs), 0, 6);
+            enc.setBuffer_offset_atIndex(Some(&self.tex_info), 0, 7);
+            enc.setBuffer_offset_atIndex(Some(&self.texels), 0, 8);
+            enc.setBuffer_offset_atIndex(Some(&albedo_depth), 0, 9);
+            enc.setBuffer_offset_atIndex(Some(&ids), 0, 10);
+        }
+        enc.dispatchThreads_threadsPerThreadgroup(
+            MTLSize {
+                width: width as usize,
+                height: height as usize,
+                depth: 1,
+            },
+            MTLSize {
+                width: 8,
+                height: 8,
+                depth: 1,
+            },
+        );
+        enc.endEncoding();
+        cb.commit();
+        cb.waitUntilCompleted();
+
+        // SAFETY: the buffers hold `pixels` float4 and u32 values and the command buffer has completed.
+        let (ad, ids) = unsafe {
+            (
+                std::slice::from_raw_parts(
+                    albedo_depth.contents().as_ptr().cast::<f32>(),
+                    pixels * 4,
+                ),
+                std::slice::from_raw_parts(ids.contents().as_ptr().cast::<u32>(), pixels),
+            )
+        };
+        let ad = ad.as_chunks::<4>().0;
+        Ok(Aovs {
+            albedo: ad.iter().map(|p| [p[0], p[1], p[2]]).collect(),
+            depth: ad.iter().map(|p| p[3]).collect(),
+            object_id: ids.to_vec(),
+        })
     }
 }
 

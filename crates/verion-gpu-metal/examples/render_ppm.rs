@@ -9,7 +9,7 @@ mod imp {
     use std::{collections::HashMap, fs, io::Write, path::Path};
 
     use verion_gpu_metal::{MetalContext, Renderer};
-    use verion_render_io::{ExrFrame, RenderInfo, load_hdri, write_exr};
+    use verion_render_io::{ExrAovs, ExrFrame, RenderInfo, load_hdri, write_exr};
     use verion_scene::{
         BaseBsdf, Camera, IDENTITY, Image, Instance, Light, Material, Mesh, OutputTransform, Scene,
     };
@@ -359,6 +359,7 @@ mod imp {
                 working_space: scene.working_space(),
                 beauty: &env_pixels(ew, eh),
                 normal: None,
+                aovs: Default::default(),
                 info: RenderInfo {
                     physical: true,
                     samples: 0,
@@ -378,6 +379,7 @@ mod imp {
                 working_space: scene.working_space(),
                 beauty: &normal_map_pixels(),
                 normal: None,
+                aovs: Default::default(),
                 info: RenderInfo {
                     physical: true,
                     samples: 0,
@@ -400,12 +402,23 @@ mod imp {
         write_ppm(&dir.join("normals.ppm"), w, h, &normals, |v| {
             ((v * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0 + 0.5) as u8
         });
+        let aov = renderer.render_aovs(w, h).expect("aovs");
+        let mut ids = aov.object_id.clone();
+        ids.sort_unstable();
+        ids.dedup();
+        let far = aov.depth.iter().fold(0.0f32, |m, &d| m.max(d));
+        println!("aovs: object ids {ids:?}, farthest depth {far:.2}");
         let frame = ExrFrame {
             width: w,
             height: h,
             working_space: space,
             beauty: &beauty,
             normal: Some(&normals),
+            aovs: ExrAovs {
+                albedo: Some(&aov.albedo),
+                depth: Some(&aov.depth),
+                object_id: Some(&aov.object_id),
+            },
             info: RenderInfo {
                 physical: true,
                 samples: spp,
