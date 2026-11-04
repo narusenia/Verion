@@ -16,8 +16,8 @@
 | 9 | render-cli | REQ-VIEW-001 | 進行中（`render-cli scene.gltf -o out.exr [--width --height --spp --hdri env.exr --metrics m.json]` は動作（8spp ごとの進捗バーあり。glTF にカメラが無ければ境界球に合わせて +z 側へ自動配置。既定値と完全一致するカメラは「無し」とみなす）。計測 JSON は CPU 側の経過時間と Beauty の `gpu_s`（項目 10）。Stylization・モード引数は対応機能が未実装のため未対応。CI からの呼び出しは未接続） |
 | 10 | GPU 計測 | REQ-GPU-004 | 進行中（`Accumulation::gpu_seconds`（コマンドバッファの GPU タイムスタンプ）と `render-cli --metrics` の `gpu_s` は済。現行は 1 カーネルで trace / shade を分離計測できず、分離は REQ-GPU-005 の Wavefront 化が前提。AOV パスは未計測） |
 | 11 | Reference モード | REQ-CORE-006 | 進行中（Stylization・NRC・ReSTIR が未実装のため、レンダラーは構造的に Reference のみ。`render-cli --mode reference` と、出力メタデータの `physical` を mode から決める接続は済。「Stylization Pass を通らない」の検証テストは `StylizationLayer` が空 enum で書けないため、REQ-STY-001 で変種が入る時点で追加） |
-| 12 | Mitsuba 3 照合・白炉テスト・テストシーン管理 | REQ-QA-001 / 002 / 004 | 進行中（Cornell Box（拡散・金属・ガラス・点光源・面光源）は `scripts/mitsuba_cornell.py` で照合済み。平均輝度の最悪チャンネル偏差 ±1% 以内で合格とし、実測は 0.19%。球 + 手続き生成 HDRI・Spot・法線マップ（最大傾き約 35°）も `scripts/mitsuba_cornell.py` のモード（`hdri` / `spot` / `normalmap`）で照合済み。最悪チャンネル偏差は 0.07% / 0.14% / 0.36%、4x4 ブロック平均の最悪は 0.19% / 1.89% / 1.39%。全シーンは開発機で `mise run crosscheck` が実行する（Metal GPU が要るため CI の対象外）。合否は平均輝度の最悪チャンネル 1% 以内かつ 4x4 ブロック平均 2% 以内で、PSNR は表示のみ（ノイズ支配のため）。実物の HDRI（外部アセットの選定後）・FLIP・白炉は未） |
-| 13 | ベンチ基盤・ベースライン記録（規模下限の仮置きを見直す） | REQ-PERF-001 / 002 / 003 | 未着手 |
+| 12 | Mitsuba 3 照合・白炉テスト・テストシーン管理 | REQ-QA-001 / 002 / 004 | 進行中（Cornell Box（拡散・金属・ガラス・点光源・面光源）は `scripts/mitsuba_cornell.py` で照合済み。平均輝度の最悪チャンネル偏差 ±1% 以内で合格とし、実測は 0.19%。球 + 手続き生成 HDRI・Spot・法線マップ（最大傾き約 35°）も `scripts/mitsuba_cornell.py` のモード（`hdri` / `spot` / `normalmap`）で照合済み。最悪チャンネル偏差は 0.07% / 0.14% / 0.36%、4x4 ブロック平均の最悪は 0.19% / 1.89% / 1.39%。全シーンは開発機で `mise run crosscheck` が実行する（Metal GPU が要るため CI の対象外）。合否は平均輝度の最悪チャンネル 1% 以内かつ 4x4 ブロック平均 2% 以内で、PSNR は表示のみ（ノイズ支配のため）。HDR-FLIP は `mise run crosscheck` が表示のみ（ノイズ床と同水準）。白炉テストは拡散・粗い金属（GGX 単一散乱アルベドの数値積分と 8 点で 0.01 以内）・誘電体・粗いガラス（球）で済み、多重散乱補正なしの損失は許容誤差扱い。実物の HDRI（外部アセットの選定後）は未） |
+| 13 | ベンチ基盤・ベースライン記録（規模下限の仮置きを見直す） | REQ-PERF-001 / 002 / 003 | 進行中（`mise run bench`（`scripts/bench.sh`）が `benchmarks/*.gltf` を固定設定で描画し、`gpu_s` を `benchmarks/baseline/<chip>.json` と比べて 10% 超の遅化で失敗。M5 のベースライン記録済み。M4 Pro は未記録、規模下限（5M 三角形・4K テクスチャ）のシーンは未着手。GPU が要るため CI の対象外） |
 
 ## 完了条件
 
@@ -26,7 +26,7 @@
 
 ## 既知の制限（M1 の完了条件に入れない。Mitsuba 3 照合の結果を見て M2 以降で判断する）
 
-- GGX は単一散乱のみ。粗さ 0.5 の白炉で最大 10% 暗くなる（多重散乱補正は未実装）
+- GGX は単一散乱のみ。粗さ 0.5 の金属の白炉で最大 10%、粗さ 1.0 の金属で約 60%、粗さ 0.6 のガラスで約 25% 暗くなる（多重散乱補正は未実装）
 - ガラス越しの点光源・面光源の直接光は NEE で評価しない（屈折は BSDF サンプリングのみ）
 - 閉じた誘電体メッシュは頂点の巻き方向（反時計回りが外側）で内外を判定する
 - 法線 AOV（`render_normals`）は頂点法線の補間値（法線のないメッシュは幾何法線）で、法線マップは反映しない。1 サンプルでアンチエイリアスしない

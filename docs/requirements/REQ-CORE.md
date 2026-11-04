@@ -62,7 +62,7 @@ Diffuse、GGX Conductor、Dielectric（透過）。glTF の metallic-roughness �
 
 ### 受入条件
 
-- [ ] 白炉テストでエネルギー保存が許容誤差内（REQ-QA-002）
+- [x] 白炉テストでエネルギー保存が許容誤差内（REQ-QA-002。多重散乱補正なしの損失を除く）
 - [ ] 金属・ガラスの基礎シーンが参照画像と一致する
 
 ### 依存要件
