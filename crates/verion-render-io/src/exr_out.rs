@@ -14,6 +14,17 @@ pub struct RenderInfo {
     pub samples: u32,
 }
 
+/// Optional primary-ray AOVs (all the same size as the frame).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ExrAovs<'a> {
+    /// Base color in the frame's working space; converted to the output primaries like Beauty.
+    pub albedo: Option<&'a [[f32; 3]]>,
+    /// Distance along the camera's forward axis, written as `Z`.
+    pub depth: Option<&'a [f32]>,
+    /// Instance id plus one (0 = background), written as the 32-bit integer channel `ObjectId`.
+    pub object_id: Option<&'a [u32]>,
+}
+
 /// One rendered frame. Pixels are row-major from the top-left, radiance in `working_space`.
 pub struct ExrFrame<'a> {
     pub width: u32,
@@ -22,6 +33,7 @@ pub struct ExrFrame<'a> {
     pub beauty: &'a [[f32; 3]],
     /// World-space normals, written untouched.
     pub normal: Option<&'a [[f32; 3]]>,
+    pub aovs: ExrAovs<'a>,
     pub info: RenderInfo,
 }
 
@@ -65,7 +77,13 @@ pub fn write_exr(
     if size == 0 {
         return bad("size must be non-zero");
     }
-    if frame.beauty.len() != size || frame.normal.is_some_and(|n| n.len() != size) {
+    let a = &frame.aovs;
+    if frame.beauty.len() != size
+        || frame.normal.is_some_and(|n| n.len() != size)
+        || a.albedo.is_some_and(|p| p.len() != size)
+        || a.depth.is_some_and(|p| p.len() != size)
+        || a.object_id.is_some_and(|p| p.len() != size)
+    {
         return bad("pixel count does not match width x height");
     }
 
@@ -86,6 +104,26 @@ pub fn write_exr(
                 .enumerate()
                 .map(|(i, n)| channel(n, normal, i)),
         );
+    }
+
+    if let Some(albedo) = a.albedo {
+        let primaries = OutputTransform::linear(transform.target);
+        let albedo: Vec<[f32; 3]> = albedo
+            .iter()
+            .map(|&p| primaries.apply(frame.working_space, p))
+            .collect();
+        channels.extend(
+            ["Albedo.R", "Albedo.G", "Albedo.B"]
+                .iter()
+                .enumerate()
+                .map(|(i, n)| channel(n, &albedo, i)),
+        );
+    }
+    if let Some(depth) = a.depth {
+        channels.push(AnyChannel::new("Z", FlatSamples::F32(depth.to_vec())));
+    }
+    if let Some(ids) = a.object_id {
+        channels.push(AnyChannel::new("ObjectId", FlatSamples::U32(ids.to_vec())));
     }
 
     let untouched = transform.tone_map == ToneMap::None && transform.oetf == Oetf::Linear;
@@ -145,6 +183,7 @@ mod tests {
             working_space: ColorSpace::LinearRec709,
             beauty,
             normal,
+            aovs: ExrAovs::default(),
             info: RenderInfo {
                 physical: true,
                 samples: 64,
@@ -190,6 +229,39 @@ mod tests {
         );
         assert_eq!(get("verion/samples"), Some(AttributeValue::I32(64)));
         assert_eq!(img.attributes.chromaticities.unwrap().red, Vec2(0.64, 0.33));
+    }
+
+    #[test]
+    fn writes_albedo_depth_and_object_id() {
+        let beauty = [[0.0; 3]; 2];
+        let albedo = [[1.0, 0.0, 0.0], [0.5, 0.5, 0.5]];
+        let mut f = frame(&beauty, None);
+        f.aovs = ExrAovs {
+            albedo: Some(&albedo),
+            depth: Some(&[3.0, 0.0]),
+            object_id: Some(&[7, 0]),
+        };
+        let path = temp("ids.exr");
+        let t = OutputTransform::linear(ColorSpace::LinearRec709);
+        write_exr(&path, &f, &t).unwrap();
+        let img = read_back(&path);
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(values(&img, "Albedo.R"), [1.0, 0.5]);
+        assert_eq!(values(&img, "Z"), [3.0, 0.0]);
+        assert_eq!(values(&img, "ObjectId"), [7.0, 0.0]);
+        let list = &img.layer_data.channel_data.list;
+        let id = list
+            .iter()
+            .find(|c| c.name.to_string() == "ObjectId")
+            .unwrap();
+        assert!(matches!(id.sample_data, FlatSamples::U32(_)));
+
+        f.aovs.depth = Some(&[1.0]);
+        assert!(matches!(
+            write_exr(&path, &f, &t),
+            Err(ExrError::BadFrame(_))
+        ));
     }
 
     #[test]

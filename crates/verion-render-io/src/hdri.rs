@@ -251,6 +251,7 @@ mod tests {
             working_space: ColorSpace::LinearRec709,
             beauty: &beauty,
             normal: None,
+            aovs: Default::default(),
             info: RenderInfo {
                 physical: true,
                 samples: 1,
