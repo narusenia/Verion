@@ -5,7 +5,9 @@ mod imp {
     use std::{collections::HashMap, fs, io::Write, path::Path};
 
     use verion_gpu_metal::{MetalContext, Renderer};
-    use verion_scene::{BaseBsdf, Camera, IDENTITY, Instance, Light, Material, Mesh, Scene};
+    use verion_scene::{
+        BaseBsdf, Camera, IDENTITY, Instance, Light, Material, Mesh, OutputTransform, Scene,
+    };
 
     fn diffuse(c: [f32; 3]) -> Material {
         let base = BaseBsdf {
@@ -222,15 +224,18 @@ mod imp {
         let mut num = |default: u32| args.next().map_or(default, |a| a.parse().expect("number"));
         let (w, h, spp) = (num(512), num(384), num(256));
 
+        let scene = scene();
         let ctx = MetalContext::new().expect("Metal ray tracing is required");
-        let renderer = Renderer::new(&ctx, &scene()).expect("renderer");
+        let renderer = Renderer::new(&ctx, &scene).expect("renderer");
         let dir = Path::new(&dir);
         fs::create_dir_all(dir).unwrap();
 
         let beauty = renderer.render(w, h, spp).expect("render");
-        // Plain sRGB-ish gamma; real color management arrives with REQ-CORE-005.
-        write_ppm(&dir.join("beauty.ppm"), w, h, &beauty, |v| {
-            (v.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0 + 0.5) as u8
+        let display = OutputTransform::display();
+        let space = scene.working_space();
+        let shown: Vec<[f32; 3]> = beauty.iter().map(|&p| display.apply(space, p)).collect();
+        write_ppm(&dir.join("beauty.ppm"), w, h, &shown, |v| {
+            (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
         });
         let normals = renderer.render_normals(w, h).expect("normals");
         write_ppm(&dir.join("normals.ppm"), w, h, &normals, |v| {
