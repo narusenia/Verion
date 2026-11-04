@@ -9,10 +9,13 @@ StructuredBuffer<uint> instances;   // 16 words: vertex offset, index offset, ma
 StructuredBuffer<float> materials;  // 12 words: base color rgb, emission rgb, metallic, roughness, transmission, ior, 2 pad
 StructuredBuffer<uint> lights;      // 8 words: kind (0 point, 1 directional), color rgb, intensity, position or travel direction xyz (floats as bits)
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
-                                    // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count
+                                    // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W)
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
 StructuredBuffer<float> emitters;   // 16 words per emissive world-space triangle: p0, p1, p2, radiance rgb, area, selection pdf, 2 pad
 StructuredBuffer<float> emitCdf;    // cumulative selection probability per emitter triangle, last entry 1
+StructuredBuffer<float> envPixels;  // environment map rgb per texel (scale applied), latitude-longitude, row-major from the top
+StructuredBuffer<float> envMarginal; // cumulative probability per row of luminance * sin(theta), last entry 1
+StructuredBuffer<float> envCond;    // cumulative probability per column within each row, last entry of each row 1
 
 static const float PI = 3.14159265358979;
 
@@ -113,6 +116,76 @@ float3 sampleVndf(float3 wo, float alpha, float u1, float u2)
 }
 
 
+
+float lum(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
+
+float3 envTexel(uint i, uint j)
+{
+    uint o = 3 * (j * params[24] + i);
+    return float3(envPixels[o], envPixels[o + 1], envPixels[o + 2]);
+}
+
+// +y is up and the image center faces -z.
+void envCoords(float3 d, out uint i, out uint j)
+{
+    uint w = params[24];
+    uint h = params[25];
+    float u = atan2(d.x, -d.z) * (0.5 / PI) + 0.5;
+    float v = acos(clamp(d.y, -1.0, 1.0)) / PI;
+    i = min(uint(u * w), w - 1);
+    j = min(uint(v * h), h - 1);
+}
+
+float3 envRadiance(float3 d)
+{
+    uint i, j;
+    envCoords(d, i, j);
+    return envTexel(i, j);
+}
+
+// Solid-angle density of sampling direction d: the sin(theta) of the lat-long Jacobian cancels
+// against the sin(theta) weight of the distribution.
+float envPdf(float3 d)
+{
+    uint i, j;
+    envCoords(d, i, j);
+    return lum(envTexel(i, j)) * pf(26);
+}
+
+float3 envSample(float u1, float u2, float u3, float u4, out float pdf, out float3 le)
+{
+    uint w = params[24];
+    uint h = params[25];
+    uint lo = 0;
+    uint hi = h - 1;
+    while (lo < hi)
+    {
+        uint mid = (lo + hi) / 2;
+        if (envMarginal[mid] >= u1)
+            hi = mid;
+        else
+            lo = mid + 1;
+    }
+    uint j = lo;
+    lo = 0;
+    hi = w - 1;
+    while (lo < hi)
+    {
+        uint mid = (lo + hi) / 2;
+        if (envCond[j * w + mid] >= u2)
+            hi = mid;
+        else
+            lo = mid + 1;
+    }
+    uint i = lo;
+    float phi = ((i + u3) / w - 0.5) * 2.0 * PI;
+    float theta = ((j + u4) / h) * PI;
+    float st = sin(theta);
+    le = envTexel(i, j);
+    pdf = lum(le) * pf(26);
+    return float3(st * sin(phi), cos(theta), -st * cos(phi));
+}
+
 struct Surface
 {
     float3 albedo;
@@ -200,6 +273,9 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
     uint maxDepth = params[7];
     uint emitterCount = params[23];
     // Set when the previous bounce was a reflection that light sampling also covers; qPrev is its density.
+    bool hasEnv = params[24] > 0;
+    // Probability that next-event estimation samples the environment map instead of an emitter.
+    float pEnv = hasEnv ? (emitterCount > 0 ? 0.5 : 1.0) : 0.0;
     bool misPrev = false;
     float qPrev = 0.0;
 
@@ -218,6 +294,17 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         {
             // Uniform sky is reached by cosine sampling, so it needs no light sampling.
             radiance += thr * sky;
+            if (hasEnv)
+            {
+                float wB = 1.0;
+                if (misPrev)
+                {
+                    float pl = pEnv * envPdf(dir);
+                    float den = qPrev * qPrev + pl * pl;
+                    wB = den > 0.0 ? qPrev * qPrev / den : 1.0;
+                }
+                radiance += thr * envRadiance(dir) * wB;
+            }
             break;
         }
 
@@ -248,7 +335,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
             {
                 uint e = (eb - 1 + q.CommittedPrimitiveIndex()) * 16;
                 float cosl = max(abs(dot(nOut, dir)), 1.0e-4);
-                float pl = emitters[e + 13] * pHitT * pHitT / (emitters[e + 12] * cosl);
+                float pl = (1.0 - pEnv) * emitters[e + 13] * pHitT * pHitT / (emitters[e + 12] * cosl);
                 wB = qPrev * qPrev / (qPrev * qPrev + pl * pl);
             }
             radiance += thr * le * wB;
@@ -306,7 +393,9 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         }
 
         // Light sampling of emissive triangles, combined with BSDF sampling by the power heuristic.
-        if (emitterCount > 0)
+        float chooseLight = rng.next();
+        bool chooseEnv = hasEnv && chooseLight < pEnv;
+        if (emitterCount > 0 && !chooseEnv)
         {
             float ue = rng.next();
             float ua = rng.next();
@@ -335,11 +424,31 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
             float cosi = dot(n, wi);
             if (cosi > 0.0 && cosl > 1.0e-5 && !occluded(p, wi, dist * (1.0 - 1.0e-3)))
             {
-                float pl = emitters[e + 13] * d2 / (emitters[e + 12] * cosl);
+                float pl = (1.0 - pEnv) * emitters[e + 13] * d2 / (emitters[e + 12] * cosl);
                 float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
                 float qb = reflectivePdf(surf, woL, wiL);
                 float wl = pl * pl / (pl * pl + qb * qb);
                 radiance += thr * evalReflective(surf, woL, wiL) * float3(emitters[e + 9], emitters[e + 10], emitters[e + 11]) / pl * wl;
+            }
+        }
+
+        if (chooseEnv)
+        {
+            float e1 = rng.next();
+            float e2 = rng.next();
+            float e3 = rng.next();
+            float e4 = rng.next();
+            float pdfE;
+            float3 leE;
+            float3 wi = envSample(e1, e2, e3, e4, pdfE, leE);
+            float cosi = dot(n, wi);
+            if (pdfE > 0.0 && cosi > 0.0 && !occluded(p, wi, 1.0e30))
+            {
+                float pl = pEnv * pdfE;
+                float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
+                float qb = reflectivePdf(surf, woL, wiL);
+                float wl = pl * pl / (pl * pl + qb * qb);
+                radiance += thr * evalReflective(surf, woL, wiL) * leE / pl * wl;
             }
         }
 

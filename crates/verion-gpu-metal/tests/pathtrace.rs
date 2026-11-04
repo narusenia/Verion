@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use verion_gpu_metal::{Error, MetalContext, Renderer};
 
-use verion_scene::{BaseBsdf, Camera, IDENTITY, Instance, Light, Material, Mesh, Scene};
+use verion_scene::{BaseBsdf, Camera, IDENTITY, Image, Instance, Light, Material, Mesh, Scene};
 
 fn context() -> Option<MetalContext> {
     match MetalContext::new() {
@@ -543,4 +543,120 @@ fn glossy_metal_reflects_a_large_area_light_without_gain_or_loss() {
         let got = center_pixel_radiance(&ctx, &scene);
         assert!(got > lo && got < 1.005, "roughness {roughness}: {got}");
     }
+}
+
+fn hdri(w: u32, h: u32, f: impl Fn(u32, u32) -> f32) -> Image {
+    let pixels = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .map(|(x, y)| [f(x, y); 3])
+        .collect();
+    Image::new(w, h, pixels).unwrap()
+}
+
+#[test]
+fn constant_environment_map_is_a_white_furnace() {
+    let Some(ctx) = context() else { return };
+    // A uniform lat-long map must behave like the uniform sky: light sampling and BSDF sampling
+    // share the weight, so the combined estimate has to stay exactly unbiased.
+    let mut s = Scene::new();
+    let mesh = s.add_mesh(cube(0.5));
+    let mat = s.add_material(material([1.0; 3], [0.0; 3]));
+    s.add_instance(Instance {
+        mesh,
+        material: mat,
+        transform: IDENTITY,
+    })
+    .unwrap();
+    let image = s.add_image(hdri(32, 16, |_, _| 1.0));
+    s.add_light(Light::EnvironmentMap { image, scale: 1.0 });
+    s.set_camera(camera_at_z(3.0));
+    let img = Renderer::new(&ctx, &s).unwrap().render(32, 32, 64).unwrap();
+    let got = center_mean(&img, 32, 16);
+    assert!((got - 1.0).abs() < 0.015, "{got}");
+    assert!(
+        (mean(&img) - 1.0).abs() < 0.015,
+        "background {}",
+        mean(&img)
+    );
+}
+
+#[test]
+fn bright_texel_is_importance_sampled() {
+    let Some(ctx) = context() else { return };
+    // One texel carries all the light. It subtends ~0.007 sr, so plain BSDF sampling would hit it in
+    // about 0.2% of paths and leave 64 samples nearly black; importance sampling must find it.
+    let (w, h, i, j, radiance) = (64u32, 32u32, 0u32, 8u32, 200.0f32);
+    let mut s = Scene::new();
+    let floor = s.add_mesh(plane(25.0, 0.0));
+    let mat = s.add_material(material([1.0; 3], [0.0; 3]));
+    s.add_instance(Instance {
+        mesh: floor,
+        material: mat,
+        transform: IDENTITY,
+    })
+    .unwrap();
+    let image = s.add_image(hdri(
+        w,
+        h,
+        |x, y| if (x, y) == (i, j) { radiance } else { 0.0 },
+    ));
+    s.add_light(Light::EnvironmentMap { image, scale: 1.0 });
+    s.set_camera(camera_at_z(3.0));
+
+    // Irradiance on the +z-facing floor: integrate cos(theta_floor) over the texel's solid angle.
+    let n = 64;
+    let mut e = 0.0f64;
+    for a in 0..n {
+        for b in 0..n {
+            let u = (f64::from(i) + (f64::from(a) + 0.5) / f64::from(n)) / f64::from(w);
+            let v = (f64::from(j) + (f64::from(b) + 0.5) / f64::from(n)) / f64::from(h);
+            let (phi, theta) = (
+                (u - 0.5) * 2.0 * std::f64::consts::PI,
+                v * std::f64::consts::PI,
+            );
+            let d_omega = theta.sin()
+                * (std::f64::consts::PI / f64::from(h * n))
+                * (2.0 * std::f64::consts::PI / f64::from(w * n));
+            e += f64::from(radiance) * (-theta.sin() * phi.cos()) * d_omega;
+        }
+    }
+    let expected = e / std::f64::consts::PI; // albedo 1
+    assert!(expected > 0.1, "test setup: {expected}");
+
+    let img = Renderer::new(&ctx, &s).unwrap().render(65, 65, 64).unwrap();
+    let got = f64::from(center_mean(&img, 65, 5));
+    assert!(
+        (got - expected).abs() / expected < 0.03,
+        "{got} vs {expected}"
+    );
+}
+
+#[test]
+fn invalid_environment_maps_are_rejected() {
+    let Some(ctx) = context() else { return };
+    let tri_scene = |lights: &dyn Fn(&mut Scene)| {
+        let mut s = sky_scene(cube(0.5), material([1.0; 3], [0.0; 3]), 3.0);
+        lights(&mut s);
+        s
+    };
+    // An image id that belongs to a different scene.
+    let mut other = Scene::new();
+    let foreign = other.add_image(hdri(2, 2, |_, _| 1.0));
+    let dangling = tri_scene(&|s| {
+        s.add_light(Light::EnvironmentMap {
+            image: foreign,
+            scale: 1.0,
+        });
+    });
+    assert!(matches!(
+        Renderer::new(&ctx, &dangling),
+        Err(Error::Scene(_))
+    ));
+
+    let two = tri_scene(&|s| {
+        let image = s.add_image(hdri(2, 2, |_, _| 1.0));
+        s.add_light(Light::EnvironmentMap { image, scale: 1.0 });
+        s.add_light(Light::EnvironmentMap { image, scale: 2.0 });
+    });
+    assert!(matches!(Renderer::new(&ctx, &two), Err(Error::Scene(_))));
 }
