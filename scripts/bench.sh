@@ -1,5 +1,5 @@
 #!/bin/sh
-# Renders each benchmarks/*.gltf at a fixed size and spp, and compares gpu_s with the baseline recorded
+# Renders each benchmarks/*.gltf and the generated scale scene at a fixed size and spp, and compares gpu_s with the baseline recorded
 # for this machine (benchmarks/baseline/<chip>.json); exits 1 when any scene is more than 10% slower.
 # `bench.sh record` writes the baseline instead. Needs a Metal GPU; not run in CI.
 set -eu
@@ -9,8 +9,10 @@ chip=$(sysctl -n machdep.cpu.brand_string | tr 'A-Z ' 'a-z-')
 base=benchmarks/baseline/$chip.json
 mkdir -p "$out" benchmarks/baseline
 cargo build --release -q -p verion-render-cli
+# REQ-PERF-003 scale scene (5M triangles, four 4K textures) is too big to commit; generated once.
+[ -f "$out/scale/scale.gltf" ] || python3 -I scripts/gen_scale_scene.py "$out/scale"
 result="{}"
-for scene in benchmarks/*.gltf; do
+for scene in benchmarks/*.gltf "$out/scale/scale.gltf"; do
   name=$(basename "$scene" .gltf)
   best=
   for i in $(seq "$runs"); do
