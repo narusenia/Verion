@@ -100,4 +100,4 @@ print("mean RGB  mitsuba", [round(x, 4) for x in mm], " verion", [round(x, 4) fo
 abs_err = mean([abs(a - b) for m, r in zip(mine, ref) for a, b in zip(m, r)])
 print(f"mean abs error / mean radiance: {abs_err / mean(mm):.4f} (noise floor falls with 1/sqrt(spp))")
 worst = max(abs(b / a - 1) for a, b in zip(mm, mv))
-print(f"worst channel deviation {worst:.2%}: {'PASS' if worst <= 0.02 else 'FAIL'} (limit 2%)")
+print(f"worst channel deviation {worst:.2%}: {'PASS' if worst <= 0.01 else 'FAIL'} (limit 1%)")
