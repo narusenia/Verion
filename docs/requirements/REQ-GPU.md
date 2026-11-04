@@ -79,7 +79,7 @@ GPU タイムスタンプで trace / shade / 合計を測る。拡張項目（re
 
 ### 受入条件
 
-- [ ] 計測値を JSON で出力できる
+- [ ] 計測値を JSON で出力できる（部分: 合計 `gpu_s` のみ。trace / shade の分離は REQ-GPU-005 の Wavefront 化が前提）
 
 ### 依存要件
 
