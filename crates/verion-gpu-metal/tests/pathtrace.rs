@@ -453,3 +453,94 @@ fn rough_metal_highlight_matches_ggx() {
     let got = img[32 * 65 + 32][0];
     assert!((got - 1.0).abs() < 0.02, "{got}");
 }
+
+/// Emitter-only material: black base, constant emitted radiance.
+fn emitter(le: f32) -> Material {
+    material([0.0; 3], [le; 3])
+}
+
+/// Floor at z = 0 with `floor` material, a camera at z = 0.5, and `light` placed above it.
+fn floor_with_emitter(
+    floor: Material,
+    light: Mesh,
+    light_transform: verion_scene::Transform,
+    le: f32,
+) -> Scene {
+    let mut s = Scene::new();
+    let f = s.add_mesh(plane(25.0, 0.0));
+    let fm = s.add_material(floor);
+    s.add_instance(Instance {
+        mesh: f,
+        material: fm,
+        transform: IDENTITY,
+    })
+    .unwrap();
+    let l = s.add_mesh(light);
+    let lm = s.add_material(emitter(le));
+    s.add_instance(Instance {
+        mesh: l,
+        material: lm,
+        transform: light_transform,
+    })
+    .unwrap();
+    s.set_camera(camera_at_z(0.5));
+    s
+}
+
+fn center_pixel_radiance(ctx: &MetalContext, scene: &Scene) -> f32 {
+    let img = Renderer::new(ctx, scene)
+        .unwrap()
+        .render(65, 65, 64)
+        .unwrap();
+    center_mean(&img, 65, 5)
+}
+
+#[test]
+fn large_area_light_over_a_floor_gives_rho_times_radiance() {
+    let Some(ctx) = context() else { return };
+    // Parallel planes: irradiance pi * Le * F with a view factor F = 0.999 for a 50 x 50 emitter at height 1.
+    let mut up = IDENTITY;
+    up[2][3] = 1.0;
+    let scene = floor_with_emitter(material([0.5; 3], [0.0; 3]), plane(25.0, 0.0), up, 2.0);
+    let got = center_pixel_radiance(&ctx, &scene);
+    assert!((got - 0.5 * 2.0 * 0.999).abs() < 0.015, "{got}");
+}
+
+#[test]
+fn small_area_light_matches_the_square_form_factor() {
+    let Some(ctx) = context() else { return };
+    // 0.2 x 0.2 emitter at height 1, placed by an instance transform. Point below its center:
+    // E = 4 pi Le F with F the corner form factor of a 0.1 x 0.1 rectangle; L = rho E / pi.
+    let a = 0.1f64;
+    let root = (1.0 + a * a).sqrt();
+    let corner = (a / root) * (a / root).atan() / std::f64::consts::PI;
+    let (rho, le) = (1.0f32, 50.0f32);
+    let expected = rho as f64 * 4.0 * corner * le as f64;
+    let mut up = IDENTITY;
+    up[2][3] = 1.0;
+    let scene = floor_with_emitter(material([rho; 3], [0.0; 3]), plane(0.1, 0.0), up, le);
+    let got = center_pixel_radiance(&ctx, &scene) as f64;
+    assert!(
+        (got - expected).abs() / expected < 0.03,
+        "{got} vs {expected}"
+    );
+}
+
+#[test]
+fn glossy_metal_reflects_a_large_area_light_without_gain_or_loss() {
+    let Some(ctx) = context() else { return };
+    let mut up = IDENTITY;
+    up[2][3] = 1.0;
+    // Light sampling and BSDF sampling must agree at every roughness, or the weights would bias this.
+    for (roughness, lo) in [(0.0, 0.995), (0.3, 0.95), (0.5, 0.9)] {
+        let metal = bsdf(BaseBsdf {
+            base_color: [1.0; 3],
+            metallic: 1.0,
+            roughness,
+            ..BaseBsdf::default()
+        });
+        let scene = floor_with_emitter(metal, plane(25.0, 0.0), up, 1.0);
+        let got = center_pixel_radiance(&ctx, &scene);
+        assert!(got > lo && got < 1.005, "roughness {roughness}: {got}");
+    }
+}

@@ -5,12 +5,14 @@
 RaytracingAccelerationStructure scene;
 StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
-StructuredBuffer<uint> instances;   // 16 words: vertex offset, index offset, material, pad, 12 floats (row-major 3x4)
+StructuredBuffer<uint> instances;   // 16 words: vertex offset, index offset, material, emitter base + 1 (0 = not emissive), 12 floats (row-major 3x4)
 StructuredBuffer<float> materials;  // 12 words: base color rgb, emission rgb, metallic, roughness, transmission, ior, 2 pad
 StructuredBuffer<uint> lights;      // 8 words: kind (0 point, 1 directional), color rgb, intensity, position or travel direction xyz (floats as bits)
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
-                                    // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb
+                                    // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
+StructuredBuffer<float> emitters;   // 16 words per emissive world-space triangle: p0, p1, p2, radiance rgb, area, selection pdf, 2 pad
+StructuredBuffer<float> emitCdf;    // cumulative selection probability per emitter triangle, last entry 1
 
 static const float PI = 3.14159265358979;
 
@@ -110,6 +112,44 @@ float3 sampleVndf(float3 wo, float alpha, float u1, float u2)
     return normalize(float3(alpha * nh.x, alpha * nh.y, max(0.0, nh.z)));
 }
 
+
+struct Surface
+{
+    float3 albedo;
+    float metallic;
+    float alpha;
+    float transmission;
+    float ior;
+    float eta;  // relative index n_transmitted / n_incident on the viewer's side
+    float fSel; // chance the dielectric base lobe reflects specularly
+};
+
+// f * cos(wi) of the reflective lobes. Rough transmission is not included.
+float3 evalReflective(Surface s, float3 woL, float3 wiL)
+{
+    float3 hh = normalize(woL + wiL);
+    float woh = max(dot(woL, hh), 0.0);
+    // The cosine cancels against the 1 / (4 cos wi cos wo) of the microfacet BRDF.
+    float core = D(hh.z, s.alpha) * G1(woL.z, s.alpha) * G1(wiL.z, s.alpha) / (4.0 * woL.z);
+    float t = s.transmission;
+    return s.metallic * schlick(s.albedo, woh) * core
+        + (1.0 - s.metallic) * (t * fresnelDielectric(woh, s.eta) + (1.0 - t) * fresnelDielectric(woh, s.ior)) * core
+        + (1.0 - s.metallic) * (1.0 - t) * (1.0 - s.fSel) * s.albedo * (wiL.z / PI);
+}
+
+// Density of choosing wiL through the reflective lobes of the sampler below. Used for MIS only:
+// NEE and BSDF sampling share this function, so an approximate value still gives an unbiased image.
+float reflectivePdf(Surface s, float3 woL, float3 wiL)
+{
+    float3 hh = normalize(woL + wiL);
+    float woh = max(dot(woL, hh), 0.0);
+    float spec = G1(woL.z, s.alpha) * D(hh.z, s.alpha) / (4.0 * woL.z); // visible-normal reflection pdf
+    float t = s.transmission;
+    float pSpec = s.metallic + (1.0 - s.metallic) * (t * fresnelDielectric(woh, s.eta) + (1.0 - t) * s.fSel);
+    float pDiff = (1.0 - s.metallic) * (1.0 - t) * (1.0 - s.fSel) * wiL.z / PI;
+    return pSpec * spec + pDiff;
+}
+
 bool occluded(float3 o, float3 d, float tmax)
 {
     RayDesc ray;
@@ -158,6 +198,10 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
     float3 thr = float3(1.0);
     uint lightCount = params[5];
     uint maxDepth = params[7];
+    uint emitterCount = params[23];
+    // Set when the previous bounce was a reflection that light sampling also covers; qPrev is its density.
+    bool misPrev = false;
+    float qPrev = 0.0;
 
     for (uint depth = 0; depth < maxDepth; depth++)
     {
@@ -195,7 +239,20 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
 
         uint mi = instances[inst + 2] * 12;
         float3 albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
-        radiance += thr * float3(materials[mi + 3], materials[mi + 4], materials[mi + 5]);
+        float3 le = float3(materials[mi + 3], materials[mi + 4], materials[mi + 5]);
+        if (any(le > 0.0))
+        {
+            float wB = 1.0;
+            uint eb = instances[inst + 3];
+            if (misPrev && eb != 0)
+            {
+                uint e = (eb - 1 + q.CommittedPrimitiveIndex()) * 16;
+                float cosl = max(abs(dot(nOut, dir)), 1.0e-4);
+                float pl = emitters[e + 13] * pHitT * pHitT / (emitters[e + 12] * cosl);
+                wB = qPrev * qPrev / (qPrev * qPrev + pl * pl);
+            }
+            radiance += thr * le * wB;
+        }
         float metallic = materials[mi + 6];
         float rough = materials[mi + 7];
         float transmission = materials[mi + 8];
@@ -207,6 +264,14 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         basis(n, T, B);
         float3 woL = float3(dot(wo, T), dot(wo, B), max(dot(wo, n), 1.0e-4));
         float fSel = fresnelDielectric(woL.z, ior); // chance the dielectric base lobe reflects specularly
+        Surface surf;
+        surf.albedo = albedo;
+        surf.metallic = metallic;
+        surf.alpha = alpha;
+        surf.transmission = transmission;
+        surf.ior = ior;
+        surf.eta = eta;
+        surf.fSel = fSel;
 
         // Next-event estimation for delta lights (no MIS: sampling can never hit them). Includes the
         // reflective lobes only; rough transmission of a delta light is not evaluated.
@@ -235,15 +300,46 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
             float c = dot(n, wi);
             if (c > 0.0 && !occluded(p, wi, dist - 1.0e-3))
             {
-                float3 wiL = float3(dot(wi, T), dot(wi, B), c);
-                float3 hh = normalize(woL + wiL);
-                float woh = max(dot(woL, hh), 0.0);
-                // f * cos(wi): the cosine cancels against the 1 / (4 cos wi cos wo) of the microfacet BRDF.
-                float core = D(hh.z, alpha) * G1(woL.z, alpha) * G1(wiL.z, alpha) / (4.0 * woL.z);
-                float3 f = metallic * schlick(albedo, woh) * core
-                    + (1.0 - metallic) * (transmission * fresnelDielectric(woh, eta) + (1.0 - transmission) * fresnelDielectric(woh, ior)) * core
-                    + (1.0 - metallic) * (1.0 - transmission) * (1.0 - fSel) * albedo * (c / PI);
+                float3 f = evalReflective(surf, woL, float3(dot(wi, T), dot(wi, B), c));
                 radiance += thr * f * li_;
+            }
+        }
+
+        // Light sampling of emissive triangles, combined with BSDF sampling by the power heuristic.
+        if (emitterCount > 0)
+        {
+            float ue = rng.next();
+            float ua = rng.next();
+            float ub = rng.next();
+            uint lo = 0;
+            uint hi = emitterCount - 1;
+            while (lo < hi)
+            {
+                uint mid = (lo + hi) / 2;
+                if (emitCdf[mid] >= ue)
+                    hi = mid;
+                else
+                    lo = mid + 1;
+            }
+            uint e = lo * 16;
+            float3 a = float3(emitters[e], emitters[e + 1], emitters[e + 2]);
+            float3 b = float3(emitters[e + 3], emitters[e + 4], emitters[e + 5]);
+            float3 c = float3(emitters[e + 6], emitters[e + 7], emitters[e + 8]);
+            float su = sqrt(ua);
+            float3 xl = a * (1.0 - su) + b * (su * (1.0 - ub)) + c * (su * ub);
+            float3 toL = xl - p;
+            float d2 = dot(toL, toL);
+            float dist = sqrt(d2);
+            float3 wi = toL / dist;
+            float cosl = abs(dot(normalize(cross(b - a, c - a)), wi));
+            float cosi = dot(n, wi);
+            if (cosi > 0.0 && cosl > 1.0e-5 && !occluded(p, wi, dist * (1.0 - 1.0e-3)))
+            {
+                float pl = emitters[e + 13] * d2 / (emitters[e + 12] * cosl);
+                float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
+                float qb = reflectivePdf(surf, woL, wiL);
+                float wl = pl * pl / (pl * pl + qb * qb);
+                radiance += thr * evalReflective(surf, woL, wiL) * float3(emitters[e + 9], emitters[e + 10], emitters[e + 11]) / pl * wl;
             }
         }
 
@@ -256,6 +352,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         float3 wiL = float3(0, 0, 1);
         float3 w = float3(1.0);
         bool ok = true;
+        bool refracted = false;
         if (lobe < metallic)
         {
             float3 h = sampleVndf(woL, alpha, u1, u2);
@@ -280,6 +377,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                 float k = 1.0 - r * r * (1.0 - woh * woh);
                 wiL = -woL * r + (r * woh - sqrt(max(k, 0.0))) * h;
                 ok = wiL.z < 0.0 && k > 0.0;
+                refracted = true;
                 // Radiance scales by (n_incident / n_transmitted)^2 across the interface.
                 w = albedo * G1(max(-wiL.z, 0.0), alpha) * r * r;
             }
@@ -299,6 +397,8 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         }
         if (!ok)
             break;
+        misPrev = !refracted;
+        qPrev = refracted ? 0.0 : reflectivePdf(surf, woL, wiL);
 
         dir = normalize(wiL.x * T + wiL.y * B + wiL.z * n);
         org = hit + n * (wiL.z > 0.0 ? 1.0e-4 : -1.0e-4);
