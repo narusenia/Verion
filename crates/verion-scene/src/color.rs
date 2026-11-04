@@ -5,13 +5,13 @@
 
 type Mat3 = [[f32; 3]; 3];
 
-/// Linear RGB primaries. Both use the D65-referenced matrices below, so white stays white.
+/// Linear RGB primaries. Conversions keep (1, 1, 1) white, so equal-energy RGB stays grey.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ColorSpace {
     /// Linear Rec.709 / sRGB primaries.
     #[default]
     LinearRec709,
-    /// ACEScg (AP1 primaries, Bradford-adapted to D65 white).
+    /// ACEScg (AP1 primaries, D60 white; the matrices Bradford-adapt from D65).
     AcesCg,
 }
 
@@ -38,6 +38,19 @@ impl ColorSpace {
             (Self::LinearRec709, Self::AcesCg) => apply(&REC709_TO_ACESCG, rgb),
             (Self::AcesCg, Self::LinearRec709) => apply(&ACESCG_TO_REC709, rgb),
             _ => rgb,
+        }
+    }
+
+    /// CIE xy chromaticities of red, green, blue and white, as written to file metadata.
+    pub fn chromaticities(self) -> [[f32; 2]; 4] {
+        match self {
+            Self::LinearRec709 => [[0.64, 0.33], [0.30, 0.60], [0.15, 0.06], [0.3127, 0.3290]],
+            Self::AcesCg => [
+                [0.713, 0.293],
+                [0.165, 0.830],
+                [0.128, 0.044],
+                [0.32168, 0.33767],
+            ],
         }
     }
 

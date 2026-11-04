@@ -12,6 +12,7 @@ gltf = { version = "1.4", features = [
     "KHR_materials_ior",
     "KHR_materials_emissive_strength",
 ] }
+exr = "1.74"
 verion-scene = { version = "0.0.0", path = "../verion-scene" }
 
 [lints]

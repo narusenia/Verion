@@ -24,3 +24,10 @@ wildcards = "deny"
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+
+[advisories]
+ignore = [
+  # paste is unmaintained (not vulnerable) and is a build-time proc-macro pulled in by exr -> pulp.
+  # Revisit when exr or pulp drops it.
+  { id = "RUSTSEC-2024-0436", reason = "unmaintained proc-macro via exr -> pulp; no known vulnerability" },
+]

@@ -10,9 +10,9 @@
 | 3 | Metal の Device / Queue / BLAS / TLAS | REQ-GPU-001 / 003 | 進行中（M5 で動作確認済み。別環境での確認が未了） |
 | 4 | Scene IR と revision | REQ-CORE-001 | 済 |
 | 5 | glTF 入力 | REQ-IO-001 | 進行中（BaseColor・MetallicRoughness・Emissive テクスチャは読める。Normal テクスチャ・spot ライトも対応済み。残りは未対応の拡張のみ） |
-| 6 | BSDF・Integrator・テクスチャ・HDRI・ライト | REQ-CORE-002 / 003 / 004 | 進行中（HDRI ファイル読み込みが未実装。Mitsuba 3 照合は項目 12） |
+| 6 | BSDF・Integrator・テクスチャ・HDRI・ライト | REQ-CORE-002 / 003 / 004 | 進行中（HDRI の `.hdr` / `.exr` 読み込みは実装済み。Mitsuba 3 照合は項目 12） |
 | 7 | カラーマネジメント | REQ-CORE-005 | 進行中（作業色空間 Linear Rec.709 / ACEScg、glTF 取り込み時の入力変換、表示変換 = 目標色空間+Reinhard+sRGB OETF は実装済み。EXR 側の変換は項目 8 で接続） |
-| 8 | EXR 多チャンネル出力 | REQ-IO-003 | 未着手 |
+| 8 | EXR 多チャンネル出力 | REQ-IO-003 | 進行中（Beauty + Normal AOV、物理/非物理・spp・作業色空間のメタデータ、chromaticities、`exr` crate による書き出しは実装済み。外部ビューアでの目視確認と、Albedo・Depth・ObjectId は未） |
 | 9 | render-cli | REQ-VIEW-001 | 未着手 |
 | 10 | GPU 計測 | REQ-GPU-004 | 未着手 |
 | 11 | Reference モード | REQ-CORE-006 | 未着手 |
@@ -33,10 +33,11 @@
 - 法線マップの接線は三角形ごとの UV 微分から導出する（glTF の TANGENT 属性は読まない。MikkTSpace と差が出るメッシュがある）
 - shading 法線が幾何面の裏へ曲げたサンプルは打ち切る（わずかなエネルギー損失）
 - 発光は両面に放射する。発光テクスチャを持つ材質は面光源として NEE しない
-- 環境マップは緯度経度の 1 枚のみ、最近傍サンプリング、回転なし。`.hdr` / `.exr` の読み込みは項目 8 の EXR 実装と同時に依存を決める
+- 環境マップは緯度経度の 1 枚のみ、最近傍サンプリング、回転なし。`.hdr` は自前パーサ（標準向き `-Y +X`・フラット/新 RLE のみ。旧 RLE と XYZE は非対応）、`.exr` は `exr` crate。`.hdr` は Rec.709 とみなし、`.exr` は chromaticities で ACEScg と Rec.709 を判別する
 - 光線オフセットは 1e-4 固定（シーンのスケールに依存）
 - 色空間は Linear Rec.709 と ACEScg の 2 つのみ。OCIO 連携、ACES RRT/ODT、Display P3 などは未対応（OCIO は同じ API の裏へ後から差し替える想定）
 - シーン内の色はすべて作業色空間の値。glTF は取り込み時に変換するが、コードで直接作るシーン・sky・HDRI は呼び出し側が作業色空間の値を渡す。`Scene::set_working_space` は既存の色を変換しない
 - ACEScg での描画は RGB 3 チャンネルの計算で、スペクトル計算とは結果が異なる。表示用トーンマップ（Reinhard）は物理ベースではなく、Reference の物理値は `OutputTransform::linear` で取り出す
+- EXR 出力の AOV は Beauty と Normal のみ。`exr` crate は `pulp` 経由で `paste`（メンテ終了、RUSTSEC-2024-0436）を引くため `deny.toml` で理由付きの例外にしている。`exr` 側の更新時に見直す
 - GPU テストは M5 のみで確認。M4 Pro と、GPU を持たない CI 上でのスキップ以外の確認は未了
 - 生成 MSL と `.slang` の一致は、ローカルの pre-commit（`mise run shaders:check`）でのみ検査する。CI は対象外
