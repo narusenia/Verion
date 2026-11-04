@@ -466,7 +466,7 @@ impl Renderer {
     }
 
     /// World-space normal of the first hit per pixel, row-major from the top-left; misses are zero.
-    /// Normals face the viewer.
+    /// Interpolated vertex normals (geometric normals for meshes without them), facing the viewer.
     pub fn render_normals(&self, width: u32, height: u32) -> Result<Vec<[f32; 3]>, Error> {
         if width == 0 || height == 0 {
             return Err(Error::Scene("image size must be non-zero".into()));
@@ -499,7 +499,7 @@ impl Renderer {
             enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
         }
         // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, camera, output).
+        // indices, instances, camera, output, vnormals).
         unsafe {
             enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
             enc.setBuffer_offset_atIndex(Some(&self.positions), 0, 1);
@@ -507,6 +507,7 @@ impl Renderer {
             enc.setBuffer_offset_atIndex(Some(&self.instances), 0, 3);
             enc.setBuffer_offset_atIndex(Some(&camera), 0, 4);
             enc.setBuffer_offset_atIndex(Some(&out), 0, 5);
+            enc.setBuffer_offset_atIndex(Some(&self.vnormals), 0, 6);
         }
         enc.dispatchThreads_threadsPerThreadgroup(
             MTLSize {

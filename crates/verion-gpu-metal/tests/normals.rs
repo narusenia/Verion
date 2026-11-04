@@ -78,6 +78,33 @@ fn instance_rotation_reaches_the_normal() {
 }
 
 #[test]
+fn vertex_normals_are_interpolated_on_both_faces() {
+    let Some(ctx) = context() else { return };
+    // Every vertex carries the same tilted normal, so the pixel must show it, not the flat (0, 0, 1).
+    let tilted = [0.0, 0.6, 0.8];
+    for indices in [[0, 1, 2], [0, 2, 1]] {
+        let mut s = Scene::new();
+        let positions = vec![[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]];
+        let mesh = Mesh::new(positions, Some(vec![tilted; 3]), None, indices.to_vec()).unwrap();
+        let (mesh, material) = (s.add_mesh(mesh), s.add_material(Material::default()));
+        s.add_instance(Instance {
+            mesh,
+            material,
+            transform: IDENTITY,
+        })
+        .unwrap();
+        let mut cam = Camera::default();
+        cam.transform[2][3] = 3.0;
+        s.set_camera(cam);
+        let img = Renderer::new(&ctx, &s)
+            .unwrap()
+            .render_normals(32, 32)
+            .unwrap();
+        assert_close(center(&img, 32, 32), tilted);
+    }
+}
+
+#[test]
 fn empty_scene_and_zero_size_are_errors() {
     let Some(ctx) = context() else { return };
     assert!(matches!(
