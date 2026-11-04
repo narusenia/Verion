@@ -938,3 +938,139 @@ fn missing_texture_image_is_rejected() {
     s.add_light(Light::Environment { color: [0.0; 3] });
     assert!(matches!(Renderer::new(&ctx, &s), Err(Error::Scene(_))));
 }
+
+/// Mean radiance over the central pixels of a sphere of `base` under a uniform sky of radiance 1.
+/// Energy conservation puts it at 1; losses go below.
+fn sphere_furnace(ctx: &MetalContext, base: BaseBsdf) -> f32 {
+    let scene = sky_scene(icosphere(1.0), bsdf(base), 4.0);
+    let img = Renderer::new(ctx, &scene)
+        .unwrap()
+        .render(32, 32, 2048)
+        .unwrap();
+    center_mean(&img, 32, 8)
+}
+
+fn dielectric(transmission: f32, roughness: f32) -> BaseBsdf {
+    BaseBsdf {
+        transmission,
+        roughness,
+        base_color: [1.0; 3],
+        ..BaseBsdf::default()
+    }
+}
+
+#[test]
+fn smooth_dielectrics_conserve_energy_in_a_furnace() {
+    let Some(ctx) = context() else { return };
+    for (name, base, lo) in [
+        ("glass r0", dielectric(1.0, 0.0), 0.99),
+        ("diffuse base + specular r0.1", dielectric(0.0, 0.1), 0.99),
+        ("diffuse base + specular r0.5", dielectric(0.0, 0.5), 0.99),
+    ] {
+        let got = sphere_furnace(&ctx, base);
+        assert!((lo..=1.005).contains(&got), "{name}: {got}");
+    }
+}
+
+/// Rough transmission is single-scatter only, so it loses energy (a known limit in the M1 README);
+/// it must never create any, and the loss must not grow beyond what was measured.
+#[test]
+fn rough_glass_loses_but_never_gains_energy_in_a_furnace() {
+    let Some(ctx) = context() else { return };
+    for (roughness, lo) in [(0.3, 0.95), (0.6, 0.70)] {
+        let got = sphere_furnace(&ctx, dielectric(1.0, roughness));
+        assert!((lo..=1.005).contains(&got), "roughness {roughness}: {got}");
+    }
+}
+
+/// Single-scattering GGX directional albedo (F = 1) by quadrature: the integral of
+/// D * G1(wo) * G1(wi) / (4 cos_o) over the hemisphere, with the shader's alpha and separable Smith G.
+fn ggx_albedo(cos_o: f64, alpha: f64) -> f64 {
+    let g1 = |c: f64| 2.0 / (1.0 + (1.0 + alpha * alpha * (1.0 - c * c) / (c * c)).sqrt());
+    let d = |hz: f64| {
+        let a2 = alpha * alpha;
+        a2 / (std::f64::consts::PI * (hz * hz * (a2 - 1.0) + 1.0).powi(2))
+    };
+    let wo = [(1.0 - cos_o * cos_o).sqrt(), 0.0, cos_o];
+    let (n_t, n_p) = (2000, 2000);
+    let mut sum = 0.0;
+    for i in 0..n_t {
+        let theta = (i as f64 + 0.5) / n_t as f64 * std::f64::consts::FRAC_PI_2;
+        for j in 0..n_p {
+            let phi = (j as f64 + 0.5) / n_p as f64 * std::f64::consts::TAU;
+            let wi = [
+                theta.sin() * phi.cos(),
+                theta.sin() * phi.sin(),
+                theta.cos(),
+            ];
+            let h = [wo[0] + wi[0], wo[1] + wi[1], wo[2] + wi[2]];
+            let hz = h[2] / (h[0] * h[0] + h[1] * h[1] + h[2] * h[2]).sqrt();
+            sum += d(hz) * g1(cos_o) * g1(wi[2]) / (4.0 * cos_o) * theta.sin();
+        }
+    }
+    sum * (std::f64::consts::FRAC_PI_2 / n_t as f64) * (std::f64::consts::TAU / n_p as f64)
+}
+
+/// A flat metal plane tilted so the camera sees it at `cos_o`; under a uniform sky of radiance 1
+/// every reflected path escapes, so the pixel is exactly the directional albedo.
+fn metal_plane_pixel(ctx: &MetalContext, roughness: f32, cos_o: f32) -> f32 {
+    let mut s = Scene::new();
+    let sin_o = (1.0 - cos_o * cos_o).sqrt();
+    let (t1, t2, f) = ([cos_o, 0.0, -sin_o], [0.0, 1.0, 0.0], 5.0);
+    let p = |a: f32, b: f32| {
+        [
+            a * t1[0] + b * t2[0],
+            a * t1[1] + b * t2[1],
+            a * t1[2] + b * t2[2],
+        ]
+    };
+    let mesh = s.add_mesh(
+        Mesh::new(
+            vec![p(-f, -f), p(f, -f), p(f, f), p(-f, f)],
+            None,
+            None,
+            vec![0, 1, 2, 0, 2, 3],
+        )
+        .unwrap(),
+    );
+    let base = BaseBsdf {
+        metallic: 1.0,
+        roughness,
+        base_color: [1.0; 3],
+        ..BaseBsdf::default()
+    };
+    let mat = s.add_material(bsdf(base));
+    s.add_instance(Instance {
+        mesh,
+        material: mat,
+        transform: IDENTITY,
+    })
+    .unwrap();
+    s.add_light(Light::Environment { color: [1.0; 3] });
+    s.set_camera(camera_at_z(3.0));
+    let img = Renderer::new(ctx, &s)
+        .unwrap()
+        .render(32, 32, 4096)
+        .unwrap();
+    let img = &img;
+    let c: Vec<f32> = (14..18)
+        .flat_map(|y| (14..18).map(move |x| img[y * 32 + x][0]))
+        .collect();
+    c.iter().sum::<f32>() / c.len() as f32
+}
+
+#[test]
+fn rough_metal_furnace_matches_ggx_single_scatter_albedo() {
+    let Some(ctx) = context() else { return };
+    for roughness in [0.1f32, 0.3, 0.5, 1.0] {
+        for cos_o in [1.0f32, 0.5] {
+            let got = metal_plane_pixel(&ctx, roughness, cos_o);
+            let alpha = (roughness * roughness) as f64;
+            let want = ggx_albedo(cos_o as f64, alpha) as f32;
+            assert!(
+                (got - want).abs() < 0.01,
+                "roughness {roughness}, cos {cos_o}: {got} vs {want}"
+            );
+        }
+    }
+}
