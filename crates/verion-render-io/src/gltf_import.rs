@@ -160,7 +160,7 @@ impl Importer<'_> {
             self.camera(node.index(), &camera, transform);
         }
         if let Some(light) = node.light() {
-            self.light(node.index(), &light, &world);
+            self.light(&light, &world);
         }
         for child in node.children() {
             self.node(&child, &world)?;
@@ -345,7 +345,7 @@ impl Importer<'_> {
         });
     }
 
-    fn light(&mut self, node: usize, light: &gltf::khr_lights_punctual::Light, world: &Mat4) {
+    fn light(&mut self, light: &gltf::khr_lights_punctual::Light, world: &Mat4) {
         let (color, intensity) = (light.color(), light.intensity());
         let ir = match light.kind() {
             Kind::Point => Light::Point {
@@ -359,11 +359,17 @@ impl Importer<'_> {
                 color,
                 intensity,
             },
-            Kind::Spot { .. } => {
-                self.warnings
-                    .push(format!("node {node}: spot lights are not supported"));
-                return;
-            }
+            Kind::Spot {
+                inner_cone_angle,
+                outer_cone_angle,
+            } => Light::Spot {
+                position: [world[3][0], world[3][1], world[3][2]],
+                direction: [-world[2][0], -world[2][1], -world[2][2]],
+                color,
+                intensity,
+                inner_cone: inner_cone_angle,
+                outer_cone: outer_cone_angle,
+            },
         };
         self.scene.add_light(ir);
     }
@@ -478,6 +484,27 @@ mod tests {
         }
         out.extend(&bin);
         out
+    }
+
+    #[test]
+    fn imports_a_spot_light_along_local_minus_z() {
+        let json = JSON.replace(
+            r#"{"type": "point", "color": [1, 1, 1], "intensity": 10}"#,
+            r#"{"type": "spot", "color": [1, 1, 1], "intensity": 10, "spot": {"innerConeAngle": 0.1, "outerConeAngle": 0.5}}"#,
+        );
+        let Import { scene, warnings } = load_gltf_slice(&glb(&json, &[])).unwrap();
+        assert_eq!(
+            scene.lights(),
+            [Light::Spot {
+                position: [0.0, 3.0, 0.0],
+                direction: [0.0, 0.0, -1.0],
+                color: [1.0; 3],
+                intensity: 10.0,
+                inner_cone: 0.1,
+                outer_cone: 0.5,
+            }]
+        );
+        assert!(warnings.iter().all(|w| !w.contains("spot")), "{warnings:?}");
     }
 
     #[test]
