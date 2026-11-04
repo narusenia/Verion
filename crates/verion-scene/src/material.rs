@@ -1,3 +1,5 @@
+use crate::ImageId;
+
 /// Material IR, split per ADR-0008 so stylization never leaks into the physical base.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Material {
@@ -17,6 +19,12 @@ pub struct BaseBsdf {
     pub transmission: f32,
     pub ior: f32,
     pub emission: [f32; 3],
+    /// Textures multiply the factors above (glTF semantics) and hold linear values. Sampling is
+    /// repeat-wrapped trilinear; UVs come from the mesh. The image ids must come from the same scene.
+    pub base_color_texture: Option<ImageId>,
+    /// Roughness in green, metallic in blue.
+    pub metallic_roughness_texture: Option<ImageId>,
+    pub emission_texture: Option<ImageId>,
 }
 
 impl Default for BaseBsdf {
@@ -28,6 +36,9 @@ impl Default for BaseBsdf {
             transmission: 0.0,
             ior: 1.5,
             emission: [0.0; 3],
+            base_color_texture: None,
+            metallic_roughness_texture: None,
+            emission_texture: None,
         }
     }
 }

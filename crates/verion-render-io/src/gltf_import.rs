@@ -214,6 +214,7 @@ impl Importer<'_> {
             transmission: m.transmission().map_or(0.0, |t| t.transmission_factor()),
             ior: m.ior().unwrap_or(1.5),
             emission,
+            ..BaseBsdf::default()
         };
 
         let name = m.index().map_or("default".to_string(), |i| i.to_string());
