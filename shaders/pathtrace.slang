@@ -7,7 +7,7 @@ StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
 StructuredBuffer<uint> instances;   // 16 words: vertex offset, index offset, material, emitter base + 1 (0 = not emissive), 12 floats (row-major 3x4)
 StructuredBuffer<float> materials;  // 16 words: base color rgb, emission rgb, metallic, roughness, transmission, ior,
-                                    // base color / metallic-roughness / emission texture + 1 (0 = none), 3 pad
+                                    // base color / metallic-roughness / emission / normal texture + 1 (0 = none), normal scale, 1 pad
 StructuredBuffer<uint> lights;      // 8 words: kind (0 point, 1 directional), color rgb, intensity, position or travel direction xyz (floats as bits)
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
                                     // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle
@@ -424,9 +424,10 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         uint texBase = uint(materials[mi + 10]);
         uint texMR = uint(materials[mi + 11]);
         uint texEm = uint(materials[mi + 12]);
+        uint texNm = uint(materials[mi + 13]);
         float2 texRM = float2(1.0); // x = roughness (green), y = metallic (blue)
         float3 texEmission = float3(1.0);
-        if (texBase + texMR + texEm > 0)
+        if (texBase + texMR + texEm + texNm > 0)
         {
             float2 uv0 = float2(uvs[2 * (indices[tri] + vo)], uvs[2 * (indices[tri] + vo) + 1]);
             float2 uv1 = float2(uvs[2 * (indices[tri + 1] + vo)], uvs[2 * (indices[tri + 1] + vo) + 1]);
@@ -442,6 +443,24 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                 texRM = sampleTexture(texMR - 1, uv, footprint).yz;
             if (texEm > 0)
                 texEmission = sampleTexture(texEm - 1, uv, footprint);
+            if (texNm > 0)
+            {
+                // Tangent frame from the UV derivatives of this triangle; green points up the image (-v).
+                float det = d1.x * d2.y - d2.x * d1.y;
+                float3 dPdu = (e1 * d2.y - e2 * d1.y) / det;
+                float3 dPdv = (e2 * d1.x - e1 * d2.x) / det;
+                float3 tg = dPdu - ns * dot(ns, dPdu);
+                if (abs(det) > 1.0e-20 && dot(tg, tg) > 1.0e-20)
+                {
+                    tg = normalize(tg);
+                    float3 bt = cross(ns, tg);
+                    if (dot(bt, dPdv) > 0.0)
+                        bt = -bt;
+                    float3 nt = sampleTexture(texNm - 1, uv, footprint) * 2.0 - 1.0;
+                    ns = normalize(nt.x * materials[mi + 14] * tg + nt.y * materials[mi + 14] * bt + nt.z * ns);
+                    n = outside ? ns : -ns;
+                }
+            }
         }
 
         float3 le = float3(materials[mi + 3], materials[mi + 4], materials[mi + 5]) * texEmission;

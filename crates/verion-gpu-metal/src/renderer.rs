@@ -353,6 +353,7 @@ impl Renderer {
                 texture(b.metallic_roughness_texture)?,
                 texture(b.emission_texture)?,
             ];
+            let normal_texture = texture(b.normal_texture)?;
             materials.extend([
                 c[0],
                 c[1],
@@ -367,8 +368,8 @@ impl Renderer {
                 tex[0],
                 tex[1],
                 tex[2],
-                0.0,
-                0.0,
+                normal_texture,
+                b.normal_scale,
                 0.0,
             ]);
         }
