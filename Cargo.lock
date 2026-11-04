@@ -98,12 +98,3 @@ dependencies = [
 [[package]]
 name = "verion-scene"
 version = "0.0.0"
-
-[[package]]
-name = "verion-spike-rt"
-version = "0.0.0"
-dependencies = [
- "objc2",
- "objc2-foundation",
- "objc2-metal",
-]
