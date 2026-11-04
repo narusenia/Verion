@@ -4,8 +4,8 @@ use std::{collections::HashMap, fmt, path::Path};
 
 use gltf::{Document, camera::Projection, khr_lights_punctual::Kind, mesh::Mode};
 use verion_scene::{
-    BaseBsdf, Camera, IDENTITY, Instance, Light, Material, MaterialId, Mesh, MeshError, MeshId,
-    Scene, SceneError, Transform,
+    BaseBsdf, Camera, IDENTITY, Image, ImageId, Instance, Light, Material, MaterialId, Mesh,
+    MeshError, MeshId, Scene, SceneError, Transform,
 };
 
 /// Extensions this importer understands; any other one in `extensionsUsed` is warned about.
@@ -52,15 +52,15 @@ impl From<SceneError> for Error {
 
 /// Loads a `.gltf` (with external buffers) or `.glb` file.
 pub fn load_gltf(path: &Path) -> Result<Import, Error> {
-    let (doc, buffers, _images) = gltf::import(path).map_err(|e| Error::Gltf(e.to_string()))?;
-    convert(&doc, &buffers)
+    let (doc, buffers, images) = gltf::import(path).map_err(|e| Error::Gltf(e.to_string()))?;
+    convert(&doc, &buffers, &images)
 }
 
 /// Loads a self-contained `.glb` or `.gltf` (embedded buffers) from memory.
 pub fn load_gltf_slice(bytes: &[u8]) -> Result<Import, Error> {
-    let (doc, buffers, _images) =
+    let (doc, buffers, images) =
         gltf::import_slice(bytes).map_err(|e| Error::Gltf(e.to_string()))?;
-    convert(&doc, &buffers)
+    convert(&doc, &buffers, &images)
 }
 
 /// Column-major 4x4, as glTF stores it.
@@ -96,6 +96,9 @@ fn to_transform(m: &Mat4) -> Transform {
 
 struct Importer<'a> {
     buffers: &'a [gltf::buffer::Data],
+    images: &'a [gltf::image::Data],
+    /// (glTF image, sRGB-encoded) -> IR image, so one file used two ways becomes two linear images.
+    image_cache: HashMap<(usize, bool), Option<ImageId>>,
     scene: Scene,
     warnings: Vec<String>,
     /// (glTF mesh, primitive) -> IR mesh + material, so shared meshes stay shared.
@@ -104,9 +107,15 @@ struct Importer<'a> {
     camera_set: bool,
 }
 
-fn convert(doc: &Document, buffers: &[gltf::buffer::Data]) -> Result<Import, Error> {
+fn convert(
+    doc: &Document,
+    buffers: &[gltf::buffer::Data],
+    images: &[gltf::image::Data],
+) -> Result<Import, Error> {
     let mut imp = Importer {
         buffers,
+        images,
+        image_cache: HashMap::new(),
         scene: Scene::new(),
         warnings: Vec::new(),
         meshes: HashMap::new(),
@@ -218,17 +227,31 @@ impl Importer<'_> {
         };
 
         let name = m.index().map_or("default".to_string(), |i| i.to_string());
-        let has_texture = pbr.base_color_texture().is_some()
-            || pbr.metallic_roughness_texture().is_some()
-            || m.normal_texture().is_some()
-            || m.occlusion_texture().is_some()
-            || m.emissive_texture().is_some()
-            || m.transmission()
-                .is_some_and(|t| t.transmission_texture().is_some());
-        if has_texture {
-            self.warnings.push(format!(
-                "material {name}: textures are not supported yet and were ignored"
-            ));
+        let mut base = base;
+        base.base_color_texture = pbr
+            .base_color_texture()
+            .and_then(|t| self.texture(&name, "base color", &t, true));
+        base.metallic_roughness_texture = pbr
+            .metallic_roughness_texture()
+            .and_then(|t| self.texture(&name, "metallic-roughness", &t, false));
+        base.emission_texture = m
+            .emissive_texture()
+            .and_then(|t| self.texture(&name, "emissive", &t, true));
+        let ignored = [
+            ("normal", m.normal_texture().is_some()),
+            ("occlusion", m.occlusion_texture().is_some()),
+            (
+                "transmission",
+                m.transmission()
+                    .is_some_and(|t| t.transmission_texture().is_some()),
+            ),
+        ];
+        for (kind, present) in ignored {
+            if present {
+                self.warnings.push(format!(
+                    "material {name}: {kind} textures are not supported yet and were ignored"
+                ));
+            }
         }
         if m.alpha_mode() != gltf::material::AlphaMode::Opaque {
             self.warnings.push(format!(
@@ -241,6 +264,38 @@ impl Importer<'_> {
             ..Material::default()
         });
         self.materials.insert(m.index(), id);
+        id
+    }
+
+    /// Imports the texture's image as linear data; `None` (with a warning) when it cannot be used.
+    fn texture(
+        &mut self,
+        material: &str,
+        slot: &str,
+        info: &gltf::texture::Info,
+        srgb: bool,
+    ) -> Option<ImageId> {
+        if info.tex_coord() != 0 {
+            self.warnings.push(format!(
+                "material {material}: {slot} texture uses UV set {}; only set 0 is supported",
+                info.tex_coord()
+            ));
+            return None;
+        }
+        let source = info.texture().source().index();
+        if let Some(&cached) = self.image_cache.get(&(source, srgb)) {
+            return cached;
+        }
+        let id = match to_image(&self.images[source], srgb) {
+            Ok(image) => Some(self.scene.add_image(image)),
+            Err(why) => {
+                self.warnings.push(format!(
+                    "material {material}: {slot} texture ignored: {why}"
+                ));
+                None
+            }
+        };
+        self.image_cache.insert((source, srgb), id);
         id
     }
 
@@ -288,6 +343,56 @@ impl Importer<'_> {
     }
 }
 
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Converts a decoded glTF image to linear RGB. One channel becomes grey, two become (r, g, 0).
+fn to_image(data: &gltf::image::Data, srgb: bool) -> Result<Image, String> {
+    use gltf::image::Format::*;
+    let (channels, bytes) = match data.format {
+        R8 => (1, 1),
+        R8G8 => (2, 1),
+        R8G8B8 => (3, 1),
+        R8G8B8A8 => (4, 1),
+        R16 => (1, 2),
+        R16G16 => (2, 2),
+        R16G16B16 => (3, 2),
+        R16G16B16A16 => (4, 2),
+        R32G32B32FLOAT => (3, 4),
+        R32G32B32A32FLOAT => (4, 4),
+    };
+    let stride = channels * bytes;
+    let is_float = bytes == 4;
+    let channel = |px: &[u8], c: usize| -> f32 {
+        let at = &px[c * bytes..(c + 1) * bytes];
+        let v = match bytes {
+            1 => f32::from(at[0]) / 255.0,
+            2 => f32::from(u16::from_le_bytes([at[0], at[1]])) / 65535.0,
+            _ => f32::from_le_bytes([at[0], at[1], at[2], at[3]]),
+        };
+        if srgb && !is_float {
+            srgb_to_linear(v)
+        } else {
+            v
+        }
+    };
+    let pixels = data
+        .pixels
+        .chunks_exact(stride)
+        .map(|px| match channels {
+            1 => [channel(px, 0); 3],
+            2 => [channel(px, 0), channel(px, 1), 0.0],
+            _ => [channel(px, 0), channel(px, 1), channel(px, 2)],
+        })
+        .collect();
+    Image::new(data.width, data.height, pixels).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,13 +425,18 @@ mod tests {
       "buffers": [{"byteLength": 44}]
     }"#;
 
-    fn glb(json: &str) -> Vec<u8> {
+    /// Binary glTF: the triangle's buffer (44 bytes) followed by `extra` (an embedded image).
+    fn glb(json: &str, extra: &[u8]) -> Vec<u8> {
         let mut bin: Vec<u8> = [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
             .iter()
             .flat_map(|f| f.to_le_bytes())
             .collect();
         bin.extend([0u16, 1, 2].iter().flat_map(|i| i.to_le_bytes()));
         bin.extend([0, 0]);
+        bin.extend(extra);
+        while !bin.len().is_multiple_of(4) {
+            bin.push(0);
+        }
         let mut j = json.as_bytes().to_vec();
         while !j.len().is_multiple_of(4) {
             j.push(b' ');
@@ -346,7 +456,7 @@ mod tests {
 
     #[test]
     fn imports_mesh_material_camera_and_light() {
-        let Import { scene, warnings } = load_gltf_slice(&glb(JSON)).unwrap();
+        let Import { scene, warnings } = load_gltf_slice(&glb(JSON, &[])).unwrap();
 
         assert_eq!(scene.meshes().len(), 1);
         assert_eq!(scene.meshes()[0].indices(), [0, 1, 2]);
@@ -376,5 +486,93 @@ mod tests {
     #[test]
     fn invalid_file_is_an_error() {
         assert!(matches!(load_gltf_slice(b"not gltf"), Err(Error::Gltf(_))));
+    }
+
+    /// 2x2 RGB PNG: red, green / blue, grey (128).
+    const PNG: [u8; 76] = [
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x08, 0x02, 0x00, 0x00, 0x00, 0xfd,
+        0xd4, 0x9a, 0x73, 0x00, 0x00, 0x00, 0x13, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8,
+        0xcf, 0xc0, 0xc0, 0x00, 0xc2, 0x0c, 0xff, 0x1b, 0x1a, 0x1a, 0x00, 0x1c, 0xf4, 0x04, 0x7e,
+        0x29, 0x80, 0x40, 0xd8, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60,
+        0x82,
+    ];
+
+    fn textured_json(tex_coord: u32) -> String {
+        format!(
+            r#"{{
+          "asset": {{"version": "2.0"}},
+          "scene": 0,
+          "scenes": [{{"nodes": [0]}}],
+          "nodes": [{{"mesh": 0}}],
+          "meshes": [{{"primitives": [{{"attributes": {{"POSITION": 0}}, "indices": 1, "material": 0}}]}}],
+          "materials": [{{
+            "pbrMetallicRoughness": {{
+              "baseColorTexture": {{"index": 0, "texCoord": {tex_coord}}},
+              "metallicRoughnessTexture": {{"index": 0}}
+            }},
+            "normalTexture": {{"index": 0}}
+          }}],
+          "textures": [{{"source": 0}}],
+          "images": [{{"bufferView": 2, "mimeType": "image/png"}}],
+          "accessors": [
+            {{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3", "min": [0, 0, 0], "max": [1, 1, 0]}},
+            {{"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}}
+          ],
+          "bufferViews": [
+            {{"buffer": 0, "byteOffset": 0, "byteLength": 36}},
+            {{"buffer": 0, "byteOffset": 36, "byteLength": 6}},
+            {{"buffer": 0, "byteOffset": 44, "byteLength": 76}}
+          ],
+          "buffers": [{{"byteLength": 120}}]
+        }}"#
+        )
+    }
+
+    #[test]
+    fn imports_textures_as_linear_images() {
+        let Import { scene, warnings } = load_gltf_slice(&glb(&textured_json(0), &PNG)).unwrap();
+        let base = &scene.materials()[0].base;
+        let (color, mr) = (
+            base.base_color_texture.unwrap(),
+            base.metallic_roughness_texture.unwrap(),
+        );
+        assert_ne!(
+            color, mr,
+            "sRGB and linear uses of one file are separate images"
+        );
+
+        let color = &scene.images()[color.index()];
+        assert_eq!((color.width(), color.height()), (2, 2));
+        assert_eq!(color.pixels()[0], [1.0, 0.0, 0.0]);
+        // sRGB 128/255 decodes to about 0.2158.
+        assert!(
+            (color.pixels()[3][0] - 0.2158).abs() < 1e-3,
+            "{:?}",
+            color.pixels()[3]
+        );
+        // Metallic-roughness data is already linear.
+        let mr = &scene.images()[mr.index()];
+        assert!((mr.pixels()[3][0] - 128.0 / 255.0).abs() < 1e-6);
+        assert_eq!(
+            warnings,
+            ["material 0: normal textures are not supported yet and were ignored"]
+        );
+    }
+
+    #[test]
+    fn texture_on_another_uv_set_is_ignored_with_a_warning() {
+        let Import { scene, warnings } = load_gltf_slice(&glb(&textured_json(1), &PNG)).unwrap();
+        assert_eq!(scene.materials()[0].base.base_color_texture, None);
+        assert!(
+            scene.materials()[0]
+                .base
+                .metallic_roughness_texture
+                .is_some()
+        );
+        assert!(
+            warnings.iter().any(|w| w.contains("UV set 1")),
+            "{warnings:?}"
+        );
     }
 }
