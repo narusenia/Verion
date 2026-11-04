@@ -55,7 +55,10 @@ run = "scripts/crosscheck.sh"
 description = "Fail when the committed MSL is stale (needs slangc; not run in CI)"
 run = "scripts/shaders.sh check"
 
+[tasks.bench]
+description = "Benchmark gpu_s against this machine's baseline; `mise run bench record` re-records it (needs a Metal GPU; not run in CI)"
+run = "scripts/bench.sh"
+
 # Added when the matching code exists:
 #   deps   - crate dependency rules (REQ-INFRA-001), scripts/check-deps.sh
-#   bench  - benchmarks and regression check (REQ-PERF-001/002)
 #   qa     - reference-image comparison against Mitsuba 3 (REQ-QA-001)
