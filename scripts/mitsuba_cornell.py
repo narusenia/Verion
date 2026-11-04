@@ -124,7 +124,7 @@ print("mean RGB  mitsuba", [round(x, 4) for x in mm], " verion", [round(x, 4) fo
 abs_err = mean([abs(a - b) for m, r in zip(mine, ref) for a, b in zip(m, r)])
 print(f"mean abs error / mean radiance: {abs_err / mean(mm):.4f} (noise floor falls with 1/sqrt(spp))")
 worst = max(abs(b / a - 1) for a, b in zip(mm, mv))
-print(f"worst channel deviation {worst:.2%}: {'PASS' if worst <= 0.01 else 'FAIL'} (limit 1%)")
+print(f"worst channel deviation {worst:.2%} (limit 1%)")
 
 # Block means catch what the global mean hides, e.g. a mirrored or rotated environment map.
 n = 4
@@ -137,4 +137,13 @@ for by in range(n):
         b = mean([c[i] for c in ref for i in idx])
         if max(a, b) > 0.05 * mean(mm):  # skip near-black blocks (background, thin cone edges)
             worst_block = max(worst_block, abs(b / a - 1) if a else float("inf"))
-print(f"worst {n}x{n} block mean deviation (blocks above 5% of mean radiance) {worst_block:.2%}")
+print(f"worst {n}x{n} block mean deviation (blocks above 5% of mean radiance) {worst_block:.2%} (limit 2%)")
+
+# PSNR against Mitsuba's render over the peak radiance; noise-dominated, so reported but not gated.
+mse = mean([(a - b) ** 2 for m, r in zip(mine, ref) for a, b in zip(m, r)])
+peak = max(max(c) for c in mine)
+print(f"PSNR {10 * math.log10(peak * peak / mse):.1f} dB (peak {peak:.2f}; reported only)")
+
+ok = worst <= 0.01 and worst_block <= 0.02
+print("PASS" if ok else "FAIL")
+sys.exit(0 if ok else 1)
