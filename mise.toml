@@ -37,6 +37,10 @@ depends = ["fmt", "clippy", "deny", "test"]
 description = "Install lefthook git hooks"
 run = "lefthook install"
 
+[tasks.shaders]
+description = "Regenerate the committed MSL from shaders/*.slang"
+run = "slangc shaders/normals.slang -target metal -entry normals -stage compute -o crates/verion-gpu-metal/shaders/normals.metal"
+
 # Added when the matching code exists:
 #   deps   - crate dependency rules (REQ-INFRA-001), scripts/check-deps.sh
 #   bench  - benchmarks and regression check (REQ-PERF-001/002)
