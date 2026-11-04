@@ -1,6 +1,6 @@
 //! Uploads a Scene IR snapshot and renders AOVs with the Slang-generated kernels.
 
-use std::{ffi::c_void, ptr::NonNull};
+use std::{collections::HashMap, ffi::c_void, ptr::NonNull};
 
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
@@ -8,7 +8,7 @@ use objc2_metal::{
     MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder,
     MTLComputePipelineState, MTLDevice, MTLLibrary, MTLResourceOptions, MTLResourceUsage, MTLSize,
 };
-use verion_scene::{Light, Scene, Transform};
+use verion_scene::{Image, Light, Scene, Transform};
 
 use crate::{Blas, Error, Instance, MetalContext, Obj, Tlas};
 
@@ -17,7 +17,7 @@ const PATHTRACE_MSL: &str = include_str!("../shaders/pathtrace.metal");
 
 /// Path length limit. Radiance beyond it is dropped, so closed furnaces read slightly dark.
 const MAX_DEPTH: u32 = 8;
-const MATERIAL_WORDS: usize = 12;
+const MATERIAL_WORDS: usize = 16;
 const LIGHT_WORDS: usize = 8;
 /// Words per emissive triangle; must match `shaders/pathtrace.slang`.
 const EMITTER_WORDS: usize = 16;
@@ -160,6 +160,34 @@ fn build_env(ctx: &MetalContext, scene: &Scene) -> Result<EnvMap, Error> {
     })
 }
 
+/// Box-filtered mip chain of `image`, level 0 first. Returns the texels (rgb) and the level count.
+fn mip_chain(image: &Image) -> (Vec<f32>, u32) {
+    let (mut w, mut h) = (image.width() as usize, image.height() as usize);
+    let mut level = image.pixels().to_vec();
+    let mut texels = Vec::new();
+    let mut levels = 0;
+    loop {
+        texels.extend(level.iter().flatten());
+        levels += 1;
+        if w == 1 && h == 1 {
+            return (texels, levels);
+        }
+        let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+        let mut next = Vec::with_capacity(nw * nh);
+        for y in 0..nh {
+            for x in 0..nw {
+                let mut sum = [0.0f32; 3];
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let p = level[(2 * y + dy).min(h - 1) * w + (2 * x + dx).min(w - 1)];
+                    sum.iter_mut().zip(p).for_each(|(s, v)| *s += v);
+                }
+                next.push(sum.map(|s| s / 4.0));
+            }
+        }
+        (level, w, h) = (next, nw, nh);
+    }
+}
+
 /// A scene snapshot ready to trace. Later scene edits are not reflected.
 pub struct Renderer {
     ctx: MetalContext,
@@ -175,6 +203,9 @@ pub struct Renderer {
     emit_cdf: Obj<dyn MTLBuffer>,
     emitter_count: u32,
     env: EnvMap,
+    uvs: Obj<dyn MTLBuffer>,
+    texels: Obj<dyn MTLBuffer>,
+    tex_info: Obj<dyn MTLBuffer>,
     sky: [f32; 3],
     aperture: f32,
     focus: f32,
@@ -190,11 +221,16 @@ impl Renderer {
         }
         let mut positions: Vec<f32> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
+        let mut uvs: Vec<f32> = Vec::new();
         let mut blases = Vec::new();
         let mut offsets = Vec::new(); // (vertex offset, index offset) per mesh
         for mesh in scene.meshes() {
             offsets.push(((positions.len() / 3) as u32, indices.len() as u32));
             positions.extend(mesh.positions().iter().flatten());
+            match mesh.uvs() {
+                Some(uv) => uvs.extend(uv.iter().flatten()),
+                None => uvs.extend(std::iter::repeat_n(0.0, mesh.positions().len() * 2)),
+            }
             indices.extend_from_slice(mesh.indices());
             blases.push(Blas::build(ctx, mesh.positions(), mesh.indices())?);
         }
@@ -213,7 +249,12 @@ impl Renderer {
             }
             let le = scene.materials()[inst.material.index()].base.emission;
             let radiance = le[0] + le[1] + le[2];
-            if radiance > 0.0 {
+            // A textured emitter has no constant radiance to sample, so only BSDF sampling finds it.
+            let textured = scene.materials()[inst.material.index()]
+                .base
+                .emission_texture
+                .is_some();
+            if radiance > 0.0 && !textured {
                 let mesh = &scene.meshes()[inst.mesh.index()];
                 record[3] = powers.len() as u32 + 1;
                 for tri in mesh.indices().as_chunks::<3>().0 {
@@ -269,10 +310,43 @@ impl Renderer {
             *last = 1.0;
         }
 
+        // Every referenced image becomes one texture with a full mip chain.
+        let mut texture_of: HashMap<usize, u32> = HashMap::new();
+        let mut texels: Vec<f32> = Vec::new();
+        let mut tex_info: Vec<u32> = Vec::new();
+        let mut texture = |id: Option<verion_scene::ImageId>| -> Result<f32, Error> {
+            let Some(id) = id else { return Ok(0.0) };
+            let slot = match texture_of.get(&id.index()) {
+                Some(&slot) => slot,
+                None => {
+                    let image = scene
+                        .images()
+                        .get(id.index())
+                        .ok_or_else(|| Error::Scene("material refers to a missing image".into()))?;
+                    let (chain, levels) = mip_chain(image);
+                    let slot = texture_of.len() as u32;
+                    tex_info.extend([
+                        (texels.len() / 3) as u32,
+                        image.width(),
+                        image.height(),
+                        levels,
+                    ]);
+                    texels.extend(chain);
+                    texture_of.insert(id.index(), slot);
+                    slot
+                }
+            };
+            Ok(slot as f32 + 1.0)
+        };
         let mut materials = Vec::with_capacity(scene.materials().len() * MATERIAL_WORDS);
         for m in scene.materials() {
             let b = &m.base;
             let (c, e) = (b.base_color, b.emission);
+            let tex = [
+                texture(b.base_color_texture)?,
+                texture(b.metallic_roughness_texture)?,
+                texture(b.emission_texture)?,
+            ];
             materials.extend([
                 c[0],
                 c[1],
@@ -284,6 +358,10 @@ impl Renderer {
                 b.roughness,
                 b.transmission,
                 b.ior,
+                tex[0],
+                tex[1],
+                tex[2],
+                0.0,
                 0.0,
                 0.0,
             ]);
@@ -335,6 +413,9 @@ impl Renderer {
             lights: upload(ctx, &lights)?,
             emitter_count: powers.len() as u32,
             env: build_env(ctx, scene)?,
+            uvs: upload(ctx, &uvs)?,
+            texels: upload(ctx, &texels)?,
+            tex_info: upload(ctx, &tex_info)?,
             emitters: upload(ctx, &emitters)?,
             emit_cdf: upload(ctx, &emit_cdf)?,
             sky,
@@ -466,7 +547,7 @@ impl Renderer {
 
     /// Traces `samples` more paths per pixel into `acc` and waits for the GPU.
     pub fn accumulate(&self, acc: &mut Accumulation, samples: u32) -> Result<(), Error> {
-        let mut params = [0u32; 27];
+        let mut params = [0u32; 28];
         params[0] = acc.width;
         params[1] = acc.height;
         params[2] = self.camera[2].to_bits();
@@ -484,6 +565,8 @@ impl Renderer {
         params[24] = self.env.width;
         params[25] = self.env.height;
         params[26] = self.env.pdf_scale.to_bits();
+        // Footprint of one pixel per unit of travelled distance, for texture filtering.
+        params[27] = (2.0 * self.camera[2] / acc.height as f32).to_bits();
 
         let cb = self
             .ctx
@@ -498,7 +581,7 @@ impl Renderer {
             enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
         }
         // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional). Dispatches in one encoder run in
+        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional, uvs, texels, texInfo). Dispatches in one encoder run in
         // order, so the `+=` on `accum` never races.
         unsafe {
             enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
@@ -513,6 +596,9 @@ impl Renderer {
             enc.setBuffer_offset_atIndex(Some(&self.env.pixels), 0, 10);
             enc.setBuffer_offset_atIndex(Some(&self.env.marginal), 0, 11);
             enc.setBuffer_offset_atIndex(Some(&self.env.conditional), 0, 12);
+            enc.setBuffer_offset_atIndex(Some(&self.uvs), 0, 13);
+            enc.setBuffer_offset_atIndex(Some(&self.texels), 0, 14);
+            enc.setBuffer_offset_atIndex(Some(&self.tex_info), 0, 15);
             for k in 0..samples {
                 params[6] = acc.samples + k;
                 enc.setBytes_length_atIndex(
