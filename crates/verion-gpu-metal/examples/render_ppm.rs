@@ -1,7 +1,8 @@
 //! Dev tool: renders a small test scene (Cornell-style box, metal and glass spheres) to PPM and EXR files.
-//! Usage: cargo run --release -p verion-gpu-metal --example render_ppm -- [out_dir] [width] [height] [spp] [walls|hdri]
+//! Usage: cargo run --release -p verion-gpu-metal --example render_ppm -- [out_dir] [width] [height] [spp] [walls|hdri|spot]
 //! `walls` leaves out the spheres (diffuse walls, area light and point light only). `hdri` renders
 //! the spheres on a large floor lit by a procedural environment map (written to env.exr).
+//! `spot` lights the same open scene with one hard-edged spot light.
 #[cfg(target_os = "macos")]
 mod imp {
     use std::{collections::HashMap, fs, io::Write, path::Path};
@@ -118,7 +119,8 @@ mod imp {
     }
 
     fn scene(mode: &str) -> Scene {
-        let (walls_only, hdri) = (mode == "walls", mode == "hdri");
+        let (walls_only, spot) = (mode == "walls", mode == "spot");
+        let open = mode == "hdri" || spot;
         let mut s = Scene::new();
         let add = |s: &mut Scene, mesh: Mesh, material: Material, transform| {
             let (mesh, material) = (s.add_mesh(mesh), s.add_material(material));
@@ -131,14 +133,14 @@ mod imp {
         };
         let (lo, hi) = (-2.0, 2.0);
         let grey = [0.75; 3];
-        let f = if hdri { 20.0 } else { 2.0 };
+        let f = if open { 20.0 } else { 2.0 };
         add(
             &mut s,
             quad([-f, lo, -f], [f, lo, -f], [f, lo, f], [-f, lo, f]),
             diffuse(grey),
             IDENTITY,
         ); // floor
-        if !hdri {
+        if !open {
             add(
                 &mut s,
                 quad([lo, hi, lo], [hi, hi, lo], [hi, hi, hi], [lo, hi, hi]),
@@ -214,11 +216,21 @@ mod imp {
         };
         cam.transform[2][3] = 6.0;
         s.set_camera(cam);
-        if !hdri {
+        if !open {
             s.add_light(Light::Point {
                 position: [0.0, 1.0, 1.5],
                 color: [1.0, 0.95, 0.9],
                 intensity: 1.5,
+            });
+        }
+        if spot {
+            s.add_light(Light::Spot {
+                position: [2.0, 4.0, 3.0],
+                direction: [-2.0, -5.3, -3.0],
+                color: [1.0, 0.95, 0.9],
+                intensity: 40.0,
+                inner_cone: 0.49,
+                outer_cone: 0.5,
             });
         }
         s
