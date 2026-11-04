@@ -1,6 +1,9 @@
 //! `render-cli scene.gltf -o out.exr`: headless render (REQ-VIEW-001).
 //! Always Reference mode for now: no stylization or AI approximation exists yet (REQ-CORE-006).
 
+// shortcut: the render path is macOS-only, so off macOS its helpers look dead; gate them individually once a second backend exists.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
+
 use std::{fs, path::PathBuf, time::Instant};
 
 use clap::Parser;
