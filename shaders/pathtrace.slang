@@ -1,4 +1,4 @@
-// Diffuse path tracer, one sample per pixel per dispatch (M1 item 6b).
+// Path tracer with a glTF-style BSDF, one sample per pixel per dispatch (M1 items 6b and 6c).
 // Flat word buffers only; layouts are documented next to each binding and mirrored in
 // crates/verion-gpu-metal/src/renderer.rs.
 
@@ -6,7 +6,7 @@ RaytracingAccelerationStructure scene;
 StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
 StructuredBuffer<uint> instances;   // 16 words: vertex offset, index offset, material, pad, 12 floats (row-major 3x4)
-StructuredBuffer<float> materials;  // 8 words: base color rgb, emission rgb, 2 pad
+StructuredBuffer<float> materials;  // 12 words: base color rgb, emission rgb, metallic, roughness, transmission, ior, 2 pad
 StructuredBuffer<uint> lights;      // 8 words: kind (0 point, 1 directional), color rgb, intensity, position or travel direction xyz (floats as bits)
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
                                     // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb
@@ -46,14 +46,68 @@ float3 transformPoint(uint base, float3 p)
     return r;
 }
 
-float3 cosineHemisphere(float3 n, float u1, float u2)
+float3 cosineLocal(float u1, float u2)
 {
-    float3 a = abs(n.x) > 0.9 ? float3(0, 1, 0) : float3(1, 0, 0);
-    float3 b = normalize(cross(n, a));
-    float3 t = cross(b, n);
     float r = sqrt(u1);
     float phi = 2.0 * PI * u2;
-    return normalize(t * (r * cos(phi)) + b * (r * sin(phi)) + n * sqrt(max(0.0, 1.0 - u1)));
+    return float3(r * cos(phi), r * sin(phi), sqrt(max(0.0, 1.0 - u1)));
+}
+
+float G1(float cosT, float alpha)
+{
+    float c2 = cosT * cosT;
+    float tan2 = (1.0 - c2) / max(c2, 1.0e-8);
+    return 2.0 / (1.0 + sqrt(1.0 + alpha * alpha * tan2));
+}
+
+float D(float hz, float alpha)
+{
+    float a2 = alpha * alpha;
+    float d = hz * hz * (a2 - 1.0) + 1.0;
+    return a2 / (PI * d * d);
+}
+
+float3 schlick(float3 f0, float c)
+{
+    float m = 1.0 - saturate(c);
+    float m2 = m * m;
+    return f0 + (1.0 - f0) * (m2 * m2 * m);
+}
+
+// Unpolarized dielectric Fresnel. eta = n_transmitted / n_incident; 1 at total internal reflection.
+float fresnelDielectric(float cosi, float eta)
+{
+    float s2 = (1.0 - cosi * cosi) / (eta * eta);
+    if (s2 >= 1.0)
+        return 1.0;
+    float cost = sqrt(1.0 - s2);
+    float rs = (cosi - eta * cost) / (cosi + eta * cost);
+    float rp = (eta * cosi - cost) / (eta * cosi + cost);
+    return 0.5 * (rs * rs + rp * rp);
+}
+
+void basis(float3 n, out float3 t, out float3 b)
+{
+    float3 a = abs(n.x) > 0.9 ? float3(0, 1, 0) : float3(1, 0, 0);
+    b = normalize(cross(n, a));
+    t = cross(b, n);
+}
+
+// Visible-normal sampling of GGX (Heitz 2018) in the local frame (z = normal), wo.z > 0.
+float3 sampleVndf(float3 wo, float alpha, float u1, float u2)
+{
+    float3 vh = normalize(float3(alpha * wo.x, alpha * wo.y, wo.z));
+    float lensq = vh.x * vh.x + vh.y * vh.y;
+    float3 t1 = lensq > 0.0 ? float3(-vh.y, vh.x, 0.0) * rsqrt(lensq) : float3(1, 0, 0);
+    float3 t2 = cross(vh, t1);
+    float r = sqrt(u1);
+    float phi = 2.0 * PI * u2;
+    float a = r * cos(phi);
+    float b = r * sin(phi);
+    float s = 0.5 * (1.0 + vh.z);
+    b = (1.0 - s) * sqrt(1.0 - a * a) + s * b;
+    float3 nh = a * t1 + b * t2 + sqrt(max(0.0, 1.0 - a * a - b * b)) * vh;
+    return normalize(float3(alpha * nh.x, alpha * nh.y, max(0.0, nh.z)));
 }
 
 bool occluded(float3 o, float3 d, float tmax)
@@ -129,17 +183,33 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         float3 p0 = transformPoint(inst + 4, vertexPos(indices[tri] + vo));
         float3 p1 = transformPoint(inst + 4, vertexPos(indices[tri + 1] + vo));
         float3 p2 = transformPoint(inst + 4, vertexPos(indices[tri + 2] + vo));
-        float3 n = normalize(cross(p1 - p0, p2 - p0));
-        if (dot(n, dir) > 0.0)
-            n = -n; // double-sided
+        // Winding gives the outward normal (glTF is counter-clockwise); `n` faces the viewer.
+        float3 nOut = normalize(cross(p1 - p0, p2 - p0));
+        float3 wo = -dir;
+        bool outside = dot(nOut, wo) > 0.0;
+        float3 n = outside ? nOut : -nOut;
+        float pHitT = q.CommittedRayT();
+        float3 hit = org + dir * pHitT;
         // shortcut: fixed 1e-4 ray offset assumes unit-scale scenes, scale it with scene bounds later.
-        float3 p = org + dir * q.CommittedRayT() + n * 1.0e-4;
+        float3 p = hit + n * 1.0e-4;
 
-        uint mi = instances[inst + 2] * 8;
+        uint mi = instances[inst + 2] * 12;
         float3 albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
         radiance += thr * float3(materials[mi + 3], materials[mi + 4], materials[mi + 5]);
+        float metallic = materials[mi + 6];
+        float rough = materials[mi + 7];
+        float transmission = materials[mi + 8];
+        float ior = materials[mi + 9];
+        float alpha = max(rough * rough, 1.0e-3);
+        float eta = outside ? ior : 1.0 / ior; // relative index n_transmitted / n_incident
 
-        // Next-event estimation for delta lights (no MIS needed: they cannot be hit by sampling).
+        float3 T, B;
+        basis(n, T, B);
+        float3 woL = float3(dot(wo, T), dot(wo, B), max(dot(wo, n), 1.0e-4));
+        float fSel = fresnelDielectric(woL.z, ior); // chance the dielectric base lobe reflects specularly
+
+        // Next-event estimation for delta lights (no MIS: sampling can never hit them). Includes the
+        // reflective lobes only; rough transmission of a delta light is not evaluated.
         for (uint li = 0; li < lightCount; li++)
         {
             uint o = li * 8;
@@ -164,13 +234,75 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
             }
             float c = dot(n, wi);
             if (c > 0.0 && !occluded(p, wi, dist - 1.0e-3))
-                radiance += thr * albedo * (c / PI) * li_;
+            {
+                float3 wiL = float3(dot(wi, T), dot(wi, B), c);
+                float3 hh = normalize(woL + wiL);
+                float woh = max(dot(woL, hh), 0.0);
+                // f * cos(wi): the cosine cancels against the 1 / (4 cos wi cos wo) of the microfacet BRDF.
+                float core = D(hh.z, alpha) * G1(woL.z, alpha) * G1(wiL.z, alpha) / (4.0 * woL.z);
+                float3 f = metallic * schlick(albedo, woh) * core
+                    + (1.0 - metallic) * (transmission * fresnelDielectric(woh, eta) + (1.0 - transmission) * fresnelDielectric(woh, ior)) * core
+                    + (1.0 - metallic) * (1.0 - transmission) * (1.0 - fSel) * albedo * (c / PI);
+                radiance += thr * f * li_;
+            }
         }
 
-        // Cosine-sampled bounce: pdf = cos / pi cancels the Lambert BRDF, leaving the albedo.
-        org = p;
-        dir = cosineHemisphere(n, rng.next(), rng.next());
-        thr *= albedo;
+        // Sample one lobe by its weight, then apply that lobe's own sampling weight, which already
+        // carries f * cos / pdf: metal GGX, rough dielectric transmission, or dielectric base.
+        float lobe = rng.next();
+        float u1 = rng.next();
+        float u2 = rng.next();
+        float u3 = rng.next();
+        float3 wiL = float3(0, 0, 1);
+        float3 w = float3(1.0);
+        bool ok = true;
+        if (lobe < metallic)
+        {
+            float3 h = sampleVndf(woL, alpha, u1, u2);
+            float woh = dot(woL, h);
+            wiL = 2.0 * woh * h - woL;
+            ok = wiL.z > 0.0;
+            w = schlick(albedo, woh) * G1(max(wiL.z, 0.0), alpha);
+        }
+        else if (lobe < metallic + (1.0 - metallic) * transmission)
+        {
+            float3 h = sampleVndf(woL, alpha, u1, u2);
+            float woh = dot(woL, h);
+            if (u3 < fresnelDielectric(woh, eta))
+            {
+                wiL = 2.0 * woh * h - woL;
+                ok = wiL.z > 0.0;
+                w = float3(G1(max(wiL.z, 0.0), alpha));
+            }
+            else
+            {
+                float r = 1.0 / eta;
+                float k = 1.0 - r * r * (1.0 - woh * woh);
+                wiL = -woL * r + (r * woh - sqrt(max(k, 0.0))) * h;
+                ok = wiL.z < 0.0 && k > 0.0;
+                // Radiance scales by (n_incident / n_transmitted)^2 across the interface.
+                w = albedo * G1(max(-wiL.z, 0.0), alpha) * r * r;
+            }
+        }
+        else if (u3 < fSel)
+        {
+            float3 h = sampleVndf(woL, alpha, u1, u2);
+            float woh = dot(woL, h);
+            wiL = 2.0 * woh * h - woL;
+            ok = wiL.z > 0.0;
+            w = float3(fresnelDielectric(woh, ior) / fSel * G1(max(wiL.z, 0.0), alpha));
+        }
+        else
+        {
+            wiL = cosineLocal(u1, u2);
+            w = albedo;
+        }
+        if (!ok)
+            break;
+
+        dir = normalize(wiL.x * T + wiL.y * B + wiL.z * n);
+        org = hit + n * (wiL.z > 0.0 ? 1.0e-4 : -1.0e-4);
+        thr *= w;
 
         if (depth >= 2)
         {
@@ -180,6 +312,9 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
             thr /= pr;
         }
     }
+
+    if (any(isnan(radiance)) || any(isinf(radiance)))
+        radiance = float3(0.0); // one bad sample must not poison the running sum
 
     uint o = 3 * pixel;
     accum[o] += radiance.x;

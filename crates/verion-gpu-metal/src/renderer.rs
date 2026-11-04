@@ -17,7 +17,7 @@ const PATHTRACE_MSL: &str = include_str!("../shaders/pathtrace.metal");
 
 /// Path length limit. Radiance beyond it is dropped, so closed furnaces read slightly dark.
 const MAX_DEPTH: u32 = 8;
-const MATERIAL_WORDS: usize = 8;
+const MATERIAL_WORDS: usize = 12;
 const LIGHT_WORDS: usize = 8;
 
 /// Words per record in the instance table; must match `shaders/normals.slang`.
@@ -121,8 +121,22 @@ impl Renderer {
 
         let mut materials = Vec::with_capacity(scene.materials().len() * MATERIAL_WORDS);
         for m in scene.materials() {
-            let (c, e) = (m.base.base_color, m.base.emission);
-            materials.extend([c[0], c[1], c[2], e[0], e[1], e[2], 0.0, 0.0]);
+            let b = &m.base;
+            let (c, e) = (b.base_color, b.emission);
+            materials.extend([
+                c[0],
+                c[1],
+                c[2],
+                e[0],
+                e[1],
+                e[2],
+                b.metallic,
+                b.roughness,
+                b.transmission,
+                b.ior,
+                0.0,
+                0.0,
+            ]);
         }
 
         // Environment lights are summed into one uniform sky; the rest go to the NEE table.
