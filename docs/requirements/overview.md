@@ -100,6 +100,7 @@ Verion は、Blender / Cinema 4D / Maya などの DCC から使える GPU レン
 | REQ-PERF-003 | 規模の下限 | Must | Draft |
 | REQ-PERF-004 | Octane 比較 | Should | Draft |
 | REQ-PERF-005 | 研究目標（保証しない） | Could | Draft |
+| REQ-PERF-006 | Texture Out-of-Core | Should | Draft |
 | REQ-INFRA-001 | Cargo workspace とクレート構成 | Must | Draft |
 | REQ-INFRA-002 | CI | Should | Draft |
 | REQ-INFRA-003 | ライセンス方針と依存検査 | Must | Draft |
