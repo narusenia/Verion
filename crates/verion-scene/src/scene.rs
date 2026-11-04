@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{Material, Mesh};
+use crate::{Image, Material, Mesh};
 
 /// Row-major 3x4 affine transform.
 pub type Transform = [[f32; 4]; 3];
@@ -19,11 +19,13 @@ pub struct MaterialId(u32);
 pub struct InstanceId(u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LightId(u32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImageId(u32);
 
 macro_rules! id_index {
     ($($t:ty),*) => {$(impl $t { pub fn index(self) -> usize { self.0 as usize } })*};
 }
-id_index!(MeshId, MaterialId, InstanceId, LightId);
+id_index!(MeshId, MaterialId, InstanceId, LightId, ImageId);
 
 /// A placed copy of a mesh with a material.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -45,8 +47,11 @@ pub enum Light {
         color: [f32; 3],
         intensity: f32,
     },
-    /// Uniform sky. HDRI images arrive with REQ-CORE-004.
+    /// Uniform sky.
     Environment { color: [f32; 3] },
+    /// Latitude-longitude HDRI. +y is up and the image center faces -z. The image id must come from
+    /// this scene; consumers report a dangling id as an error.
+    EnvironmentMap { image: ImageId, scale: f32 },
 }
 
 /// Perspective thin-lens camera.
@@ -104,6 +109,7 @@ impl std::error::Error for SceneError {}
 pub struct Scene {
     meshes: Vec<Mesh>,
     materials: Vec<Material>,
+    images: Vec<Image>,
     instances: Vec<Instance>,
     lights: Vec<Light>,
     camera: Camera,
@@ -125,6 +131,10 @@ impl Scene {
 
     pub fn materials(&self) -> &[Material] {
         &self.materials
+    }
+
+    pub fn images(&self) -> &[Image] {
+        &self.images
     }
 
     pub fn instances(&self) -> &[Instance] {
@@ -159,6 +169,12 @@ impl Scene {
     pub fn set_material(&mut self, id: MaterialId, material: Material) {
         self.revisions.material += 1;
         self.materials[id.index()] = material;
+    }
+
+    /// Images do not change any revision until a light or material refers to them.
+    pub fn add_image(&mut self, image: Image) -> ImageId {
+        self.images.push(image);
+        ImageId(self.images.len() as u32 - 1)
     }
 
     pub fn add_instance(&mut self, instance: Instance) -> Result<InstanceId, SceneError> {

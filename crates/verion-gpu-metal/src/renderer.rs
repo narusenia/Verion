@@ -208,6 +208,8 @@ impl Renderer {
                     color,
                     intensity,
                 } => (1, color, intensity, direction),
+                // Environment maps are handled in the next commit.
+                Light::EnvironmentMap { .. } => continue,
                 Light::Environment { color } => {
                     sky.iter_mut().zip(color).for_each(|(s, c)| *s += c);
                     continue;
