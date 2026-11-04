@@ -297,9 +297,8 @@ mod imp {
                     gy += -(y - cy) * g;
                 }
                 // Slope toward +u is gx; toward the image's up direction (+Y) it is -gy.
-                // Peak tilt is about 7 degrees, below the camera's grazing view of the floor: a normal
-                // bent away from the viewer is treated differently by Verion and Mitsuba (see M1 README).
-                let n = [-0.02 * gx, 0.02 * gy, 1.0];
+                // Peak tilt is about 35 degrees, past the camera's grazing view of the floor.
+                let n = [-0.08 * gx, 0.08 * gy, 1.0];
                 let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
                 px.push(n.map(|c| c / len * 0.5 + 0.5));
             }
