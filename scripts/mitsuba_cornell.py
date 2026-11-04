@@ -1,11 +1,12 @@
 """Renders the render_ppm example scene with Mitsuba 3 and compares it with Verion's render.exr.
 
 Usage: mise exec -- ~/.local/share/mise/installs/pipx-mitsuba/3.7.1/mitsuba/bin/python \
-           scripts/mitsuba_cornell.py [out_dir] [width] [height] [spp] [walls|hdri]
+           scripts/mitsuba_cornell.py [out_dir] [width] [height] [spp] [walls|hdri|spot|normalmap]
 out_dir must hold the render.exr written by the example (cargo run --release -p verion-gpu-metal
 --example render_ppm -- out_dir w h spp). Writes out_dir/mitsuba.exr.
 `walls` leaves out the spheres, `hdri` swaps the box for a floor under out_dir/env.exr (pass the same
-mode to the example, which writes env.exr).
+mode to the example, which writes env.exr); `spot` uses the same floor with one spot light, `normalmap` adds the
+example's normal.exr on a 6x6 floor.
 Differences from Verion: Mitsuba's analytic spheres versus Verion's icospheres.
 """
 
@@ -81,11 +82,25 @@ desc = (
 mode = sys.argv[5] if len(sys.argv) > 5 else ""
 if mode == "walls":
     del desc["gold"], desc["glass"]
-elif mode == "hdri":
+elif mode in ("hdri", "spot", "normalmap"):
     for k in ("ceiling", "back", "left", "right", "light", "light_back", "point"):
         del desc[k]
     desc["floor"] = quad(grey, [0, -2, 0], [1, 0, 0], -90, half=20.0)
     # Mitsuba's lat-long mapping is Verion's turned 180 degrees about +y (found by rendering a sun).
+if mode in ("spot", "normalmap"):
+    # Half-angles 0.5 / 0.49 rad as in the example; the thin falloff band makes the edge near hard.
+    desc["spot"] = {"type": "spot", "cutoff_angle": math.degrees(0.5), "beam_width": math.degrees(0.49),
+                    "intensity": {"type": "rgb", "value": [40.0, 38.0, 36.0]},
+                    "to_world": T().look_at(origin=[2, 4, 3], target=[0, -1.3, 0], up=[0, 1, 0])}
+if mode == "normalmap":
+    desc["floor"] = quad(
+        {"type": "normalmap",
+         # Mitsuba's v runs up the image, Verion's down.
+         "normalmap": {"type": "bitmap", "raw": True, "filename": str(out / "normal.exr"),
+                        "to_uv": T().translate([0, 1, 0]).scale([1, -1, 1])},
+         "bsdf": grey},
+        [0, -2, 0], [1, 0, 0], -90, half=3.0)
+elif mode == "hdri":
     desc["env"] = {"type": "envmap", "filename": str(out / "env.exr"),
                    "to_world": T().rotate([0, 1, 0], 180)}
 scene = mi.load_dict(desc)
@@ -120,5 +135,6 @@ for by in range(n):
         idx = [(by * bh + y) * w + bx * bw + x for y in range(bh) for x in range(bw)]
         a = mean([c[i] for c in mine for i in idx])
         b = mean([c[i] for c in ref for i in idx])
-        worst_block = max(worst_block, abs(b / a - 1))
-print(f"worst {n}x{n} block mean deviation {worst_block:.2%}")
+        if max(a, b) > 0.05 * mean(mm):  # skip near-black blocks (background, thin cone edges)
+            worst_block = max(worst_block, abs(b / a - 1) if a else float("inf"))
+print(f"worst {n}x{n} block mean deviation (blocks above 5% of mean radiance) {worst_block:.2%}")

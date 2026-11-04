@@ -1,7 +1,9 @@
 //! Dev tool: renders a small test scene (Cornell-style box, metal and glass spheres) to PPM and EXR files.
-//! Usage: cargo run --release -p verion-gpu-metal --example render_ppm -- [out_dir] [width] [height] [spp] [walls|hdri]
+//! Usage: cargo run --release -p verion-gpu-metal --example render_ppm -- [out_dir] [width] [height] [spp] [walls|hdri|spot|normalmap]
 //! `walls` leaves out the spheres (diffuse walls, area light and point light only). `hdri` renders
 //! the spheres on a large floor lit by a procedural environment map (written to env.exr).
+//! `spot` lights the same open scene with one hard-edged spot light. `normalmap` lights it the same
+//! way and puts a procedural normal map on the floor (written to normal.exr).
 #[cfg(target_os = "macos")]
 mod imp {
     use std::{collections::HashMap, fs, io::Write, path::Path};
@@ -9,7 +11,7 @@ mod imp {
     use verion_gpu_metal::{MetalContext, Renderer};
     use verion_render_io::{ExrFrame, RenderInfo, load_hdri, write_exr};
     use verion_scene::{
-        BaseBsdf, Camera, IDENTITY, Instance, Light, Material, Mesh, OutputTransform, Scene,
+        BaseBsdf, Camera, IDENTITY, Image, Instance, Light, Material, Mesh, OutputTransform, Scene,
     };
 
     fn diffuse(c: [f32; 3]) -> Material {
@@ -118,7 +120,10 @@ mod imp {
     }
 
     fn scene(mode: &str) -> Scene {
-        let (walls_only, hdri) = (mode == "walls", mode == "hdri");
+        let walls_only = mode == "walls";
+        let nmap = mode == "normalmap";
+        let spot = mode == "spot" || nmap;
+        let open = mode == "hdri" || spot;
         let mut s = Scene::new();
         let add = |s: &mut Scene, mesh: Mesh, material: Material, transform| {
             let (mesh, material) = (s.add_mesh(mesh), s.add_material(material));
@@ -131,14 +136,44 @@ mod imp {
         };
         let (lo, hi) = (-2.0, 2.0);
         let grey = [0.75; 3];
-        let f = if hdri { 20.0 } else { 2.0 };
-        add(
-            &mut s,
-            quad([-f, lo, -f], [f, lo, -f], [f, lo, f], [-f, lo, f]),
-            diffuse(grey),
-            IDENTITY,
-        ); // floor
-        if !hdri {
+        let f = if nmap {
+            3.0
+        } else if open {
+            20.0
+        } else {
+            2.0
+        };
+        let (floor, floor_material) = if nmap {
+            let image = Image::new(NMAP_SIZE, NMAP_SIZE, normal_map_pixels()).unwrap();
+            let base = BaseBsdf {
+                base_color: grey,
+                ior: 1.0,
+                normal_texture: Some(s.add_image(image)),
+                ..BaseBsdf::default()
+            };
+            // u runs along +x and v along +z, so the image reads as seen from the camera.
+            let mesh = Mesh::new(
+                vec![[-f, lo, -f], [f, lo, -f], [f, lo, f], [-f, lo, f]],
+                Some(vec![[0.0, 1.0, 0.0]; 4]),
+                Some(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
+                vec![0, 2, 1, 0, 3, 2],
+            )
+            .unwrap();
+            (
+                mesh,
+                Material {
+                    base,
+                    ..Material::default()
+                },
+            )
+        } else {
+            (
+                quad([-f, lo, -f], [f, lo, -f], [f, lo, f], [-f, lo, f]),
+                diffuse(grey),
+            )
+        };
+        add(&mut s, floor, floor_material, IDENTITY); // floor
+        if !open {
             add(
                 &mut s,
                 quad([lo, hi, lo], [hi, hi, lo], [hi, hi, hi], [lo, hi, hi]),
@@ -214,14 +249,61 @@ mod imp {
         };
         cam.transform[2][3] = 6.0;
         s.set_camera(cam);
-        if !hdri {
+        if !open {
             s.add_light(Light::Point {
                 position: [0.0, 1.0, 1.5],
                 color: [1.0, 0.95, 0.9],
                 intensity: 1.5,
             });
         }
+        if spot {
+            s.add_light(Light::Spot {
+                position: [2.0, 4.0, 3.0],
+                direction: [-2.0, -5.3, -3.0],
+                color: [1.0, 0.95, 0.9],
+                intensity: 40.0,
+                inner_cone: 0.49,
+                outer_cone: 0.5,
+            });
+        }
         s
+    }
+
+    const NMAP_SIZE: u32 = 128;
+
+    /// Tangent-space normals (glTF: +Y up the image) of four Gaussian bumps, deliberately asymmetric
+    /// so a mirrored or rotated lookup shows up.
+    fn normal_map_pixels() -> Vec<[f32; 3]> {
+        let bumps = [
+            (0.3f32, 0.3f32, 1.0f32, 0.10f32),
+            (0.7, 0.35, -1.0, 0.08),
+            (0.5, 0.7, 1.0, 0.12),
+            (0.2, 0.75, -0.8, 0.07),
+        ];
+        let mut px = Vec::with_capacity((NMAP_SIZE * NMAP_SIZE) as usize);
+        for j in 0..NMAP_SIZE {
+            for i in 0..NMAP_SIZE {
+                let (x, y) = (
+                    (i as f32 + 0.5) / NMAP_SIZE as f32,
+                    (j as f32 + 0.5) / NMAP_SIZE as f32,
+                );
+                // Height gradient in image coordinates (y grows downward).
+                let (mut gx, mut gy) = (0.0, 0.0);
+                for (cx, cy, a, sigma) in bumps {
+                    let g = a
+                        * (-((x - cx).powi(2) + (y - cy).powi(2)) / (2.0 * sigma * sigma)).exp()
+                        / (sigma * sigma);
+                    gx += -(x - cx) * g;
+                    gy += -(y - cy) * g;
+                }
+                // Slope toward +u is gx; toward the image's up direction (+Y) it is -gy.
+                // Peak tilt is about 35 degrees, past the camera's grazing view of the floor.
+                let n = [-0.08 * gx, 0.08 * gy, 1.0];
+                let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+                px.push(n.map(|c| c / len * 0.5 + 0.5));
+            }
+        }
+        px
     }
 
     /// Smooth sky gradient plus a wide sun lobe, so nearest and bilinear lookups agree closely.
@@ -288,6 +370,21 @@ mod imp {
             let image = load_hdri(&path, scene.working_space()).expect("load env");
             let image = scene.add_image(image);
             scene.add_light(Light::EnvironmentMap { image, scale: 1.0 });
+        }
+        if mode == "normalmap" {
+            let map = ExrFrame {
+                width: NMAP_SIZE,
+                height: NMAP_SIZE,
+                working_space: scene.working_space(),
+                beauty: &normal_map_pixels(),
+                normal: None,
+                info: RenderInfo {
+                    physical: true,
+                    samples: 0,
+                },
+            };
+            let linear = OutputTransform::linear(scene.working_space());
+            write_exr(&dir.join("normal.exr"), &map, &linear).expect("write normal map");
         }
         let ctx = MetalContext::new().expect("Metal ray tracing is required");
         let renderer = Renderer::new(&ctx, &scene).expect("renderer");
