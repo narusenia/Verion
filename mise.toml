@@ -45,6 +45,10 @@ run = "lefthook install"
 description = "Regenerate the committed MSL from shaders/*.slang"
 run = "scripts/shaders.sh"
 
+[tasks.crosscheck]
+description = "Mitsuba 3 cross-check of the example scenes (needs a Metal GPU; not run in CI)"
+run = "scripts/crosscheck.sh"
+
 [tasks."shaders:check"]
 description = "Fail when the committed MSL is stale (needs slangc; not run in CI)"
 run = "scripts/shaders.sh check"
