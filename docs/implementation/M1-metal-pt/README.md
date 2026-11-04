@@ -9,7 +9,7 @@
 | 2 | workspace・mise・CI・deny の雛形、GPU CI の実行環境を決める | REQ-INFRA-001 / 002 / 003 | 済（CI は GPU 不要の検査のみ。GPU テストは開発機で実行） |
 | 3 | Metal の Device / Queue / BLAS / TLAS | REQ-GPU-001 / 003 | 進行中（M5 で動作確認済み。別環境での確認が未了） |
 | 4 | Scene IR と revision | REQ-CORE-001 | 済 |
-| 5 | glTF 入力 | REQ-IO-001 | 未着手 |
+| 5 | glTF 入力 | REQ-IO-001 | 進行中（テクスチャ読み込みは項目 6 で追加） |
 | 6 | BSDF・Integrator・テクスチャ・HDRI・ライト | REQ-CORE-002 / 003 / 004 | 未着手 |
 | 7 | カラーマネジメント | REQ-CORE-005 | 未着手 |
 | 8 | EXR 多チャンネル出力 | REQ-IO-003 | 未着手 |

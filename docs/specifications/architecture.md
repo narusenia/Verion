@@ -13,6 +13,7 @@ verion-material ─┘
 - `verion-scene`、`verion-geometry`、`verion-material` は GPU API に依存しない。入力形式（glTF など）の型も公開 API に出さない
 - `verion-gpu` が Backend の共通の契約（`RayTracingBackend`、`NeuralBackend`、Capabilities）を持つ。抽象は最小限にし、バッファや同期の違いは隠しすぎない
 - `verion-gpu-metal` と `verion-gpu-vulkan` は互いに依存しない。GPU API を直接呼ぶので、`unsafe` を使ってよいのはこの 2 つのクレートだけ
+- `verion-render-io` が入力（glTF）と出力（画像）を扱い、`verion-scene` に依存する。glTF の型はこのクレートの外へ出さない。`verion-scene` は逆に `verion-render-io` を知らない
 - シェーダーは Slang で `shaders/` に置き、Backend ごとに MSL と SPIR-V へ変換する
 
 ## 検査
