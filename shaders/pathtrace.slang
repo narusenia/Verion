@@ -463,6 +463,11 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                 }
             }
         }
+        // A shading normal bent away from the viewer would put wo below the lobe's horizon and zero the
+        // diffuse term (the Fresnel weight reaches 1); keep it a small angle on the viewer's side.
+        float woN = dot(n, wo);
+        if (woN < 0.05)
+            n = normalize(n + wo * (0.05 - woN));
 
         float3 le = float3(materials[mi + 3], materials[mi + 4], materials[mi + 5]) * texEmission;
         if (any(le > 0.0))
