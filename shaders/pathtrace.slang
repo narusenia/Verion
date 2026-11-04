@@ -20,6 +20,7 @@ StructuredBuffer<float> envCond;    // cumulative probability per column within 
 StructuredBuffer<float> uvs;        // uv per vertex, all meshes concatenated (zero when a mesh has none)
 StructuredBuffer<float> texels;     // rgb texels, each texture's mip chain level 0 first
 StructuredBuffer<uint> texInfo;     // 4 words per texture: texel offset, width, height, mip level count
+StructuredBuffer<float> vnormals;   // xyz per vertex, all meshes concatenated (zero when a mesh has none)
 
 static const float PI = 3.14159265358979;
 
@@ -54,6 +55,20 @@ float3 transformPoint(uint base, float3 p)
     }
     return r;
 }
+
+// Object-space normal to world space: inverse transpose of the 3x3 part, written with cofactors
+// (rows of the inverse transpose are cross products of the other two rows, divided by det).
+float3 transformNormal(uint base, float3 n)
+{
+    float3 r0 = float3(asfloat(instances[base]), asfloat(instances[base + 1]), asfloat(instances[base + 2]));
+    float3 r1 = float3(asfloat(instances[base + 4]), asfloat(instances[base + 5]), asfloat(instances[base + 6]));
+    float3 r2 = float3(asfloat(instances[base + 8]), asfloat(instances[base + 9]), asfloat(instances[base + 10]));
+    float3 c0 = cross(r1, r2);
+    float s = dot(r0, c0) < 0.0 ? -1.0 : 1.0; // a mirroring transform flips the cofactor direction
+    return s * float3(dot(c0, n), dot(cross(r2, r0), n), dot(cross(r0, r1), n));
+}
+
+float3 vertexNormal(uint v) { return float3(vnormals[3 * v], vnormals[3 * v + 1], vnormals[3 * v + 2]); }
 
 float3 cosineLocal(float u1, float u2)
 {
@@ -369,16 +384,39 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         float3 p0 = transformPoint(inst + 4, vertexPos(indices[tri] + vo));
         float3 p1 = transformPoint(inst + 4, vertexPos(indices[tri + 1] + vo));
         float3 p2 = transformPoint(inst + 4, vertexPos(indices[tri + 2] + vo));
-        // Winding gives the outward normal (glTF is counter-clockwise); `n` faces the viewer.
+        // Winding gives the outward normal (glTF is counter-clockwise); `ng` faces the viewer.
         float3 nOut = normalize(cross(p1 - p0, p2 - p0));
         float3 wo = -dir;
         bool outside = dot(nOut, wo) > 0.0;
-        float3 n = outside ? nOut : -nOut;
+        float3 ng = outside ? nOut : -nOut;
         float pHitT = q.CommittedRayT();
         pathLen += pHitT;
         float3 hit = org + dir * pHitT;
         // shortcut: fixed 1e-4 ray offset assumes unit-scale scenes, scale it with scene bounds later.
-        float3 p = hit + n * 1.0e-4;
+        float3 p = hit + ng * 1.0e-4;
+
+        // Barycentric weights of vertices 1 and 2 at the hit.
+        float3 e1 = p1 - p0;
+        float3 e2 = p2 - p0;
+        float3 e3 = hit - p0;
+        float d11 = dot(e1, e1);
+        float d12 = dot(e1, e2);
+        float d22 = dot(e2, e2);
+        float den = max(d11 * d22 - d12 * d12, 1.0e-20);
+        float b1 = (d22 * dot(e3, e1) - d12 * dot(e3, e2)) / den;
+        float b2 = (d11 * dot(e3, e2) - d12 * dot(e3, e1)) / den;
+
+        // Shading normal: interpolated vertex normals, on the same side as the geometric normal.
+        // Meshes without normals (zero vectors) shade with the geometric normal.
+        float3 nsObj = (1.0 - b1 - b2) * vertexNormal(indices[tri] + vo) + b1 * vertexNormal(indices[tri + 1] + vo) + b2 * vertexNormal(indices[tri + 2] + vo);
+        float3 ns = nOut;
+        if (dot(nsObj, nsObj) > 1.0e-12)
+        {
+            ns = normalize(transformNormal(inst + 4, nsObj));
+            if (dot(ns, nOut) < 0.0)
+                ns = -ns;
+        }
+        float3 n = outside ? ns : -ns;
 
         uint mi = instances[inst + 2] * 16;
         float3 albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
@@ -393,15 +431,6 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
             float2 uv0 = float2(uvs[2 * (indices[tri] + vo)], uvs[2 * (indices[tri] + vo) + 1]);
             float2 uv1 = float2(uvs[2 * (indices[tri + 1] + vo)], uvs[2 * (indices[tri + 1] + vo) + 1]);
             float2 uv2 = float2(uvs[2 * (indices[tri + 2] + vo)], uvs[2 * (indices[tri + 2] + vo) + 1]);
-            float3 e1 = p1 - p0;
-            float3 e2 = p2 - p0;
-            float3 e3 = hit - p0;
-            float d11 = dot(e1, e1);
-            float d12 = dot(e1, e2);
-            float d22 = dot(e2, e2);
-            float den = max(d11 * d22 - d12 * d12, 1.0e-20);
-            float b1 = (d22 * dot(e3, e1) - d12 * dot(e3, e2)) / den;
-            float b2 = (d11 * dot(e3, e2) - d12 * dot(e3, e1)) / den;
             float2 uv = uv0 + b1 * (uv1 - uv0) + b2 * (uv2 - uv0);
             float2 d1 = uv1 - uv0;
             float2 d2 = uv2 - uv0;
@@ -599,7 +628,11 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         qPrev = refracted ? 0.0 : reflectivePdf(surf, woL, wiL);
 
         dir = normalize(wiL.x * T + wiL.y * B + wiL.z * n);
-        org = hit + n * (wiL.z > 0.0 ? 1.0e-4 : -1.0e-4);
+        // A shading normal can bend a sample through the true surface; drop it rather than leak.
+        float side = dot(dir, ng);
+        if (refracted ? side >= 0.0 : side <= 0.0)
+            break;
+        org = hit + ng * (side > 0.0 ? 1.0e-4 : -1.0e-4);
         thr *= w;
 
         if (depth >= 2)

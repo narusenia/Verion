@@ -204,6 +204,7 @@ pub struct Renderer {
     emitter_count: u32,
     env: EnvMap,
     uvs: Obj<dyn MTLBuffer>,
+    vnormals: Obj<dyn MTLBuffer>,
     texels: Obj<dyn MTLBuffer>,
     tex_info: Obj<dyn MTLBuffer>,
     sky: [f32; 3],
@@ -222,6 +223,7 @@ impl Renderer {
         let mut positions: Vec<f32> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
         let mut uvs: Vec<f32> = Vec::new();
+        let mut vnormals: Vec<f32> = Vec::new();
         let mut blases = Vec::new();
         let mut offsets = Vec::new(); // (vertex offset, index offset) per mesh
         for mesh in scene.meshes() {
@@ -230,6 +232,10 @@ impl Renderer {
             match mesh.uvs() {
                 Some(uv) => uvs.extend(uv.iter().flatten()),
                 None => uvs.extend(std::iter::repeat_n(0.0, mesh.positions().len() * 2)),
+            }
+            match mesh.normals() {
+                Some(n) => vnormals.extend(n.iter().flatten()),
+                None => vnormals.extend(std::iter::repeat_n(0.0, mesh.positions().len() * 3)),
             }
             indices.extend_from_slice(mesh.indices());
             blases.push(Blas::build(ctx, mesh.positions(), mesh.indices())?);
@@ -414,6 +420,7 @@ impl Renderer {
             emitter_count: powers.len() as u32,
             env: build_env(ctx, scene)?,
             uvs: upload(ctx, &uvs)?,
+            vnormals: upload(ctx, &vnormals)?,
             texels: upload(ctx, &texels)?,
             tex_info: upload(ctx, &tex_info)?,
             emitters: upload(ctx, &emitters)?,
@@ -581,7 +588,7 @@ impl Renderer {
             enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
         }
         // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional, uvs, texels, texInfo). Dispatches in one encoder run in
+        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional, uvs, texels, texInfo, vnormals). Dispatches in one encoder run in
         // order, so the `+=` on `accum` never races.
         unsafe {
             enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
@@ -599,6 +606,7 @@ impl Renderer {
             enc.setBuffer_offset_atIndex(Some(&self.uvs), 0, 13);
             enc.setBuffer_offset_atIndex(Some(&self.texels), 0, 14);
             enc.setBuffer_offset_atIndex(Some(&self.tex_info), 0, 15);
+            enc.setBuffer_offset_atIndex(Some(&self.vnormals), 0, 16);
             for k in 0..samples {
                 params[6] = acc.samples + k;
                 enc.setBytes_length_atIndex(

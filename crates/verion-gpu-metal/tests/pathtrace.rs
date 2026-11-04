@@ -230,6 +230,55 @@ fn directional_light_direct_lighting_matches_lambert() {
     assert!((lit - 1.0).abs() < 0.01, "{lit}");
 }
 
+/// Floor lit by a sun straight down, every vertex carrying `normal`; returns the centre radiance.
+fn shaded_floor(ctx: &MetalContext, normal: [f32; 3], transform: [[f32; 4]; 3]) -> f32 {
+    let mut s = Scene::new();
+    let h = 5.0;
+    let mesh = Mesh::new(
+        vec![[-h, -h, 0.0], [h, -h, 0.0], [h, h, 0.0], [-h, h, 0.0]],
+        Some(vec![normal; 4]),
+        None,
+        vec![0, 1, 2, 0, 2, 3],
+    )
+    .unwrap();
+    let mesh = s.add_mesh(mesh);
+    let mat = s.add_material(material([1.0; 3], [0.0; 3]));
+    s.add_instance(Instance {
+        mesh,
+        material: mat,
+        transform,
+    })
+    .unwrap();
+    s.add_light(Light::Directional {
+        direction: [0.0, 0.0, -1.0],
+        color: [1.0; 3],
+        intensity: std::f32::consts::PI,
+    });
+    s.set_camera(camera_at_z(3.0));
+    center_pixel(ctx, &s)
+}
+
+#[test]
+fn vertex_normals_drive_the_shading() {
+    let Some(ctx) = context() else { return };
+    // Normal tilted 60 degrees from the geometric one: L = cos(60) = 0.5 instead of 1.
+    let tilted = shaded_floor(&ctx, [0.866_025_4, 0.0, 0.5], IDENTITY);
+    assert!((tilted - 0.5).abs() < 0.01, "{tilted}");
+}
+
+#[test]
+fn vertex_normals_follow_a_non_uniform_scale() {
+    let Some(ctx) = context() else { return };
+    // Stretching x by 2 turns (1, 0, 1) into (1/2, 0, 1) as a normal: cos = 1 / sqrt(1.25).
+    let scale = [
+        [2.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+    ];
+    let got = shaded_floor(&ctx, [1.0, 0.0, 1.0], scale);
+    assert!((got - 0.894_427).abs() < 0.01, "{got}");
+}
+
 #[test]
 fn thin_lens_keeps_the_focal_plane_sharp() {
     let Some(ctx) = context() else { return };
