@@ -1,11 +1,13 @@
 //! Scene IR: the renderer's internal scene representation, independent of any
 //! input format or GPU API (REQ-CORE-001).
 
+mod color;
 mod image;
 mod material;
 mod mesh;
 mod scene;
 
+pub use color::{ColorSpace, Oetf, OutputTransform, ToneMap};
 pub use image::{Image, ImageError};
 pub use material::{Aov, BaseBsdf, Material, OutputChannels, StylizationLayer};
 pub use mesh::{Mesh, MeshError};

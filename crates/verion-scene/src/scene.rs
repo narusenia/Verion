@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{Image, Material, Mesh};
+use crate::{ColorSpace, Image, Material, Mesh};
 
 /// Row-major 3x4 affine transform.
 pub type Transform = [[f32; 4]; 3];
@@ -124,6 +124,7 @@ pub struct Scene {
     instances: Vec<Instance>,
     lights: Vec<Light>,
     camera: Camera,
+    working_space: ColorSpace,
     revisions: Revisions,
 }
 
@@ -158,6 +159,17 @@ impl Scene {
 
     pub fn camera(&self) -> &Camera {
         &self.camera
+    }
+
+    /// The space every color value in this scene is expressed in.
+    pub fn working_space(&self) -> ColorSpace {
+        self.working_space
+    }
+
+    /// Declares the working space. It does not convert colors already added: set it before adding
+    /// content, or convert the values yourself.
+    pub fn set_working_space(&mut self, space: ColorSpace) {
+        self.working_space = space;
     }
 
     pub fn add_mesh(&mut self, mesh: Mesh) -> MeshId {
