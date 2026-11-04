@@ -55,7 +55,10 @@ pub fn load_hdri(path: &Path, space: ColorSpace) -> Result<Image, HdriError> {
     Image::new(width, height, pixels).map_err(|e| HdriError::Format(e.to_string()))
 }
 
-fn read_exr(path: &Path) -> Result<(u32, u32, Vec<[f32; 3]>, ColorSpace), HdriError> {
+/// Width, height, pixels and the color space the file declares.
+type Decoded = (u32, u32, Vec<[f32; 3]>, ColorSpace);
+
+fn read_exr(path: &Path) -> Result<Decoded, HdriError> {
     let image = read_first_rgba_layer_from_file(
         path,
         |res, _| (res.width(), vec![[0.0f32; 3]; res.area()]),
@@ -151,8 +154,8 @@ fn parse_hdr(bytes: &[u8]) -> Result<(u32, u32, Vec<[f32; 3]>), HdriError> {
             }
         } else {
             let src = data.get(..4 * w).ok_or_else(|| bad("truncated"))?;
-            for (px, v) in scan.iter_mut().zip(src.chunks_exact(4)) {
-                px.copy_from_slice(v);
+            for (px, v) in scan.iter_mut().zip(src.as_chunks::<4>().0) {
+                *px = *v;
             }
             data = &data[4 * w..];
         }
