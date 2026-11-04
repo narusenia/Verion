@@ -1,0 +1,21 @@
+[package]
+name = "verion-render-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "render-cli"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+verion-render-io = { version = "0.0.0", path = "../verion-render-io" }
+verion-scene = { version = "0.0.0", path = "../verion-scene" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+verion-gpu-metal = { version = "0.0.0", path = "../verion-gpu-metal" }
+
+[lints]
+workspace = true
