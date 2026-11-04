@@ -150,6 +150,7 @@ fn run(args: &Args) -> Result<(), String> {
         bar.set_position(acc.samples() as u64);
     }
     bar.finish_and_clear();
+    let gpu_s = acc.gpu_seconds();
     let beauty = acc.mean();
     let render_s = t.elapsed().as_secs_f64();
 
@@ -187,7 +188,7 @@ fn run(args: &Args) -> Result<(), String> {
     if let Some(path) = &args.metrics {
         let json = format!(
             "{{\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\
-\"load_s\":{load_s},\"build_s\":{build_s},\"render_s\":{render_s},\"aov_s\":{aov_s},\
+\"load_s\":{load_s},\"build_s\":{build_s},\"render_s\":{render_s},\"gpu_s\":{gpu_s},\"aov_s\":{aov_s},\
 \"write_s\":{write_s},\"total_s\":{}}}\n",
             json_str(&args.scene.display().to_string()),
             json_str(&args.output.display().to_string()),

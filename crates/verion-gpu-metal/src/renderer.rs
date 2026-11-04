@@ -621,9 +621,16 @@ pub struct Accumulation {
     width: u32,
     height: u32,
     samples: u32,
+    gpu_seconds: f64,
 }
 
 impl Accumulation {
+    /// GPU execution time of all `accumulate` calls so far, from command-buffer timestamps.
+    /// shortcut: one megakernel, so no trace / shade split; that needs the wavefront split (REQ-GPU-005).
+    pub fn gpu_seconds(&self) -> f64 {
+        self.gpu_seconds
+    }
+
     pub fn samples(&self) -> u32 {
         self.samples
     }
@@ -663,6 +670,7 @@ impl Renderer {
             width,
             height,
             samples: 0,
+            gpu_seconds: 0.0,
         })
     }
 
@@ -745,6 +753,7 @@ impl Renderer {
         enc.endEncoding();
         cb.commit();
         cb.waitUntilCompleted();
+        acc.gpu_seconds += cb.GPUEndTime() - cb.GPUStartTime();
         acc.samples += samples;
         Ok(())
     }

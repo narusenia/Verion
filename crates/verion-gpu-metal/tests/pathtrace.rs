@@ -155,6 +155,7 @@ fn progressive_accumulation_equals_one_shot_sample_count() {
     r.accumulate(&mut acc, 8).unwrap();
     r.accumulate(&mut acc, 8).unwrap();
     assert_eq!(acc.samples(), 16);
+    assert!(acc.gpu_seconds() > 0.0);
     assert!((mean(&acc.mean()) - 1.99).abs() < 0.1);
 }
 
