@@ -9,3 +9,7 @@ pre-commit:
     - name: clippy
       glob: "*.rs"
       run: mise run clippy
+    # Needs slangc, which the CI runners do not install, so this guard is local only.
+    - name: shaders
+      glob: "shaders/*.slang"
+      run: mise run shaders:check

@@ -39,10 +39,11 @@ run = "lefthook install"
 
 [tasks.shaders]
 description = "Regenerate the committed MSL from shaders/*.slang"
-run = [
-  "slangc shaders/normals.slang -target metal -entry normals -stage compute -o crates/verion-gpu-metal/shaders/normals.metal",
-  "slangc shaders/pathtrace.slang -target metal -entry pathtrace -stage compute -o crates/verion-gpu-metal/shaders/pathtrace.metal",
-]
+run = "scripts/shaders.sh"
+
+[tasks."shaders:check"]
+description = "Fail when the committed MSL is stale (needs slangc; not run in CI)"
+run = "scripts/shaders.sh check"
 
 # Added when the matching code exists:
 #   deps   - crate dependency rules (REQ-INFRA-001), scripts/check-deps.sh
