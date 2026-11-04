@@ -2,8 +2,10 @@
 #![cfg(target_os = "macos")]
 
 mod accel;
+mod renderer;
 
 pub use accel::{Blas, Instance, Tlas};
+pub use renderer::Renderer;
 
 use std::fmt;
 
@@ -20,6 +22,10 @@ pub enum Error {
         device: String,
     },
     Resource(&'static str),
+    /// The generated MSL failed to compile or the entry point is missing.
+    Shader(String),
+    /// The scene cannot be rendered (for example, it has no instances).
+    Scene(String),
 }
 
 impl fmt::Display for Error {
@@ -33,12 +39,15 @@ impl fmt::Display for Error {
                 )
             }
             Self::Resource(what) => write!(f, "failed to create Metal resource: {what}"),
+            Self::Shader(e) => write!(f, "shader error: {e}"),
+            Self::Scene(e) => write!(f, "scene error: {e}"),
         }
     }
 }
 
 impl std::error::Error for Error {}
 
+#[derive(Clone)]
 pub struct MetalContext {
     pub(crate) device: Obj<dyn MTLDevice>,
     pub(crate) queue: Obj<dyn MTLCommandQueue>,
