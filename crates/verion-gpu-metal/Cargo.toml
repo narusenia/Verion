@@ -11,6 +11,10 @@ objc2-foundation = "0.3"
 objc2-metal = "0.3"
 verion-scene = { version = "0.0.0", path = "../verion-scene" }
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+# Only the examples write EXR; the backend itself stays independent of the I/O crate.
+verion-render-io = { version = "0.0.0", path = "../verion-render-io" }
+
 [lints.rust]
 # Direct Metal calls need unsafe; only the GPU backend crates may allow it.
 unsafe_code = "allow"

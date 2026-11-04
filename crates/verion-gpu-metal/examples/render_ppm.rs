@@ -1,10 +1,11 @@
-//! Dev tool: renders a small test scene (Cornell-style box, metal and glass spheres) to PPM files.
+//! Dev tool: renders a small test scene (Cornell-style box, metal and glass spheres) to PPM and EXR files.
 //! Usage: cargo run --release -p verion-gpu-metal --example render_ppm -- [out_dir] [width] [height] [spp]
 #[cfg(target_os = "macos")]
 mod imp {
     use std::{collections::HashMap, fs, io::Write, path::Path};
 
     use verion_gpu_metal::{MetalContext, Renderer};
+    use verion_render_io::{ExrFrame, RenderInfo, write_exr};
     use verion_scene::{
         BaseBsdf, Camera, IDENTITY, Instance, Light, Material, Mesh, OutputTransform, Scene,
     };
@@ -241,8 +242,25 @@ mod imp {
         write_ppm(&dir.join("normals.ppm"), w, h, &normals, |v| {
             ((v * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0 + 0.5) as u8
         });
+        let frame = ExrFrame {
+            width: w,
+            height: h,
+            working_space: space,
+            beauty: &beauty,
+            normal: Some(&normals),
+            info: RenderInfo {
+                physical: true,
+                samples: spp,
+            },
+        };
+        write_exr(
+            &dir.join("render.exr"),
+            &frame,
+            &OutputTransform::linear(space),
+        )
+        .expect("write exr");
         println!(
-            "wrote {}/beauty.ppm and normals.ppm ({w}x{h}, {spp} spp)",
+            "wrote {}/beauty.ppm, normals.ppm and render.exr ({w}x{h}, {spp} spp)",
             dir.display()
         );
     }
