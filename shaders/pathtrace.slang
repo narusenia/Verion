@@ -6,16 +6,20 @@ RaytracingAccelerationStructure scene;
 StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
 StructuredBuffer<uint> instances;   // 16 words: vertex offset, index offset, material, emitter base + 1 (0 = not emissive), 12 floats (row-major 3x4)
-StructuredBuffer<float> materials;  // 12 words: base color rgb, emission rgb, metallic, roughness, transmission, ior, 2 pad
+StructuredBuffer<float> materials;  // 16 words: base color rgb, emission rgb, metallic, roughness, transmission, ior,
+                                    // base color / metallic-roughness / emission texture + 1 (0 = none), 3 pad
 StructuredBuffer<uint> lights;      // 8 words: kind (0 point, 1 directional), color rgb, intensity, position or travel direction xyz (floats as bits)
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
-                                    // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W)
+                                    // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
 StructuredBuffer<float> emitters;   // 16 words per emissive world-space triangle: p0, p1, p2, radiance rgb, area, selection pdf, 2 pad
 StructuredBuffer<float> emitCdf;    // cumulative selection probability per emitter triangle, last entry 1
 StructuredBuffer<float> envPixels;  // environment map rgb per texel (scale applied), latitude-longitude, row-major from the top
 StructuredBuffer<float> envMarginal; // cumulative probability per row of luminance * sin(theta), last entry 1
 StructuredBuffer<float> envCond;    // cumulative probability per column within each row, last entry of each row 1
+StructuredBuffer<float> uvs;        // uv per vertex, all meshes concatenated (zero when a mesh has none)
+StructuredBuffer<float> texels;     // rgb texels, each texture's mip chain level 0 first
+StructuredBuffer<uint> texInfo;     // 4 words per texture: texel offset, width, height, mip level count
 
 static const float PI = 3.14159265358979;
 
@@ -186,6 +190,56 @@ float3 envSample(float u1, float u2, float u3, float u4, out float pdf, out floa
     return float3(st * sin(phi), cos(theta), -st * cos(phi));
 }
 
+
+float3 texelAt(uint base, uint w, uint h, int x, int y)
+{
+    uint xi = uint(((x % int(w)) + int(w)) % int(w));
+    uint yi = uint(((y % int(h)) + int(h)) % int(h));
+    uint o = 3 * (base + yi * w + xi);
+    return float3(texels[o], texels[o + 1], texels[o + 2]);
+}
+
+float3 bilinear(uint base, uint w, uint h, float2 uv)
+{
+    float fx = uv.x * w - 0.5;
+    float fy = uv.y * h - 0.5;
+    int x0 = int(floor(fx));
+    int y0 = int(floor(fy));
+    float tx = fx - x0;
+    float ty = fy - y0;
+    float3 a = lerp(texelAt(base, w, h, x0, y0), texelAt(base, w, h, x0 + 1, y0), tx);
+    float3 b = lerp(texelAt(base, w, h, x0, y0 + 1), texelAt(base, w, h, x0 + 1, y0 + 1), tx);
+    return lerp(a, b, ty);
+}
+
+// Repeat-wrapped trilinear lookup. `footprint` is the width of the ray cone in uv units.
+float3 sampleTexture(uint tex, float2 uv, float footprint)
+{
+    uint ti = tex * 4;
+    uint base = texInfo[ti];
+    uint w = texInfo[ti + 1];
+    uint h = texInfo[ti + 2];
+    uint levels = texInfo[ti + 3];
+    float lod = clamp(log2(max(footprint * float(max(w, h)), 1.0e-8)), 0.0, float(levels - 1));
+    uint l0 = uint(floor(lod));
+    float t = lod - float(l0);
+    uint off = base;
+    uint lw = w;
+    uint lh = h;
+    for (uint k = 0; k < l0; k++)
+    {
+        off += lw * lh;
+        lw = max(lw / 2, 1u);
+        lh = max(lh / 2, 1u);
+    }
+    float3 a = bilinear(off, lw, lh, uv);
+    if (l0 + 1 >= levels || t <= 0.0)
+        return a;
+    off += lw * lh;
+    float3 b = bilinear(off, max(lw / 2, 1u), max(lh / 2, 1u), uv);
+    return lerp(a, b, t);
+}
+
 struct Surface
 {
     float3 albedo;
@@ -276,6 +330,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
     bool hasEnv = params[24] > 0;
     // Probability that next-event estimation samples the environment map instead of an emitter.
     float pEnv = hasEnv ? (emitterCount > 0 ? 0.5 : 1.0) : 0.0;
+    float pathLen = 0.0; // distance travelled so far, widens the texture-filter cone
     bool misPrev = false;
     float qPrev = 0.0;
 
@@ -320,13 +375,47 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         bool outside = dot(nOut, wo) > 0.0;
         float3 n = outside ? nOut : -nOut;
         float pHitT = q.CommittedRayT();
+        pathLen += pHitT;
         float3 hit = org + dir * pHitT;
         // shortcut: fixed 1e-4 ray offset assumes unit-scale scenes, scale it with scene bounds later.
         float3 p = hit + n * 1.0e-4;
 
-        uint mi = instances[inst + 2] * 12;
+        uint mi = instances[inst + 2] * 16;
         float3 albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
-        float3 le = float3(materials[mi + 3], materials[mi + 4], materials[mi + 5]);
+        // Textures multiply the material factors. The filter footprint comes from the ray cone.
+        uint texBase = uint(materials[mi + 10]);
+        uint texMR = uint(materials[mi + 11]);
+        uint texEm = uint(materials[mi + 12]);
+        float2 texRM = float2(1.0); // x = roughness (green), y = metallic (blue)
+        float3 texEmission = float3(1.0);
+        if (texBase + texMR + texEm > 0)
+        {
+            float2 uv0 = float2(uvs[2 * (indices[tri] + vo)], uvs[2 * (indices[tri] + vo) + 1]);
+            float2 uv1 = float2(uvs[2 * (indices[tri + 1] + vo)], uvs[2 * (indices[tri + 1] + vo) + 1]);
+            float2 uv2 = float2(uvs[2 * (indices[tri + 2] + vo)], uvs[2 * (indices[tri + 2] + vo) + 1]);
+            float3 e1 = p1 - p0;
+            float3 e2 = p2 - p0;
+            float3 e3 = hit - p0;
+            float d11 = dot(e1, e1);
+            float d12 = dot(e1, e2);
+            float d22 = dot(e2, e2);
+            float den = max(d11 * d22 - d12 * d12, 1.0e-20);
+            float b1 = (d22 * dot(e3, e1) - d12 * dot(e3, e2)) / den;
+            float b2 = (d11 * dot(e3, e2) - d12 * dot(e3, e1)) / den;
+            float2 uv = uv0 + b1 * (uv1 - uv0) + b2 * (uv2 - uv0);
+            float2 d1 = uv1 - uv0;
+            float2 d2 = uv2 - uv0;
+            float uvPerWorld = sqrt(abs(d1.x * d2.y - d1.y * d2.x) / max(length(cross(e1, e2)), 1.0e-20));
+            float footprint = pathLen * pf(27) / max(abs(dot(nOut, dir)), 0.1) * uvPerWorld;
+            if (texBase > 0)
+                albedo *= sampleTexture(texBase - 1, uv, footprint);
+            if (texMR > 0)
+                texRM = sampleTexture(texMR - 1, uv, footprint).yz;
+            if (texEm > 0)
+                texEmission = sampleTexture(texEm - 1, uv, footprint);
+        }
+
+        float3 le = float3(materials[mi + 3], materials[mi + 4], materials[mi + 5]) * texEmission;
         if (any(le > 0.0))
         {
             float wB = 1.0;
@@ -340,8 +429,8 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
             }
             radiance += thr * le * wB;
         }
-        float metallic = materials[mi + 6];
-        float rough = materials[mi + 7];
+        float metallic = materials[mi + 6] * texRM.y;
+        float rough = materials[mi + 7] * texRM.x;
         float transmission = materials[mi + 8];
         float ior = materials[mi + 9];
         float alpha = max(rough * rough, 1.0e-3);

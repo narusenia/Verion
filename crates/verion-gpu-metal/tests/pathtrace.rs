@@ -660,3 +660,139 @@ fn invalid_environment_maps_are_rejected() {
     });
     assert!(matches!(Renderer::new(&ctx, &two), Err(Error::Scene(_))));
 }
+
+/// `half` x `half` square in the z = 0 plane whose uv runs over [0, repeat]; v grows downward like
+/// the image rows (glTF convention), so the top-left corner has uv (0, 0).
+fn textured_plane(half: f32, repeat: f32) -> Mesh {
+    let h = half;
+    Mesh::new(
+        vec![[-h, -h, 0.0], [h, -h, 0.0], [h, h, 0.0], [-h, h, 0.0]],
+        None,
+        Some(vec![
+            [0.0, repeat],
+            [repeat, repeat],
+            [repeat, 0.0],
+            [0.0, 0.0],
+        ]),
+        vec![0, 1, 2, 0, 2, 3],
+    )
+    .unwrap()
+}
+
+fn texture_scene(
+    mesh: Mesh,
+    image: Image,
+    base: impl FnOnce(verion_scene::ImageId) -> BaseBsdf,
+) -> Scene {
+    let mut s = Scene::new();
+    let img = s.add_image(image);
+    let mesh = s.add_mesh(mesh);
+    let mat = s.add_material(bsdf(base(img)));
+    s.add_instance(Instance {
+        mesh,
+        material: mat,
+        transform: IDENTITY,
+    })
+    .unwrap();
+    s.add_light(Light::Environment { color: [1.0; 3] });
+    s.set_camera(camera_at_z(3.0));
+    s
+}
+
+fn lambert(base_color: [f32; 3], texture: verion_scene::ImageId) -> BaseBsdf {
+    BaseBsdf {
+        base_color,
+        ior: 1.0,
+        base_color_texture: Some(texture),
+        ..BaseBsdf::default()
+    }
+}
+
+#[test]
+fn base_color_texels_land_where_the_uvs_say() {
+    let Some(ctx) = context() else { return };
+    // 2x2 texture: red, green / blue, grey. The plane spans [-0.5, 0.5] and maps to uv [0, 1].
+    let tex = Image::new(
+        2,
+        2,
+        vec![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.5; 3]],
+    )
+    .unwrap();
+    let s = texture_scene(textured_plane(0.5, 1.0), tex, |t| lambert([1.0; 3], t));
+    let img = Renderer::new(&ctx, &s).unwrap().render(65, 65, 64).unwrap();
+    // World (+-0.25, +-0.25) is pixel 32.5 +- 0.25 / (3 tan 0.4) * 32.5, about 26 and 39.
+    let at = |x: usize, y: usize| img[y * 65 + x];
+    let close = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(p, q)| (p - q).abs() < 0.1);
+    assert!(close(at(26, 26), [1.0, 0.0, 0.0]), "{:?}", at(26, 26));
+    assert!(close(at(39, 26), [0.0, 1.0, 0.0]), "{:?}", at(39, 26));
+    assert!(close(at(26, 39), [0.0, 0.0, 1.0]), "{:?}", at(26, 39));
+    assert!(close(at(39, 39), [0.5; 3]), "{:?}", at(39, 39));
+}
+
+#[test]
+fn minified_checkerboard_averages_through_the_mip_chain() {
+    let Some(ctx) = context() else { return };
+    // 8x8 one-texel checkerboard repeated 256 times over the floor: each pixel covers ~8 texels.
+    // At one sample per pixel only a correct mip level gives 0.5; level 0 would alternate 0 and 1.
+    let pixels = (0..64)
+        .map(|i| {
+            if (i % 8 + i / 8) % 2 == 0 {
+                [1.0; 3]
+            } else {
+                [0.0; 3]
+            }
+        })
+        .collect();
+    let tex = Image::new(8, 8, pixels).unwrap();
+    let s = texture_scene(textured_plane(5.0, 256.0), tex, |t| lambert([1.0; 3], t));
+    let img = Renderer::new(&ctx, &s).unwrap().render(64, 64, 1).unwrap();
+    let worst = img
+        .iter()
+        .map(|p| (p[0] - 0.5).abs())
+        .fold(0.0f32, f32::max);
+    assert!(worst < 0.05, "worst deviation {worst}");
+}
+
+#[test]
+fn metallic_roughness_texture_scales_the_factors() {
+    let Some(ctx) = context() else { return };
+    // Factors say rough dielectric; the texture (green 0, blue 1) turns that into a smooth metal,
+    // which reflects the sky at its base color 0.5.
+    let tex = Image::new(1, 1, vec![[0.0, 0.0, 1.0]]).unwrap();
+    let s = texture_scene(textured_plane(5.0, 1.0), tex, |t| BaseBsdf {
+        base_color: [0.5; 3],
+        metallic: 1.0,
+        roughness: 1.0,
+        metallic_roughness_texture: Some(t),
+        ..BaseBsdf::default()
+    });
+    let img = Renderer::new(&ctx, &s).unwrap().render(32, 32, 16).unwrap();
+    let got = center_mean(&img, 32, 16);
+    assert!((got - 0.5).abs() < 0.01, "{got}");
+}
+
+#[test]
+fn emission_texture_scales_the_emitted_radiance() {
+    let Some(ctx) = context() else { return };
+    let tex = Image::new(1, 1, vec![[0.25; 3]]).unwrap();
+    let s = texture_scene(textured_plane(5.0, 1.0), tex, |t| BaseBsdf {
+        base_color: [0.0; 3],
+        emission: [1.0; 3],
+        ior: 1.0,
+        emission_texture: Some(t),
+        ..BaseBsdf::default()
+    });
+    let img = Renderer::new(&ctx, &s).unwrap().render(32, 32, 8).unwrap();
+    // The sky adds nothing (albedo 0), so the plane shows exactly factor * texture.
+    assert!((center_mean(&img, 32, 16) - 0.25).abs() < 1e-3);
+}
+
+#[test]
+fn missing_texture_image_is_rejected() {
+    let Some(ctx) = context() else { return };
+    let mut other = Scene::new();
+    let foreign = other.add_image(Image::new(1, 1, vec![[1.0; 3]]).unwrap());
+    let mut s = sky_scene(cube(0.5), bsdf(lambert([1.0; 3], foreign)), 3.0);
+    s.add_light(Light::Environment { color: [0.0; 3] });
+    assert!(matches!(Renderer::new(&ctx, &s), Err(Error::Scene(_))));
+}
