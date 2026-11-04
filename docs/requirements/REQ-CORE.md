@@ -104,8 +104,8 @@ BaseColor / Normal / MetallicRoughness / Emissive テクスチャとミップ。
 
 ### 受入条件
 
-- [ ] 作業色空間を設定で選べる
-- [ ] 表示と EXR 出力でそれぞれ色空間変換が指定できる
+- [x] 作業色空間を設定で選べる（`render-cli --working-space rec709|acescg`、Scene では `set_working_space`）
+- [x] 表示と EXR 出力でそれぞれ色空間変換が指定できる（`OutputTransform`、`render-cli --output-space`。OCIO は未実装で、Rec.709 と ACEScg を自前の行列で持つ）
 
 ### 依存要件
 
