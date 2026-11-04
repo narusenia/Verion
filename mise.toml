@@ -1,0 +1,41 @@
+# `mise run check` is the canonical verification entry point; CI and the
+# lefthook pre-commit hook run the same tasks.
+
+[tools]
+rust = { version = "1.99", components = "rustfmt,clippy", profile = "minimal" }
+lefthook = "2.1.5"
+jq = "1.8"
+"aqua:EmbarkStudios/cargo-deny" = "latest"
+
+[tasks.fmt]
+description = "Check formatting"
+run = "cargo fmt --all -- --check"
+
+[tasks."fmt:fix"]
+description = "Apply formatting"
+run = "cargo fmt --all"
+
+[tasks.clippy]
+description = "Clippy with warnings denied"
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.test]
+description = "Workspace test suite (GPU-free tests only)"
+run = "cargo test --workspace"
+
+[tasks.deny]
+description = "License, ban and source checks (deny.toml)"
+run = "cargo deny check"
+
+[tasks.check]
+description = "Full verification (fmt + clippy + deny + test)"
+depends = ["fmt", "clippy", "deny", "test"]
+
+[tasks."hooks:install"]
+description = "Install lefthook git hooks"
+run = "lefthook install"
+
+# Added when the matching code exists:
+#   deps   - crate dependency rules (REQ-INFRA-001), scripts/check-deps.sh
+#   bench  - benchmarks and regression check (REQ-PERF-001/002)
+#   qa     - reference-image comparison against Mitsuba 3 (REQ-QA-001)
