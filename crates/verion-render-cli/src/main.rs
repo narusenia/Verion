@@ -28,6 +28,22 @@ impl Mode {
     }
 }
 
+/// Linear RGB primaries selectable for the working space and the EXR output (REQ-CORE-005).
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum Space {
+    Rec709,
+    Acescg,
+}
+
+impl Space {
+    fn color(self) -> verion_scene::ColorSpace {
+        match self {
+            Space::Rec709 => verion_scene::ColorSpace::LinearRec709,
+            Space::Acescg => verion_scene::ColorSpace::AcesCg,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(version, about = "Headless Verion renderer")]
 struct Args {
@@ -48,6 +64,12 @@ struct Args {
     /// Equirectangular environment map (`.hdr` / `.exr`) used as the sky light
     #[arg(long)]
     hdri: Option<PathBuf>,
+    /// Primaries the scene is rendered in (glTF colors are converted into it)
+    #[arg(long, value_enum, default_value_t = Space::Rec709)]
+    working_space: Space,
+    /// Primaries of the output EXR (default: the working space)
+    #[arg(long, value_enum)]
+    output_space: Option<Space>,
     /// Write timing metrics as JSON
     #[arg(long)]
     metrics: Option<PathBuf>,
@@ -104,7 +126,7 @@ const CHUNK_SPP: u32 = 8;
 fn run(args: &Args) -> Result<(), String> {
     use indicatif::{ProgressBar, ProgressStyle};
     use verion_gpu_metal::{MetalContext, Renderer};
-    use verion_render_io::{ExrAovs, ExrFrame, RenderInfo, load_gltf, load_hdri, write_exr};
+    use verion_render_io::{ExrAovs, ExrFrame, RenderInfo, load_gltf_in, load_hdri, write_exr};
     use verion_scene::{Camera, Light, OutputTransform};
 
     if args.width == 0 || args.height == 0 || args.spp == 0 {
@@ -112,8 +134,8 @@ fn run(args: &Args) -> Result<(), String> {
     }
     let total = Instant::now();
     let t = Instant::now();
-    let import =
-        load_gltf(&args.scene).map_err(|e| format!("load {}: {e}", args.scene.display()))?;
+    let import = load_gltf_in(&args.scene, args.working_space.color())
+        .map_err(|e| format!("load {}: {e}", args.scene.display()))?;
     for w in &import.warnings {
         eprintln!("warning: {w}");
     }
@@ -181,8 +203,12 @@ fn run(args: &Args) -> Result<(), String> {
         },
     };
     let t = Instant::now();
-    write_exr(&args.output, &frame, &OutputTransform::linear(space))
-        .map_err(|e| format!("write {}: {e}", args.output.display()))?;
+    write_exr(
+        &args.output,
+        &frame,
+        &OutputTransform::linear(args.output_space.map_or(space, Space::color)),
+    )
+    .map_err(|e| format!("write {}: {e}", args.output.display()))?;
     let write_s = t.elapsed().as_secs_f64();
 
     if let Some(path) = &args.metrics {
@@ -222,6 +248,22 @@ mod tests {
         let a = Args::try_parse_from(["render-cli", "a.gltf", "-o", "o.exr"]).unwrap();
         assert_eq!((a.width, a.height, a.spp), (512, 384, 64));
         assert_eq!(a.mode, Mode::Reference);
+        assert_eq!((a.working_space, a.output_space), (Space::Rec709, None));
+        let a = Args::try_parse_from([
+            "render-cli",
+            "a.gltf",
+            "-o",
+            "o.exr",
+            "--working-space",
+            "acescg",
+            "--output-space",
+            "rec709",
+        ])
+        .unwrap();
+        assert_eq!(
+            (a.working_space, a.output_space),
+            (Space::Acescg, Some(Space::Rec709))
+        );
         assert!(Mode::Reference.physical());
         assert!(Args::try_parse_from(["render-cli", "a.gltf"]).is_err());
     }
