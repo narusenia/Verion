@@ -2,4 +2,6 @@
 
 mod gltf_import;
 
-pub use gltf_import::{Error, Import, load_gltf, load_gltf_slice};
+pub use gltf_import::{
+    Error, Import, load_gltf, load_gltf_in, load_gltf_slice, load_gltf_slice_in,
+};

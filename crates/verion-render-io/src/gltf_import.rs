@@ -4,8 +4,8 @@ use std::{collections::HashMap, fmt, path::Path};
 
 use gltf::{Document, camera::Projection, khr_lights_punctual::Kind, mesh::Mode};
 use verion_scene::{
-    BaseBsdf, Camera, IDENTITY, Image, ImageId, Instance, Light, Material, MaterialId, Mesh,
-    MeshError, MeshId, Scene, SceneError, Transform,
+    BaseBsdf, Camera, ColorSpace, IDENTITY, Image, ImageId, Instance, Light, Material, MaterialId,
+    Mesh, MeshError, MeshId, Scene, SceneError, Transform,
 };
 
 /// Extensions this importer understands; any other one in `extensionsUsed` is warned about.
@@ -50,17 +50,27 @@ impl From<SceneError> for Error {
     }
 }
 
-/// Loads a `.gltf` (with external buffers) or `.glb` file.
+/// Loads a `.gltf` (with external buffers) or `.glb` file into a Linear Rec.709 scene.
 pub fn load_gltf(path: &Path) -> Result<Import, Error> {
+    load_gltf_in(path, ColorSpace::default())
+}
+
+/// Like [`load_gltf`], converting colors (glTF is Rec.709 linear) into `space`.
+pub fn load_gltf_in(path: &Path, space: ColorSpace) -> Result<Import, Error> {
     let (doc, buffers, images) = gltf::import(path).map_err(|e| Error::Gltf(e.to_string()))?;
-    convert(&doc, &buffers, &images)
+    convert(&doc, &buffers, &images, space)
 }
 
 /// Loads a self-contained `.glb` or `.gltf` (embedded buffers) from memory.
 pub fn load_gltf_slice(bytes: &[u8]) -> Result<Import, Error> {
+    load_gltf_slice_in(bytes, ColorSpace::default())
+}
+
+/// Like [`load_gltf_slice`], converting colors into `space`.
+pub fn load_gltf_slice_in(bytes: &[u8], space: ColorSpace) -> Result<Import, Error> {
     let (doc, buffers, images) =
         gltf::import_slice(bytes).map_err(|e| Error::Gltf(e.to_string()))?;
-    convert(&doc, &buffers, &images)
+    convert(&doc, &buffers, &images, space)
 }
 
 /// Column-major 4x4, as glTF stores it.
@@ -105,22 +115,29 @@ struct Importer<'a> {
     meshes: HashMap<(usize, usize), (MeshId, MaterialId)>,
     materials: HashMap<Option<usize>, MaterialId>,
     camera_set: bool,
+    space: ColorSpace,
 }
 
 fn convert(
     doc: &Document,
     buffers: &[gltf::buffer::Data],
     images: &[gltf::image::Data],
+    space: ColorSpace,
 ) -> Result<Import, Error> {
     let mut imp = Importer {
         buffers,
         images,
         image_cache: HashMap::new(),
-        scene: Scene::new(),
+        scene: {
+            let mut scene = Scene::new();
+            scene.set_working_space(space);
+            scene
+        },
         warnings: Vec::new(),
         meshes: HashMap::new(),
         materials: HashMap::new(),
         camera_set: false,
+        space,
     };
     for ext in doc.extensions_used().filter(|e| !SUPPORTED.contains(e)) {
         imp.warnings
@@ -213,11 +230,12 @@ impl Importer<'_> {
         }
         let pbr = m.pbr_metallic_roughness();
         let [r, g, b, _] = pbr.base_color_factor();
+        let to_space = |c: [f32; 3]| ColorSpace::LinearRec709.convert(self.space, c);
         let mut emission = m.emissive_factor();
         let strength = m.emissive_strength().unwrap_or(1.0);
-        emission = emission.map(|c| c * strength);
+        emission = to_space(emission.map(|c| c * strength));
         let base = BaseBsdf {
-            base_color: [r, g, b],
+            base_color: to_space([r, g, b]),
             metallic: pbr.metallic_factor(),
             roughness: pbr.roughness_factor(),
             transmission: m.transmission().map_or(0.0, |t| t.transmission_factor()),
@@ -312,7 +330,7 @@ impl Importer<'_> {
         if let Some(&cached) = self.image_cache.get(&(source, srgb)) {
             return cached;
         }
-        let id = match to_image(&self.images[source], srgb) {
+        let id = match to_image(&self.images[source], srgb, self.space) {
             Ok(image) => Some(self.scene.add_image(image)),
             Err(why) => {
                 self.warnings.push(format!(
@@ -346,7 +364,10 @@ impl Importer<'_> {
     }
 
     fn light(&mut self, light: &gltf::khr_lights_punctual::Light, world: &Mat4) {
-        let (color, intensity) = (light.color(), light.intensity());
+        let (color, intensity) = (
+            ColorSpace::LinearRec709.convert(self.space, light.color()),
+            light.intensity(),
+        );
         let ir = match light.kind() {
             Kind::Point => Light::Point {
                 position: [world[3][0], world[3][1], world[3][2]],
@@ -384,7 +405,8 @@ fn srgb_to_linear(c: f32) -> f32 {
 }
 
 /// Converts a decoded glTF image to linear RGB. One channel becomes grey, two become (r, g, 0).
-fn to_image(data: &gltf::image::Data, srgb: bool) -> Result<Image, String> {
+/// Color data (`srgb`) also moves from Rec.709 into `space`; data textures are left alone.
+fn to_image(data: &gltf::image::Data, srgb: bool, space: ColorSpace) -> Result<Image, String> {
     use gltf::image::Format::*;
     let (channels, bytes) = match data.format {
         R8 => (1, 1),
@@ -416,10 +438,17 @@ fn to_image(data: &gltf::image::Data, srgb: bool) -> Result<Image, String> {
     let pixels = data
         .pixels
         .chunks_exact(stride)
-        .map(|px| match channels {
-            1 => [channel(px, 0); 3],
-            2 => [channel(px, 0), channel(px, 1), 0.0],
-            _ => [channel(px, 0), channel(px, 1), channel(px, 2)],
+        .map(|px| {
+            let rgb = match channels {
+                1 => [channel(px, 0); 3],
+                2 => [channel(px, 0), channel(px, 1), 0.0],
+                _ => [channel(px, 0), channel(px, 1), channel(px, 2)],
+            };
+            if srgb {
+                ColorSpace::LinearRec709.convert(space, rgb)
+            } else {
+                rgb
+            }
         })
         .collect();
     Image::new(data.width, data.height, pixels).map_err(|e| e.to_string())
@@ -615,6 +644,38 @@ mod tests {
         );
         assert_eq!(base.normal_scale, 1.0);
         assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    const ACES_RED: [f32; 3] = [0.613_097, 0.070_194, 0.020_616];
+
+    #[test]
+    fn acescg_import_converts_color_factors() {
+        let Import { scene, .. } = load_gltf_slice_in(&glb(JSON, &[]), ColorSpace::AcesCg).unwrap();
+        assert_eq!(scene.working_space(), ColorSpace::AcesCg);
+        let base = &scene.materials()[0].base;
+        assert_eq!(base.base_color, ACES_RED);
+        // Metallic and roughness are scalars, not colors.
+        assert_eq!((base.metallic, base.roughness), (0.5, 0.25));
+        // White light keeps its color in any space.
+        let Light::Point { color, .. } = scene.lights()[0] else {
+            panic!("expected a point light");
+        };
+        assert!(color.iter().all(|c| (c - 1.0).abs() < 1e-4), "{color:?}");
+    }
+
+    #[test]
+    fn acescg_import_converts_color_textures_but_not_data_textures() {
+        let Import { scene, .. } =
+            load_gltf_slice_in(&glb(&textured_json(0), &PNG), ColorSpace::AcesCg).unwrap();
+        let base = &scene.materials()[0].base;
+        let color = &scene.images()[base.base_color_texture.unwrap().index()];
+        let red = color.pixels()[0];
+        assert!(
+            red.iter().zip(ACES_RED).all(|(a, b)| (a - b).abs() < 1e-5),
+            "{red:?}"
+        );
+        let mr = &scene.images()[base.metallic_roughness_texture.unwrap().index()];
+        assert!((mr.pixels()[3][0] - 128.0 / 255.0).abs() < 1e-6);
     }
 
     #[test]
