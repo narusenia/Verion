@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+indicatif = "0.18"
 verion-render-io = { version = "0.0.0", path = "../verion-render-io" }
 verion-scene = { version = "0.0.0", path = "../verion-scene" }
 

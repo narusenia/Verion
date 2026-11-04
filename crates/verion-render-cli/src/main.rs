@@ -20,6 +20,9 @@ struct Args {
     /// Samples per pixel
     #[arg(long, default_value_t = 64)]
     spp: u32,
+    /// Equirectangular environment map (`.hdr` / `.exr`) used as the sky light
+    #[arg(long)]
+    hdri: Option<PathBuf>,
     /// Write timing metrics as JSON
     #[arg(long)]
     metrics: Option<PathBuf>,
@@ -39,11 +42,16 @@ fn json_str(s: &str) -> String {
     out
 }
 
+/// Samples per GPU dispatch; the progress bar advances once per dispatch.
+#[cfg(target_os = "macos")]
+const CHUNK_SPP: u32 = 8;
+
 #[cfg(target_os = "macos")]
 fn run(args: &Args) -> Result<(), String> {
+    use indicatif::{ProgressBar, ProgressStyle};
     use verion_gpu_metal::{MetalContext, Renderer};
-    use verion_render_io::{ExrAovs, ExrFrame, RenderInfo, load_gltf, write_exr};
-    use verion_scene::OutputTransform;
+    use verion_render_io::{ExrAovs, ExrFrame, RenderInfo, load_gltf, load_hdri, write_exr};
+    use verion_scene::{Light, OutputTransform};
 
     if args.width == 0 || args.height == 0 || args.spp == 0 {
         return Err("width, height and spp must be at least 1".into());
@@ -55,7 +63,13 @@ fn run(args: &Args) -> Result<(), String> {
     for w in &import.warnings {
         eprintln!("warning: {w}");
     }
-    let scene = import.scene;
+    let mut scene = import.scene;
+    if let Some(path) = &args.hdri {
+        let image = load_hdri(path, scene.working_space())
+            .map_err(|e| format!("hdri {}: {e}", path.display()))?;
+        let image = scene.add_image(image);
+        scene.add_light(Light::EnvironmentMap { image, scale: 1.0 });
+    }
     let load_s = t.elapsed().as_secs_f64();
 
     let t = Instant::now();
@@ -65,9 +79,21 @@ fn run(args: &Args) -> Result<(), String> {
 
     let (w, h) = (args.width, args.height);
     let t = Instant::now();
-    let beauty = renderer
-        .render(w, h, args.spp)
+    let mut acc = renderer
+        .new_accumulation(w, h)
         .map_err(|e| format!("render: {e:?}"))?;
+    // Hidden automatically when stderr is not a terminal.
+    let bar = ProgressBar::new(args.spp as u64)
+        .with_style(ProgressStyle::with_template("{bar:40} {pos}/{len} spp ({eta})").unwrap());
+    while acc.samples() < args.spp {
+        let n = CHUNK_SPP.min(args.spp - acc.samples());
+        renderer
+            .accumulate(&mut acc, n)
+            .map_err(|e| format!("render: {e:?}"))?;
+        bar.set_position(acc.samples() as u64);
+    }
+    bar.finish_and_clear();
+    let beauty = acc.mean();
     let render_s = t.elapsed().as_secs_f64();
 
     let t = Instant::now();
