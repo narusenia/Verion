@@ -65,6 +65,101 @@ fn pipeline(
         .map_err(|e| Error::Shader(e.to_string()))
 }
 
+/// Environment map tables for importance sampling (empty when the scene has none).
+struct EnvMap {
+    pixels: Obj<dyn MTLBuffer>,
+    marginal: Obj<dyn MTLBuffer>,
+    conditional: Obj<dyn MTLBuffer>,
+    width: u32,
+    height: u32,
+    /// `w * h / (2 pi^2 W)`: turns a texel luminance into a solid-angle density.
+    pdf_scale: f32,
+}
+
+fn luminance(c: [f32; 3]) -> f32 {
+    0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+}
+
+/// Sampling tables over `luminance * sin(theta)`: a marginal CDF over rows and one CDF per row.
+fn build_env(ctx: &MetalContext, scene: &Scene) -> Result<EnvMap, Error> {
+    let mut maps = scene.lights().iter().filter_map(|l| match *l {
+        Light::EnvironmentMap { image, scale } => Some((image, scale)),
+        _ => None,
+    });
+    let first = maps.next();
+    if maps.next().is_some() {
+        return Err(Error::Scene("only one environment map is supported".into()));
+    }
+    let empty = |ctx: &MetalContext| -> Result<EnvMap, Error> {
+        Ok(EnvMap {
+            pixels: upload::<f32>(ctx, &[])?,
+            marginal: upload::<f32>(ctx, &[])?,
+            conditional: upload::<f32>(ctx, &[])?,
+            width: 0,
+            height: 0,
+            pdf_scale: 0.0,
+        })
+    };
+    let Some((id, scale)) = first else {
+        return empty(ctx);
+    };
+    let image = scene
+        .images()
+        .get(id.index())
+        .ok_or_else(|| Error::Scene("environment map refers to a missing image".into()))?;
+    let (w, h) = (image.width() as usize, image.height() as usize);
+    let pixels: Vec<f32> = image.pixels().iter().flatten().map(|v| v * scale).collect();
+
+    let mut rows = vec![0.0f64; h];
+    let mut conditional = vec![0.0f32; w * h];
+    for (j, row) in rows.iter_mut().enumerate() {
+        let sin_theta = (((j as f64) + 0.5) / h as f64 * std::f64::consts::PI).sin();
+        let weights: Vec<f64> = (0..w)
+            .map(|i| {
+                f64::from(luminance([
+                    pixels[3 * (j * w + i)],
+                    pixels[3 * (j * w + i) + 1],
+                    pixels[3 * (j * w + i) + 2],
+                ])) * sin_theta
+            })
+            .collect();
+        *row = weights.iter().sum();
+        let mut running = 0.0;
+        for (i, wgt) in weights.iter().enumerate() {
+            running += wgt;
+            // A black row is never chosen; a uniform CDF keeps the search well defined anyway.
+            conditional[j * w + i] = if *row > 0.0 {
+                (running / *row) as f32
+            } else {
+                (i + 1) as f32 / w as f32
+            };
+        }
+        conditional[j * w + w - 1] = 1.0;
+    }
+    let total: f64 = rows.iter().sum();
+    if total <= 0.0 {
+        return empty(ctx); // an all-black map lights nothing
+    }
+    let mut running = 0.0;
+    let mut marginal: Vec<f32> = rows
+        .iter()
+        .map(|r| {
+            running += r / total;
+            running as f32
+        })
+        .collect();
+    marginal[h - 1] = 1.0;
+    let pdf_scale = ((w * h) as f64 / (2.0 * std::f64::consts::PI.powi(2) * total)) as f32;
+    Ok(EnvMap {
+        pixels: upload(ctx, &pixels)?,
+        marginal: upload(ctx, &marginal)?,
+        conditional: upload(ctx, &conditional)?,
+        width: w as u32,
+        height: h as u32,
+        pdf_scale,
+    })
+}
+
 /// A scene snapshot ready to trace. Later scene edits are not reflected.
 pub struct Renderer {
     ctx: MetalContext,
@@ -79,6 +174,7 @@ pub struct Renderer {
     emitters: Obj<dyn MTLBuffer>,
     emit_cdf: Obj<dyn MTLBuffer>,
     emitter_count: u32,
+    env: EnvMap,
     sky: [f32; 3],
     aperture: f32,
     focus: f32,
@@ -208,8 +304,7 @@ impl Renderer {
                     color,
                     intensity,
                 } => (1, color, intensity, direction),
-                // Environment maps are handled in the next commit.
-                Light::EnvironmentMap { .. } => continue,
+                Light::EnvironmentMap { .. } => continue, // see `build_env`
                 Light::Environment { color } => {
                     sky.iter_mut().zip(color).for_each(|(s, c)| *s += c);
                     continue;
@@ -239,6 +334,7 @@ impl Renderer {
             light_count: (lights.len() / LIGHT_WORDS) as u32,
             lights: upload(ctx, &lights)?,
             emitter_count: powers.len() as u32,
+            env: build_env(ctx, scene)?,
             emitters: upload(ctx, &emitters)?,
             emit_cdf: upload(ctx, &emit_cdf)?,
             sky,
@@ -370,7 +466,7 @@ impl Renderer {
 
     /// Traces `samples` more paths per pixel into `acc` and waits for the GPU.
     pub fn accumulate(&self, acc: &mut Accumulation, samples: u32) -> Result<(), Error> {
-        let mut params = [0u32; 24];
+        let mut params = [0u32; 27];
         params[0] = acc.width;
         params[1] = acc.height;
         params[2] = self.camera[2].to_bits();
@@ -385,6 +481,9 @@ impl Renderer {
             *dst = src.to_bits();
         }
         params[23] = self.emitter_count;
+        params[24] = self.env.width;
+        params[25] = self.env.height;
+        params[26] = self.env.pdf_scale.to_bits();
 
         let cb = self
             .ctx
@@ -399,7 +498,7 @@ impl Renderer {
             enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
         }
         // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, materials, lights, params, accum, emitters, emit_cdf). Dispatches in one encoder run in
+        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional). Dispatches in one encoder run in
         // order, so the `+=` on `accum` never races.
         unsafe {
             enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
@@ -411,6 +510,9 @@ impl Renderer {
             enc.setBuffer_offset_atIndex(Some(&acc.buffer), 0, 7);
             enc.setBuffer_offset_atIndex(Some(&self.emitters), 0, 8);
             enc.setBuffer_offset_atIndex(Some(&self.emit_cdf), 0, 9);
+            enc.setBuffer_offset_atIndex(Some(&self.env.pixels), 0, 10);
+            enc.setBuffer_offset_atIndex(Some(&self.env.marginal), 0, 11);
+            enc.setBuffer_offset_atIndex(Some(&self.env.conditional), 0, 12);
             for k in 0..samples {
                 params[6] = acc.samples + k;
                 enc.setBytes_length_atIndex(
