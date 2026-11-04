@@ -57,7 +57,7 @@ struct KernelContext_0
     uint device* indices_0;
     float device* positions_0;
     float device* materials_0;
-    float device* lights_0;
+    uint device* lights_0;
     float device* accum_0;
 };
 
@@ -214,7 +214,7 @@ float3 cosineHemisphere_0(float3 n_0, float u1_0, float u2_0)
 
 
 #line 74
-[[kernel]] void pathtrace(uint3 tid_0 [[thread_position_in_grid]], uint device* params_1 [[buffer(6)]], metal::raytracing::acceleration_structure<metal::raytracing::instancing> scene_1 [[buffer(0)]], uint device* instances_1 [[buffer(3)]], uint device* indices_1 [[buffer(2)]], float device* positions_1 [[buffer(1)]], float device* materials_1 [[buffer(4)]], float device* lights_1 [[buffer(5)]], float device* accum_1 [[buffer(7)]])
+[[kernel]] void pathtrace(uint3 tid_0 [[thread_position_in_grid]], uint device* params_1 [[buffer(6)]], metal::raytracing::acceleration_structure<metal::raytracing::instancing> scene_1 [[buffer(0)]], uint device* instances_1 [[buffer(3)]], uint device* indices_1 [[buffer(2)]], float device* positions_1 [[buffer(1)]], float device* materials_1 [[buffer(4)]], uint device* lights_1 [[buffer(5)]], float device* accum_1 [[buffer(7)]])
 {
 
 #line 74
@@ -544,8 +544,8 @@ float3 cosineHemisphere_0(float3 n_0, float u1_0, float u2_0)
                 break;
             }
             uint o_2 = li_0 * 8U;
-            float3 col_0 = float3((&kernelContext_4)->lights_0[o_2 + 1U], (&kernelContext_4)->lights_0[o_2 + 2U], (&kernelContext_4)->lights_0[o_2 + 3U]) * float3((&kernelContext_4)->lights_0[o_2 + 4U]) ;
-            float3 vec_0 = float3((&kernelContext_4)->lights_0[o_2 + 5U], (&kernelContext_4)->lights_0[o_2 + 6U], (&kernelContext_4)->lights_0[o_2 + 7U]);
+            float3 col_0 = float3((as_type<float>(((&kernelContext_4)->lights_0[o_2 + 1U]))), (as_type<float>(((&kernelContext_4)->lights_0[o_2 + 2U]))), (as_type<float>(((&kernelContext_4)->lights_0[o_2 + 3U])))) * float3((as_type<float>(((&kernelContext_4)->lights_0[o_2 + 4U])))) ;
+            float3 vec_0 = float3((as_type<float>(((&kernelContext_4)->lights_0[o_2 + 5U]))), (as_type<float>(((&kernelContext_4)->lights_0[o_2 + 6U]))), (as_type<float>(((&kernelContext_4)->lights_0[o_2 + 7U]))));
 
 #line 147
             float3 wi_0;
@@ -558,7 +558,7 @@ float3 cosineHemisphere_0(float3 n_0, float u1_0, float u2_0)
 
 
 
-            if((as_type<uint>(((&kernelContext_4)->lights_0[o_2]))) == 0U)
+            if((&kernelContext_4)->lights_0[o_2] == 0U)
             {
                 float3 toL_0 = vec_0 - p_1;
                 float d2_0 = dot(toL_0, toL_0);

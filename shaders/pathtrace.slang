@@ -7,7 +7,7 @@ StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
 StructuredBuffer<uint> instances;   // 16 words: vertex offset, index offset, material, pad, 12 floats (row-major 3x4)
 StructuredBuffer<float> materials;  // 8 words: base color rgb, emission rgb, 2 pad
-StructuredBuffer<float> lights;     // 8 words: kind (0 point, 1 directional; uint bits), color rgb, intensity, position or travel direction xyz
+StructuredBuffer<uint> lights;      // 8 words: kind (0 point, 1 directional), color rgb, intensity, position or travel direction xyz (floats as bits)
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
                                     // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
@@ -143,12 +143,12 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         for (uint li = 0; li < lightCount; li++)
         {
             uint o = li * 8;
-            float3 col = float3(lights[o + 1], lights[o + 2], lights[o + 3]) * lights[o + 4];
-            float3 vec = float3(lights[o + 5], lights[o + 6], lights[o + 7]);
+            float3 col = float3(asfloat(lights[o + 1]), asfloat(lights[o + 2]), asfloat(lights[o + 3])) * asfloat(lights[o + 4]);
+            float3 vec = float3(asfloat(lights[o + 5]), asfloat(lights[o + 6]), asfloat(lights[o + 7]));
             float3 wi;
             float dist;
             float3 li_;
-            if (asuint(lights[o]) == 0)
+            if (lights[o] == 0)
             {
                 float3 toL = vec - p;
                 float d2 = dot(toL, toL);
