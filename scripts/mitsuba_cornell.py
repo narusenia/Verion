@@ -1,9 +1,10 @@
 """Renders the render_ppm example scene with Mitsuba 3 and compares it with Verion's render.exr.
 
 Usage: mise exec -- ~/.local/share/mise/installs/pipx-mitsuba/3.7.1/mitsuba/bin/python \
-           scripts/mitsuba_cornell.py [out_dir] [width] [height] [spp]
+           scripts/mitsuba_cornell.py [out_dir] [width] [height] [spp] [walls]
 out_dir must hold the render.exr written by the example (cargo run --release -p verion-gpu-metal
 --example render_ppm -- out_dir w h spp). Writes out_dir/mitsuba.exr.
+`walls` leaves out the spheres (pass it to the example too).
 Differences from Verion: Mitsuba's analytic spheres versus Verion's icospheres.
 """
 
@@ -36,10 +37,11 @@ def quad(bsdf, center, rot_axis, rot_deg, half=2.0, emitter=None):
 
 
 grey = diffuse([0.75] * 3)
-scene = mi.load_dict(
+desc = (
     {
         "type": "scene",
-        "integrator": {"type": "path", "max_depth": 8},
+        # Verion: 8 iterations, each a hit (emission) plus a light-sampling segment = 9 segments.
+        "integrator": {"type": "path", "max_depth": 9},
         "sensor": {
             "type": "perspective",
             "fov_axis": "y",
@@ -55,6 +57,8 @@ scene = mi.load_dict(
         "left": quad(diffuse([0.75, 0.15, 0.15]), [-2, 0, 0], [0, 1, 0], 90),
         "right": quad(diffuse([0.15, 0.6, 0.15]), [2, 0, 0], [0, 1, 0], -90),
         "light": quad(diffuse([0.0] * 3), [0, 1.99, 0], [1, 0, 0], 90, half=0.6, emitter=[14.0] * 3),
+        # Verion emits from both faces; Mitsuba's area emitter is one-sided, so a copy just above the light faces the ceiling.
+        "light_back": quad(diffuse([0.0] * 3), [0, 1.9901, 0], [1, 0, 0], -90, half=0.6, emitter=[14.0] * 3),
         "gold": {
             "type": "sphere",
             "center": [-0.9, -1.3, -0.6],
@@ -73,6 +77,9 @@ scene = mi.load_dict(
                   "intensity": {"type": "rgb", "value": [1.5, 1.425, 1.35]}},
     }
 )
+if len(sys.argv) > 5 and sys.argv[5] == "walls":
+    del desc["gold"], desc["glass"]
+scene = mi.load_dict(desc)
 
 image = mi.render(scene)
 mi.util.write_bitmap(str(out / "mitsuba.exr"), image)
@@ -92,3 +99,5 @@ print("mean RGB  mitsuba", [round(x, 4) for x in mm], " verion", [round(x, 4) fo
       " ratio", [round(b / a, 4) for a, b in zip(mm, mv)])
 abs_err = mean([abs(a - b) for m, r in zip(mine, ref) for a, b in zip(m, r)])
 print(f"mean abs error / mean radiance: {abs_err / mean(mm):.4f} (noise floor falls with 1/sqrt(spp))")
+worst = max(abs(b / a - 1) for a, b in zip(mm, mv))
+print(f"worst channel deviation {worst:.2%}: {'PASS' if worst <= 0.02 else 'FAIL'} (limit 2%)")
