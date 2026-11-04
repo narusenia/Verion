@@ -8,7 +8,7 @@ Verion は、Blender / Cinema 4D / Maya などの DCC から使える GPU レン
 - **物理レンダリング**: パストレーシングによる基準品質。AI 近似なしの Reference 経路を常に保持する
 - **高速化**: ReSTIR・ニューラルキャッシュ・デノイズ・差分更新で、同一画質に到達する時間（Time to Quality）を縮める（表現力を妨げない範囲で追う）
 
-構想の全体像と研究仮説は `docs/draft_arch.md` にある。本書が要件の正本で、草案との差分は ADR に記録する。
+構想の全体像と研究仮説は `docs/drafts/` にある（元の草案は `draft_arch.md`。ほかに GPU 性能計画、Adaptive Sampling 計画、リアルタイム版 Aerion の構想）。本書が要件の正本で、草案との差分は ADR に記録する。
 
 ## 位置づけ
 

@@ -38,9 +38,9 @@ NEE と MIS を使うパストレーサー。Russian Roulette、薄レンズ DoF
 
 ### 受入条件
 
-- [ ] Cornell Box で参照画像と一致する（REQ-QA-001）
-- [ ] 累積サンプル数に対して分散が単調に減る
-- [ ] Megakernel 形式で動く（Wavefront は REQ-GPU-005）
+- [x] Cornell Box で参照画像と一致する（REQ-QA-001。平均輝度の偏差 0.19%）
+- [x] 累積サンプル数に対して分散が単調に減る（`variance_decreases_with_samples`）
+- [x] Megakernel 形式で動く（Wavefront は REQ-GPU-005）
 
 ### 依存要件
 
@@ -63,7 +63,7 @@ Diffuse、GGX Conductor、Dielectric（透過）。glTF の metallic-roughness �
 ### 受入条件
 
 - [x] 白炉テストでエネルギー保存が許容誤差内（REQ-QA-002。多重散乱補正なしの損失を除く）
-- [ ] 金属・ガラスの基礎シーンが参照画像と一致する
+- [x] 金属・ガラスの基礎シーンが参照画像と一致する（Cornell Box の金属・ガラスを Mitsuba 3 で照合）
 
 ### 依存要件
 
@@ -83,8 +83,8 @@ BaseColor / Normal / MetallicRoughness / Emissive テクスチャとミップ。
 
 ### 受入条件
 
-- [ ] 各ライト種別に NEE と MIS が効く
-- [ ] HDRI は重点サンプリングする
+- [x] 各ライト種別に NEE と MIS が効く（delta ライトは NEE のみ。MIS は面光源・HDRI。IES とライトリンクは対象外）
+- [x] HDRI は重点サンプリングする（輝度 × sin θ の周辺・条件 CDF）
 
 ### 依存要件
 

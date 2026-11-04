@@ -31,6 +31,11 @@ Metal 先行・Vulkan 後追いなので、BSDF・Integrator・Stylization を 2
 
 上記を M1 の項目 3 以降で確認し、問題があればこの ADR を更新する。
 
+### 追記（2026-11-04）
+
+- 検証済み: 複数バッファ・構造体のバインド、複数マテリアル（`shaders/pathtrace.slang` が 10 以上のバッファを使うパストレーサーを Mitsuba 3 照合まで通した）
+- 未検証のまま: intersection function table（未使用）、SPIR-V 側、M4 Pro での動作、デバッグ性
+
 ## 結果
 
 - Slang の制約に縛られる

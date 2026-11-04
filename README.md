@@ -52,7 +52,7 @@ Style is applied at the first surface the camera sees. There we compute the cont
 
 ## Documentation
 
-Start with [`docs/requirements/overview.md`](docs/requirements/overview.md). The plan is in [`docs/implementation/roadmap.md`](docs/implementation/roadmap.md), the reasons behind each decision are in [`docs/adr/`](docs/adr), and the first concept, including research hypotheses, is in [`docs/draft_arch.md`](docs/draft_arch.md). Where the draft and the requirements disagree, the requirements win.
+Start with [`docs/requirements/overview.md`](docs/requirements/overview.md). The plan is in [`docs/implementation/roadmap.md`](docs/implementation/roadmap.md), the reasons behind each decision are in [`docs/adr/`](docs/adr), and the first concept, including research hypotheses, is in [`docs/drafts/draft_arch.md`](docs/drafts/draft_arch.md). Where the draft and the requirements disagree, the requirements win.
 
 ## Development
 

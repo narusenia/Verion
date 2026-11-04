@@ -52,7 +52,7 @@ Verion は、Blender・Cinema 4D・Maya などの DCC から使うことを想�
 
 ## ドキュメント
 
-最初に [`docs/requirements/overview.md`](docs/requirements/overview.md) を読むとよい。計画は [`docs/implementation/roadmap.md`](docs/implementation/roadmap.md)、各判断の理由は [`docs/adr/`](docs/adr)、研究仮説を含む最初の構想は [`docs/draft_arch.md`](docs/draft_arch.md) にある。草案と要件が食い違う場合は、要件を正とする。
+最初に [`docs/requirements/overview.md`](docs/requirements/overview.md) を読むとよい。計画は [`docs/implementation/roadmap.md`](docs/implementation/roadmap.md)、各判断の理由は [`docs/adr/`](docs/adr)、研究仮説を含む最初の構想は [`docs/drafts/draft_arch.md`](docs/drafts/draft_arch.md) にある。草案と要件が食い違う場合は、要件を正とする。
 
 ## 開発環境
 

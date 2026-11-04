@@ -8,7 +8,7 @@ Verion is a GPU renderer written in Rust for Blender / Cinema 4D / Maya. Its cor
 - Specifications: `docs/specifications/` (`architecture.md` first; not written yet)
 - Plans: `docs/implementation/roadmap.md`, then `docs/implementation/M{n}-*/README.md`
 - Decisions: `docs/adr/`
-- Early concept (research hypotheses, not requirements): `docs/draft_arch.md`
+- Early concepts (research hypotheses, not requirements): `docs/drafts/` (`draft_arch.md` is the original; the others are the GPU performance plan, the adaptive sampling plan and the Aerion real-time engine)
 - Session handoffs: `docs/handoff/` (never at the repository root)
 
 ## Commands
