@@ -10,6 +10,7 @@ example's normal.exr on a 6x6 floor.
 Differences from Verion: Mitsuba's analytic spheres versus Verion's icospheres.
 """
 
+import array
 import math
 import sys
 from pathlib import Path
@@ -118,6 +119,8 @@ def beauty(path):
 
 
 verion = beauty(out / "render.exr")
+# RGB-only copy for FLIP, whose CLI wants both images in the same plain format.
+mi.util.write_bitmap(str(out / "verion_rgb.exr"), mi.TensorXf(array.array("f", verion), shape=(h, w, 3)))
 mine, ref = ([c[i::3] for i in range(3)] for c in (list(image.array), verion))
 mean = lambda v: sum(v) / len(v)  # noqa: E731
 mm, mv = [mean(c) for c in mine], [mean(c) for c in ref]

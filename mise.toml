@@ -12,6 +12,8 @@ jq = "1.8"
 # Mitsuba 3.7 wheels are built for CPython 3.12 only.
 python = "3.12"
 "pipx:mitsuba" = "3.7.1"
+# FLIP perceptual error (NVIDIA, BSD-3-Clause; pulls in numpy) for the cross-check; reported only.
+"pipx:flip-evaluator" = "1.7"
 
 [tasks.fmt]
 description = "Check formatting"
