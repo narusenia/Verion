@@ -6,6 +6,8 @@ rust = { version = "1.99", components = "rustfmt,clippy", profile = "minimal" }
 lefthook = "2.1.5"
 jq = "1.8"
 "aqua:EmbarkStudios/cargo-deny" = "latest"
+# Slang compiler (Apache-2.0 with LLVM Exceptions); M1 spike for ADR-0002.
+"github:shader-slang/slang" = { version = "2026.21", bin = "slangc" }
 
 [tasks.fmt]
 description = "Check formatting"

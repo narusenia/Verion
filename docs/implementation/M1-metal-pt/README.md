@@ -5,7 +5,7 @@
 
 | # | 項目 | REQ | 状態 |
 |---|------|-----|------|
-| 1 | Slang → MSL で Metal RT が動くスパイク（結論を ADR に記録） | REQ-GPU-002 | 未着手 |
+| 1 | Slang → MSL で Metal RT が動くスパイク（結論を ADR に記録） | REQ-GPU-002 | 進行中（ADR-0002 に暫定採用を記録。未検証点は ADR 参照） |
 | 2 | workspace・mise・CI・deny の雛形、GPU CI の実行環境を決める | REQ-INFRA-001 / 002 / 003 | 済（CI は GPU 不要の検査のみ。GPU テストは開発機で実行） |
 | 3 | Metal の Device / Queue / BLAS / TLAS | REQ-GPU-001 / 003 | 未着手 |
 | 4 | Scene IR と revision | REQ-CORE-001 | 未着手 |
