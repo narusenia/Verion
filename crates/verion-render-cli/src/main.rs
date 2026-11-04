@@ -5,6 +5,29 @@ use std::{fs, path::PathBuf, time::Instant};
 
 use clap::Parser;
 
+/// Render mode. Stylization and AI approximation (REQ-STY, NRC, ReSTIR) do not exist yet, so
+/// Reference is the only mode; add variants here when they land and set `physical` accordingly.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    /// Physical path tracing only (REQ-CORE-006).
+    Reference,
+}
+
+impl Mode {
+    fn name(self) -> &'static str {
+        match self {
+            Mode::Reference => "reference",
+        }
+    }
+
+    /// No non-physical processing in the output.
+    fn physical(self) -> bool {
+        match self {
+            Mode::Reference => true,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(version, about = "Headless Verion renderer")]
 struct Args {
@@ -17,6 +40,8 @@ struct Args {
     width: u32,
     #[arg(long, default_value_t = 384)]
     height: u32,
+    #[arg(long, value_enum, default_value_t = Mode::Reference)]
+    mode: Mode,
     /// Samples per pixel
     #[arg(long, default_value_t = 64)]
     spp: u32,
@@ -150,7 +175,7 @@ fn run(args: &Args) -> Result<(), String> {
             object_id: Some(&aov.object_id),
         },
         info: RenderInfo {
-            physical: true,
+            physical: args.mode.physical(),
             samples: args.spp,
         },
     };
@@ -161,12 +186,13 @@ fn run(args: &Args) -> Result<(), String> {
 
     if let Some(path) = &args.metrics {
         let json = format!(
-            "{{\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":\"reference\",\
+            "{{\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\
 \"load_s\":{load_s},\"build_s\":{build_s},\"render_s\":{render_s},\"aov_s\":{aov_s},\
 \"write_s\":{write_s},\"total_s\":{}}}\n",
             json_str(&args.scene.display().to_string()),
             json_str(&args.output.display().to_string()),
             args.spp,
+            json_str(args.mode.name()),
             total.elapsed().as_secs_f64(),
         );
         fs::write(path, json).map_err(|e| format!("write {}: {e}", path.display()))?;
@@ -194,6 +220,8 @@ mod tests {
     fn parses_required_and_defaults() {
         let a = Args::try_parse_from(["render-cli", "a.gltf", "-o", "o.exr"]).unwrap();
         assert_eq!((a.width, a.height, a.spp), (512, 384, 64));
+        assert_eq!(a.mode, Mode::Reference);
+        assert!(Mode::Reference.physical());
         assert!(Args::try_parse_from(["render-cli", "a.gltf"]).is_err());
     }
 
