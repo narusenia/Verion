@@ -8,6 +8,10 @@ jq = "1.8"
 "aqua:EmbarkStudios/cargo-deny" = "latest"
 # Slang compiler (Apache-2.0 with LLVM Exceptions); M1 spike for ADR-0002.
 "github:shader-slang/slang" = { version = "2026.21", bin = "slangc" }
+# Reference renderer for cross-checking Verion output (M1 item 12); not used by the build.
+# Mitsuba 3.7 wheels are built for CPython 3.12 only.
+python = "3.12"
+"pipx:mitsuba" = "3.7.1"
 
 [tasks.fmt]
 description = "Check formatting"
