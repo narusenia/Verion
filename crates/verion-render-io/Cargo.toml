@@ -1,0 +1,18 @@
+[package]
+name = "verion-render-io"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gltf = { version = "1.4", features = [
+    "KHR_lights_punctual",
+    "KHR_materials_transmission",
+    "KHR_materials_ior",
+    "KHR_materials_emissive_strength",
+] }
+verion-scene = { version = "0.0.0", path = "../verion-scene" }
+
+[lints]
+workspace = true
