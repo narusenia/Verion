@@ -13,7 +13,7 @@
 | 6 | BSDF・Integrator・テクスチャ・HDRI・ライト | REQ-CORE-002 / 003 / 004 | 進行中（HDRI の `.hdr` / `.exr` 読み込みは実装済み。Cornell Box・球 + 手続き生成 HDRI・Spot・法線マップは Mitsuba 3 照合済み。項目 12） |
 | 7 | カラーマネジメント | REQ-CORE-005 | 進行中（作業色空間 Linear Rec.709 / ACEScg、glTF 取り込み時の入力変換、表示変換 = 目標色空間+Reinhard+sRGB OETF は実装済み。EXR 側の変換は項目 8 で接続） |
 | 8 | EXR 多チャンネル出力 | REQ-IO-003 | 済（Beauty + Normal AOV、物理/非物理・spp・作業色空間のメタデータ、chromaticities、`exr` crate による書き出しは実装済み。Albedo・Depth（カメラ前方軸の距離）・ObjectId（インスタンス番号 + 1、32bit 整数）も実装済み。外部ビューアでの目視確認も済み） |
-| 9 | render-cli | REQ-VIEW-001 | 未着手 |
+| 9 | render-cli | REQ-VIEW-001 | 進行中（`render-cli scene.gltf -o out.exr [--width --height --spp --metrics m.json]` は動作。計測 JSON は CPU 側の経過時間のみ（GPU 計測は項目 10）。Stylization・モード引数は対応機能が未実装のため未対応。CI からの呼び出しは未接続） |
 | 10 | GPU 計測 | REQ-GPU-004 | 未着手 |
 | 11 | Reference モード | REQ-CORE-006 | 未着手 |
 | 12 | Mitsuba 3 照合・白炉テスト・テストシーン管理 | REQ-QA-001 / 002 / 004 | 進行中（Cornell Box（拡散・金属・ガラス・点光源・面光源）は `scripts/mitsuba_cornell.py` で照合済み。平均輝度の最悪チャンネル偏差 ±1% 以内で合格とし、実測は 0.19%。球 + 手続き生成 HDRI・Spot・法線マップ（最大傾き約 35°）も `scripts/mitsuba_cornell.py` のモード（`hdri` / `spot` / `normalmap`）で照合済み。最悪チャンネル偏差は 0.07% / 0.14% / 0.36%、4x4 ブロック平均の最悪は 0.19% / 1.89% / 1.39%。全シーンは開発機で `mise run crosscheck` が実行する（Metal GPU が要るため CI の対象外）。合否は平均輝度の最悪チャンネル 1% 以内かつ 4x4 ブロック平均 2% 以内で、PSNR は表示のみ（ノイズ支配のため）。実物の HDRI（外部アセットの選定後）・FLIP・白炉は未） |
