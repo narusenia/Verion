@@ -141,3 +141,15 @@ fn invalid_input_is_rejected_before_the_gpu() {
         .is_err()
     );
 }
+
+#[test]
+fn oversized_scene_reports_out_of_memory() {
+    let Ok(ctx) = MetalContext::new() else {
+        return;
+    };
+    // Twice the working set can never fit; the check runs before any allocation.
+    let huge = ctx.device().recommendedMaxWorkingSetSize() as usize * 2;
+    let err = ctx.check_fits(huge).unwrap_err();
+    assert!(matches!(err, Error::OutOfMemory { .. }), "{err}");
+    assert!(err.to_string().contains("GPU memory"));
+}
