@@ -8,7 +8,7 @@ use objc2_metal::{
     MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder,
     MTLComputePipelineState, MTLDevice, MTLLibrary, MTLResourceOptions, MTLResourceUsage, MTLSize,
 };
-use verion_scene::{Light, Scene};
+use verion_scene::{Light, Scene, Transform};
 
 use crate::{Blas, Error, Instance, MetalContext, Obj, Tlas};
 
@@ -19,9 +19,15 @@ const PATHTRACE_MSL: &str = include_str!("../shaders/pathtrace.metal");
 const MAX_DEPTH: u32 = 8;
 const MATERIAL_WORDS: usize = 12;
 const LIGHT_WORDS: usize = 8;
+/// Words per emissive triangle; must match `shaders/pathtrace.slang`.
+const EMITTER_WORDS: usize = 16;
 
 /// Words per record in the instance table; must match `shaders/normals.slang`.
 const INSTANCE_WORDS: usize = 16;
+
+fn world(t: &Transform, p: [f32; 3]) -> [f32; 3] {
+    std::array::from_fn(|r| t[r][0] * p[0] + t[r][1] * p[1] + t[r][2] * p[2] + t[r][3])
+}
 
 fn upload<T: Copy>(ctx: &MetalContext, data: &[T]) -> Result<Obj<dyn MTLBuffer>, Error> {
     // Metal rejects zero-length buffers; a dummy word keeps empty tables bindable.
@@ -70,6 +76,9 @@ pub struct Renderer {
     materials: Obj<dyn MTLBuffer>,
     lights: Obj<dyn MTLBuffer>,
     light_count: u32,
+    emitters: Obj<dyn MTLBuffer>,
+    emit_cdf: Obj<dyn MTLBuffer>,
+    emitter_count: u32,
     sky: [f32; 3],
     aperture: f32,
     focus: f32,
@@ -96,6 +105,8 @@ impl Renderer {
 
         let mut table = vec![0u32; scene.instances().len() * INSTANCE_WORDS];
         let mut tlas_instances = Vec::new();
+        let mut emitters: Vec<f32> = Vec::new();
+        let mut powers: Vec<f32> = Vec::new(); // area * radiance per emissive triangle
         for (record, inst) in table.chunks_mut(INSTANCE_WORDS).zip(scene.instances()) {
             let (vertex_offset, index_offset) = offsets[inst.mesh.index()];
             record[0] = vertex_offset;
@@ -103,6 +114,31 @@ impl Renderer {
             record[2] = inst.material.index() as u32;
             for (word, v) in record[4..].iter_mut().zip(inst.transform.iter().flatten()) {
                 *word = v.to_bits();
+            }
+            let le = scene.materials()[inst.material.index()].base.emission;
+            let radiance = le[0] + le[1] + le[2];
+            if radiance > 0.0 {
+                let mesh = &scene.meshes()[inst.mesh.index()];
+                record[3] = powers.len() as u32 + 1;
+                for tri in mesh.indices().as_chunks::<3>().0 {
+                    let [a, b, c] = [0, 1, 2]
+                        .map(|k| world(&inst.transform, mesh.positions()[tri[k] as usize]));
+                    let (e1, e2) = (
+                        [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+                        [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+                    );
+                    let cross = [
+                        e1[1] * e2[2] - e1[2] * e2[1],
+                        e1[2] * e2[0] - e1[0] * e2[2],
+                        e1[0] * e2[1] - e1[1] * e2[0],
+                    ];
+                    let area = 0.5
+                        * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+                    powers.push(area * radiance);
+                    // Degenerate triangles keep their slot (area 0) so primitive index maps to a record.
+                    emitters.extend(a.into_iter().chain(b).chain(c).chain(le));
+                    emitters.extend([area, 0.0, 0.0, 0.0]);
+                }
             }
             tlas_instances.push(Instance {
                 blas: inst.mesh.index() as u32,
@@ -117,6 +153,24 @@ impl Renderer {
         camera[2] = (cam.vertical_fov * 0.5).tan();
         for (dst, src) in camera[4..].iter_mut().zip(cam.transform.iter().flatten()) {
             *dst = *src;
+        }
+
+        // Selection probability proportional to emitted power; the CDF drives light sampling.
+        let total: f32 = powers.iter().sum();
+        let mut emit_cdf = Vec::with_capacity(powers.len());
+        let mut running = 0.0;
+        for (record, power) in emitters
+            .as_chunks_mut::<EMITTER_WORDS>()
+            .0
+            .iter_mut()
+            .zip(&powers)
+        {
+            record[13] = power / total;
+            running += power / total;
+            emit_cdf.push(running);
+        }
+        if let Some(last) = emit_cdf.last_mut() {
+            *last = 1.0;
         }
 
         let mut materials = Vec::with_capacity(scene.materials().len() * MATERIAL_WORDS);
@@ -182,6 +236,9 @@ impl Renderer {
             materials: upload(ctx, &materials)?,
             light_count: (lights.len() / LIGHT_WORDS) as u32,
             lights: upload(ctx, &lights)?,
+            emitter_count: powers.len() as u32,
+            emitters: upload(ctx, &emitters)?,
+            emit_cdf: upload(ctx, &emit_cdf)?,
             sky,
             aperture: cam.aperture_radius,
             focus: cam.focus_distance,
@@ -311,7 +368,7 @@ impl Renderer {
 
     /// Traces `samples` more paths per pixel into `acc` and waits for the GPU.
     pub fn accumulate(&self, acc: &mut Accumulation, samples: u32) -> Result<(), Error> {
-        let mut params = [0u32; 23];
+        let mut params = [0u32; 24];
         params[0] = acc.width;
         params[1] = acc.height;
         params[2] = self.camera[2].to_bits();
@@ -325,6 +382,7 @@ impl Renderer {
         for (dst, src) in params[20..23].iter_mut().zip(self.sky) {
             *dst = src.to_bits();
         }
+        params[23] = self.emitter_count;
 
         let cb = self
             .ctx
@@ -339,7 +397,7 @@ impl Renderer {
             enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
         }
         // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, materials, lights, params, accum). Dispatches in one encoder run in
+        // indices, instances, materials, lights, params, accum, emitters, emit_cdf). Dispatches in one encoder run in
         // order, so the `+=` on `accum` never races.
         unsafe {
             enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
@@ -349,6 +407,8 @@ impl Renderer {
             enc.setBuffer_offset_atIndex(Some(&self.materials), 0, 4);
             enc.setBuffer_offset_atIndex(Some(&self.lights), 0, 5);
             enc.setBuffer_offset_atIndex(Some(&acc.buffer), 0, 7);
+            enc.setBuffer_offset_atIndex(Some(&self.emitters), 0, 8);
+            enc.setBuffer_offset_atIndex(Some(&self.emit_cdf), 0, 9);
             for k in 0..samples {
                 params[6] = acc.samples + k;
                 enc.setBytes_length_atIndex(
