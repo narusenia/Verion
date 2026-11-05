@@ -3,16 +3,21 @@
 
 use gltf::json::Value;
 use verion_scene::{
-    ColorAdjust, ColorSpace, HybridSurface, OutlineStyle, RimLight, ShadowPalette,
+    ColorAdjust, ColorSpace, HybridSurface, ImageId, MatCap, OutlineStyle, RimLight, ShadowPalette,
     StylizationLayer, StylizedSpecular, ToonRamp,
 };
 
 pub const NAME: &str = "VERION_materials_stylization";
 
+/// Turns a glTF texture index into an IR image. `Err` is a bad index (an import error); `Ok(None)`
+/// is an image that cannot be used (the layer is skipped with a warning).
+pub type ResolveTexture<'a> = &'a mut dyn FnMut(usize) -> Result<Option<ImageId>, String>;
+
 /// Layers plus warnings for unknown properties. `Err` carries a message for the import error.
 pub fn parse(
     value: &Value,
     space: ColorSpace,
+    resolve: ResolveTexture,
 ) -> Result<(Vec<StylizationLayer>, Vec<String>), String> {
     let root = value.as_object().ok_or("must be an object")?;
     let mut warnings = Vec::new();
@@ -24,6 +29,7 @@ pub fn parse(
         "rimLight",
         "stylizedSpecular",
         "outlineStyle",
+        "matcap",
     ];
     for key in root.keys().filter(|k| !known.contains(&k.as_str())) {
         warnings.push(format!("unknown property {key}"));
@@ -121,6 +127,31 @@ pub fn parse(
             depth_threshold: get("depthThreshold", d.depth_threshold)?,
             crease_angle: get("creaseAngle", d.crease_angle)?,
         }));
+    }
+    if let Some(v) = root.get("matcap") {
+        let o = v.as_object().ok_or("matcap must be an object")?;
+        warn_unknown(
+            "matcap",
+            o.keys(),
+            &["texture", "strength", "albedo"],
+            &mut warnings,
+        );
+        let index = o
+            .get("texture")
+            .and_then(Value::as_object)
+            .and_then(|t| t.get("index"))
+            .and_then(Value::as_u64)
+            .ok_or("matcap.texture.index is required (a non-negative integer)")?;
+        let get = |k: &str, default| number(o.get(k), default, &format!("matcap.{k}"));
+        let (strength, albedo) = (get("strength", 1.0)?, get("albedo", 0.0)?);
+        match resolve(index as usize)? {
+            Some(image) => layers.push(StylizationLayer::MatCap(MatCap {
+                image,
+                strength,
+                albedo,
+            })),
+            None => warnings.push("matcap ignored: its texture could not be used".into()),
+        }
     }
     for layer in &layers {
         layer.validate().map_err(|e| format!("{e:?}"))?;
@@ -228,11 +259,32 @@ mod tests {
     use super::*;
 
     fn parse_str(s: &str) -> Result<(Vec<StylizationLayer>, Vec<String>), String> {
-        parse(&serde_json_from(s), ColorSpace::LinearRec709)
+        let mut scene = verion_scene::Scene::new();
+        let image = scene.add_image(verion_scene::Image::new(1, 1, vec![[1.0; 3]]).unwrap());
+        parse(&serde_json_from(s), ColorSpace::LinearRec709, &mut |i| {
+            if i == 0 {
+                Ok(Some(image))
+            } else {
+                Err(format!("texture {i} does not exist"))
+            }
+        })
     }
 
     fn serde_json_from(s: &str) -> Value {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn matcap_defaults_and_ranges() {
+        let (layers, warnings) = parse_str(r#"{"matcap": {"texture": {"index": 0}}}"#).unwrap();
+        assert!(warnings.is_empty());
+        let [StylizationLayer::MatCap(m)] = &layers[..] else {
+            panic!()
+        };
+        assert_eq!((m.strength, m.albedo), (1.0, 0.0));
+        assert!(parse_str(r#"{"matcap": {"texture": {"index": 0}, "strength": 1.5}}"#).is_err());
+        assert!(parse_str(r#"{"matcap": {"texture": {"index": 1}}}"#).is_err()); // no such texture
+        assert!(parse_str(r#"{"matcap": {}}"#).is_err()); // the texture is required
     }
 
     #[test]

@@ -122,6 +122,8 @@ struct Importer<'a> {
     images: &'a [gltf::image::Data],
     /// (glTF image, sRGB-encoded) -> IR image, so one file used two ways becomes two linear images.
     image_cache: HashMap<(usize, bool), Option<ImageId>>,
+    /// glTF texture index -> glTF image index, for textures the extensions refer to by index.
+    texture_sources: Vec<usize>,
     scene: Scene,
     warnings: Vec<String>,
     /// (glTF mesh, primitive) -> IR mesh + material, so shared meshes stay shared.
@@ -141,6 +143,7 @@ fn convert(
         buffers,
         images,
         image_cache: HashMap::new(),
+        texture_sources: doc.textures().map(|t| t.source().index()).collect(),
         scene: {
             let mut scene = Scene::new();
             scene.set_working_space(space);
@@ -367,10 +370,20 @@ impl Importer<'_> {
 
         let mut stylization = Vec::new();
         if let Some(value) = m.extension_value(stylization_ext::NAME) {
+            let space = self.space;
+            let mut resolve = |index: usize| {
+                let source = *self
+                    .texture_sources
+                    .get(index)
+                    .ok_or(format!("texture {index} does not exist"))?;
+                Ok(self.texture(&name, "matcap", 0, source, true))
+            };
             let (layers, warnings) =
-                stylization_ext::parse(value, self.space).map_err(|why| Error::Stylization {
-                    material: name.clone(),
-                    why,
+                stylization_ext::parse(value, space, &mut resolve).map_err(|why| {
+                    Error::Stylization {
+                        material: name.clone(),
+                        why,
+                    }
                 })?;
             stylization = layers;
             self.warnings.extend(
@@ -777,6 +790,50 @@ mod tests {
           "buffers": [{{"byteLength": 120}}]
         }}"#
         )
+    }
+
+    fn textured_matcap_json(matcap: &str) -> String {
+        textured_json(0).replace(
+            r#""normalTexture": {"index": 0}"#,
+            &format!(
+                r#""normalTexture": {{"index": 0}},
+                "extensions": {{"VERION_materials_stylization": {{"matcap": {matcap}}}}}"#
+            ),
+        )
+    }
+
+    #[test]
+    fn imports_a_matcap_texture_as_a_srgb_image() {
+        let json =
+            textured_matcap_json(r#"{"texture": {"index": 0}, "strength": 0.6, "albedo": 0.5}"#);
+        let Import { scene, warnings } = load_gltf_slice(&glb(&json, &PNG)).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let material = &scene.materials()[0];
+        // The same image file read as sRGB colour is shared with the base color texture.
+        assert_eq!(
+            material.stylization,
+            [verion_scene::StylizationLayer::MatCap(
+                verion_scene::MatCap {
+                    image: material.base.base_color_texture.unwrap(),
+                    strength: 0.6,
+                    albedo: 0.5,
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn a_matcap_needs_an_existing_texture() {
+        for matcap in [r#"{"texture": {"index": 5}}"#, r#"{"strength": 1}"#] {
+            let json = textured_matcap_json(matcap);
+            assert!(
+                matches!(
+                    load_gltf_slice(&glb(&json, &PNG)),
+                    Err(Error::Stylization { .. })
+                ),
+                "{matcap}"
+            );
+        }
     }
 
     #[test]
