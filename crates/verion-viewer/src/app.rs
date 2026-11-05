@@ -464,6 +464,12 @@ impl App {
     }
 
     fn upload(&mut self, ctx: &egui::Context) {
+        // A fresh accumulation has no samples and averages to black; keep the last picture until
+        // the first samples land. After a resize the old picture no longer fits, so show black then.
+        let fits = self.shown.len() == self.width as usize * self.height as usize;
+        if self.view == View::Beauty && self.acc.samples() == 0 && fits {
+            return;
+        }
         let display = OutputTransform::display();
         let space = self.scene.working_space();
         let mut lin = self.linear_image();
