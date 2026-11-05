@@ -397,6 +397,7 @@ mod imp {
                     samples: 0,
                     stylization_revision: 0,
                     grade: None,
+                    denoiser: None,
                 },
             };
             let path = dir.join("env.exr");
@@ -419,6 +420,7 @@ mod imp {
                     samples: 0,
                     stylization_revision: 0,
                     grade: None,
+                    denoiser: None,
                 },
             };
             let linear = OutputTransform::linear(scene.working_space());
@@ -465,6 +467,7 @@ mod imp {
                 samples: spp,
                 stylization_revision: 0,
                 grade: None,
+                denoiser: None,
             },
         };
         write_exr(

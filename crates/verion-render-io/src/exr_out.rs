@@ -25,6 +25,8 @@ pub struct RenderInfo {
     pub stylization_revision: u64,
     /// The color grade applied to Beauty; `None` when none was.
     pub grade: Option<GradeInfo>,
+    /// Beauty went through a denoiser (written as `verion/denoiser`). A denoised frame is not physical.
+    pub denoiser: Option<&'static str>,
 }
 
 /// Optional primary-ray AOVs (all the same size as the frame).
@@ -203,7 +205,7 @@ pub fn write_exr(
     let other = &mut attributes.other;
     other.insert(
         Text::from("verion/physical"),
-        text((frame.info.physical && untouched).to_string()),
+        text((frame.info.physical && untouched && frame.info.denoiser.is_none()).to_string()),
     );
     other.insert(
         Text::from("verion/samples"),
@@ -213,6 +215,9 @@ pub fn write_exr(
         Text::from("verion/stylizationRevision"),
         text(frame.info.stylization_revision.to_string()),
     );
+    if let Some(d) = frame.info.denoiser {
+        other.insert(Text::from("verion/denoiser"), text(d.to_string()));
+    }
     if let Some(g) = frame.info.grade {
         other.insert(
             Text::from("verion/exposure"),
@@ -279,6 +284,7 @@ mod tests {
                 samples: 64,
                 stylization_revision: 3,
                 grade: None,
+                denoiser: None,
             },
         }
     }
@@ -340,6 +346,20 @@ mod tests {
         };
         let plain = attrs(&frame(&beauty, None), "grade-none.exr");
         assert!(!plain.contains_key(&Text::from("verion/exposure")));
+        assert!(!plain.contains_key(&Text::from("verion/denoiser")));
+
+        let mut f = frame(&beauty, None);
+        f.info.denoiser = Some("oidn");
+        let denoised = attrs(&f, "denoised.exr");
+        let get = |k: &str| denoised.get(&Text::from(k)).cloned();
+        assert_eq!(
+            get("verion/denoiser"),
+            Some(AttributeValue::Text(Text::from("oidn")))
+        );
+        assert_eq!(
+            get("verion/physical"),
+            Some(AttributeValue::Text(Text::from("false")))
+        );
 
         let mut f = frame(&beauty, None);
         f.info.grade = Some(GradeInfo {
