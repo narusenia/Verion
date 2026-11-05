@@ -175,6 +175,27 @@ fn wavefront_matches_the_megakernel() {
 }
 
 #[test]
+fn adaptive_gives_the_same_image_with_both_integrators() {
+    let Some(ctx) = context() else { return };
+    let mut r = Renderer::new(&ctx, &furnace_room(0.5, 1.0)).unwrap();
+    r.set_adaptive(Some(Adaptive {
+        threshold: 0.05,
+        min_spp: 4,
+    }));
+    let mega = accumulate(&r, 32);
+    r.set_integrator(Integrator::Wavefront);
+    let wave = accumulate(&r, 32);
+    assert_eq!(wave.mean(), mega.mean());
+    assert_eq!(wave.sample_counts(), mega.sample_counts());
+    let counts = mega.sample_counts().unwrap();
+    // Some pixels stop early, some take every sample.
+    assert!(
+        counts.iter().any(|&n| n < 32) && counts.contains(&32),
+        "{counts:?}"
+    );
+}
+
+#[test]
 fn adaptive_with_a_zero_threshold_samples_every_pixel_like_uniform() {
     let Some(ctx) = context() else { return };
     let mut r = Renderer::new(&ctx, &furnace_room(0.5, 1.0)).unwrap();
@@ -187,7 +208,7 @@ fn adaptive_with_a_zero_threshold_samples_every_pixel_like_uniform() {
     let acc = accumulate(&r, 8);
     assert_eq!(acc.mean(), uniform);
     assert_eq!(acc.sample_counts().unwrap(), vec![8; 256]);
-    assert_eq!(acc.last_sampled(), 256);
+    assert_eq!(acc.active_pixels(), 256);
 }
 
 #[test]
@@ -200,7 +221,7 @@ fn adaptive_stops_converged_pixels_at_the_minimum() {
     }));
     let mut acc = accumulate(&r, 8);
     assert_eq!(acc.sample_counts().unwrap(), vec![4; 256]);
-    assert_eq!(acc.last_sampled(), 0);
+    assert_eq!(acc.active_pixels(), 0);
     assert!((mean(&acc.mean()) - 1.99).abs() < 0.2);
     // Switching it off mid-accumulation would leave the per-pixel counts stale.
     r.set_adaptive(None);

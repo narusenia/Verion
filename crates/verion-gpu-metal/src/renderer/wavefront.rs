@@ -78,31 +78,9 @@ impl Buffers {
             state: private(paths * words * 4)?,
             hits: private(paths * 16)?,
             queues: [private(paths * 4)?, private(paths * 4)?],
-            // Shared: the host reads back how many pixels the latest sample took (the last word).
-            counts: {
-                ctx.check_fits((depth + 2) * 4)?;
-                ctx.device
-                    .newBufferWithLength_options(
-                        (depth + 2) * 4,
-                        MTLResourceOptions::StorageModeShared,
-                    )
-                    .ok_or(Error::Resource("wavefront buffer"))?
-            },
+            counts: private((depth + 1) * 4)?,
             args: private(depth * 12)?,
         })
-    }
-
-    /// Pixels the latest sample traced (all of them unless adaptive sampling stopped some).
-    pub(super) fn last_sampled(&self) -> u32 {
-        // SAFETY: shared buffer of MAX_DEPTH + 2 words; read after the command buffer completed.
-        unsafe {
-            *self
-                .counts
-                .contents()
-                .as_ptr()
-                .cast::<u32>()
-                .add(MAX_DEPTH as usize + 1)
-        }
     }
 
     /// Bytes of GPU memory, for the metrics.
@@ -199,7 +177,6 @@ impl Renderer {
         cb.commit();
         cb.waitUntilCompleted();
         done.push((stage_of_cb, cb));
-        acc.last_sampled = b.last_sampled();
         for (stage, cb) in &done {
             let t = cb.GPUEndTime() - cb.GPUStartTime();
             acc.gpu_seconds += t;

@@ -26,15 +26,31 @@ const MAX_DEPTH: u32 = 8;
 /// Per-pixel adaptive sampling (REQ-ACC-007): a pixel stops taking samples once it has `min_spp`
 /// and the standard error of its luminance mean is at most `threshold` times the mean (with a
 /// floor of 0.05 for dark pixels). Stopping on the pixel's own estimate biases it slightly, so
-/// the result is non-physical. Runs on the wavefront path tracer.
+/// the result is non-physical. Works with both integrators.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Adaptive {
     pub threshold: f32,
     pub min_spp: u32,
 }
 
+impl Adaptive {
+    /// Whether a pixel with `n` samples, luminance sum `s` and square sum `s2` takes more samples.
+    /// Mirrors `pixelActive` in `shaders/include/pt_core.slang`.
+    pub fn active(&self, n: f32, s: f32, s2: f32) -> bool {
+        if n < self.min_spp as f32 {
+            return true;
+        }
+        let mean = s / n;
+        let var = (s2 / n - mean * mean).max(0.0) * n / (n - 1.0);
+        (var / n).sqrt() > self.threshold * mean.max(0.05)
+    }
+}
+
 type CommandBuffer = Obj<dyn objc2_metal::MTLCommandBuffer>;
 type Encoder = Obj<dyn MTLComputeCommandEncoder>;
+/// Most samples one megakernel thread takes in a row. Fewer dispatches cut the launch cost and the
+/// wait for each dispatch's slowest path; more would risk long-running command buffers.
+const SAMPLES_PER_DISPATCH: u32 = 8;
 /// Words of the parameter block; must match `params` in `shaders/include/pt_core.slang`.
 const PARAM_WORDS: usize = 36;
 const MATERIAL_WORDS: usize = 22;
@@ -631,9 +647,9 @@ impl Renderer {
         self.stage_timing = on;
     }
 
-    /// Turns per-pixel adaptive sampling on or off for accumulations started afterwards; it runs
-    /// the wavefront whatever `set_integrator` chose. `accumulate` then takes `samples` as the most
-    /// each pixel gets, and `Accumulation::last_sampled` tells how many pixels still take samples.
+    /// Turns per-pixel adaptive sampling on or off for accumulations started afterwards.
+    /// `accumulate` then takes `samples` as the most each pixel gets, and
+    /// `Accumulation::active_pixels` tells how many pixels still take samples.
     pub fn set_adaptive(&mut self, adaptive: Option<Adaptive>) {
         self.adaptive = adaptive;
     }
@@ -811,8 +827,8 @@ pub struct Accumulation {
     stage_seconds: Option<[f64; 2]>,
     /// Adaptive sampling only: samples, luminance sum and luminance square sum per pixel.
     pixel_stats: Option<Obj<dyn MTLBuffer>>,
-    /// Pixels the latest sample traced.
-    last_sampled: u32,
+    /// The adaptive setting the accumulation started with; the stats are only valid under it.
+    adaptive: Option<Adaptive>,
 }
 
 impl Accumulation {
@@ -965,10 +981,18 @@ impl Accumulation {
         )
     }
 
-    /// Pixels the latest `accumulate` sample traced: all of them unless adaptive sampling stopped
-    /// some. 0 means every pixel has converged and more samples change nothing.
-    pub fn last_sampled(&self) -> u32 {
-        self.last_sampled
+    /// Pixels the next sample would trace: all of them unless adaptive sampling stopped some.
+    /// 0 means every pixel has converged and more samples change nothing.
+    pub fn active_pixels(&self) -> usize {
+        match (self.stats(), self.adaptive) {
+            (Some(stats), Some(a)) => stats
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .filter(|s| a.active(s[0], s[1], s[2]))
+                .count(),
+            _ => self.width as usize * self.height as usize,
+        }
     }
 
     fn stats(&self) -> Option<&[f32]> {
@@ -1017,7 +1041,7 @@ impl Renderer {
             wavefront: None,
             stage_seconds: None,
             pixel_stats: None,
-            last_sampled: 0,
+            adaptive: None,
         })
     }
 
@@ -1065,7 +1089,10 @@ impl Renderer {
         params[28] = acc.lighting.is_some() as u32;
         params[29] = self.multiscatter as u32;
 
-        if acc.samples == 0 && acc.pixel_stats.is_none() && self.adaptive.is_some() {
+        if acc.samples == 0 {
+            acc.adaptive = self.adaptive;
+        }
+        if acc.pixel_stats.is_none() && acc.adaptive.is_some() {
             let len = acc.width as usize * acc.height as usize * 3 * size_of::<f32>();
             self.ctx.check_fits(len)?;
             acc.pixel_stats = Some(
@@ -1076,12 +1103,12 @@ impl Renderer {
             );
         }
         // The stats count every sample from the first one on, or the means come out wrong.
-        if acc.pixel_stats.is_some() != self.adaptive.is_some() {
+        if acc.adaptive.is_some() != self.adaptive.is_some() {
             return Err(Error::Scene(
                 "adaptive sampling was switched mid-accumulation; start a new accumulation".into(),
             ));
         }
-        let wavefront = self.integrator == Integrator::Wavefront || self.adaptive.is_some();
+        let wavefront = self.integrator == Integrator::Wavefront;
         if let Some(a) = self.adaptive {
             params[32] = 1;
             params[33] = a.threshold.to_bits();
@@ -1097,7 +1124,6 @@ impl Renderer {
             )?);
         }
 
-        acc.last_sampled = acc.width * acc.height;
         if wavefront {
             self.run_wavefront(acc, &mut params, samples)?;
         } else {
@@ -1170,8 +1196,11 @@ impl Renderer {
         params: &mut [u32; PARAM_WORDS],
         samples: u32,
     ) {
-        for k in 0..samples {
+        let mut k = 0;
+        while k < samples {
             params[6] = acc.samples + k;
+            params[35] = (samples - k).min(SAMPLES_PER_DISPATCH);
+            k += params[35];
             // SAFETY: the block outlives the call and Metal copies it.
             unsafe {
                 enc.setBytes_length_atIndex(

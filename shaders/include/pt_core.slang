@@ -21,7 +21,7 @@ StructuredBuffer<uint> lights;      // 16 words: kind (0 point, 1 directional, 2
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
                                     // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle, 28 lighting AOV enable, 29 multiple-scattering compensation enable,
                                     // 30 / 31 wavefront depth and path count, 32 adaptive sampling enable, 33 adaptive threshold
-                                    // (float), 34 adaptive minimum samples
+                                    // (float), 34 adaptive minimum samples, 35 megakernel samples per dispatch
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
 StructuredBuffer<float> emitters;   // 16 words per emissive world-space triangle: p0, p1, p2, radiance rgb, area, selection pdf, 2 pad
 StructuredBuffer<float> emitCdf;    // cumulative selection probability per emitter triangle, last entry 1
@@ -542,14 +542,14 @@ struct Hit
     float t;
 };
 
-// Thin-lens camera ray with a jittered pixel position, for sample params[6].
-PathState generatePath(uint px, uint py)
+// Thin-lens camera ray with a jittered pixel position, for sample `sample`.
+PathState generatePathFor(uint px, uint py, uint sample)
 {
     uint w = params[0];
     uint h = params[1];
     uint pixel = py * w + px;
     Rng rng;
-    rng.state = pcg(pixel ^ pcg(params[6] * 0x9E3779B9u + 0x7F4A7C15u));
+    rng.state = pcg(pixel ^ pcg(sample * 0x9E3779B9u + 0x7F4A7C15u));
     float t = pf(2);
     float aspect = float(w) / float(h);
     float u = (2.0 * (px + rng.next()) / w - 1.0) * aspect * t;
@@ -1035,6 +1035,22 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
     st.cls = cls;
     st.chan = chan;
     return alive;
+}
+
+PathState generatePath(uint px, uint py) { return generatePathFor(px, py, params[6]); }
+
+// Adaptive sampling (REQ-ACC-007): whether pixel p takes more samples. It stops once it has the
+// minimum samples (params[34]) and the standard error of its luminance mean is within params[33]
+// of the mean (with a floor, so near-black pixels stop too). Stopping on the pixel's own estimate
+// biases it slightly, so adaptive renders are not physical. Mirrored in `Adaptive::active` (renderer.rs).
+bool pixelActive(uint p)
+{
+    float n = pixelStats[3 * p];
+    if (n < float(params[34]))
+        return true;
+    float mean = pixelStats[3 * p + 1] / n;
+    float var = max(pixelStats[3 * p + 2] / n - mean * mean, 0.0) * n / (n - 1.0);
+    return sqrt(var / n) > pf(33) * max(mean, 0.05);
 }
 
 // Adds the finished path to the running sums of its pixel.

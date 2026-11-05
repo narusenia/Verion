@@ -13,7 +13,6 @@ void wf_args(uint3 tid : SV_DispatchThreadID)
     {
         if (params[32] == 0)
             counts[0] = pathCount();
-        counts[params[7] + 1] = counts[0]; // pixels sampled this time, read back by the host
         for (uint k = 1; k <= params[7]; k++)
             counts[k] = 0;
     }

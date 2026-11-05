@@ -15,8 +15,7 @@ RWStructuredBuffer<uint> state;    // 19: path state, see above
 RWStructuredBuffer<uint> hits;     // 20: 4 words per path: hit flag, instance, primitive, t (bits)
 StructuredBuffer<uint> queueIn;    // 21: path ids live at this depth
 RWStructuredBuffer<uint> queueOut; // 22: path ids that go on to the next depth
-RWStructuredBuffer<uint> counts;   // 23: live paths per depth (counts[d] = length of the depth-d queue), then
-                                   // the depth-0 count of the latest sample at counts[max depth + 1]
+RWStructuredBuffer<uint> counts;   // 23: live paths per depth (counts[d] = length of the depth-d queue)
 RWStructuredBuffer<uint> args;     // 24: indirect dispatch arguments, 3 words per depth
 
 static const uint WF_GROUP = 64;
