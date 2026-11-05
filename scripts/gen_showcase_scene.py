@@ -5,7 +5,10 @@ The geometry is embedded, so the file is self-contained. With a second argument 
 red base with no sheen, three sheen roughnesses and a blue sheen, lit mostly from behind.
 With `matcap` it writes the MatCap comparison instead: the same clay-colored base lit physically, then clay, metal and toon
 MatCap pictures (scripts/gen_matcaps.py, embedded) at strength 1, and the clay one at strength 0.5.
-glTF's metallicFactor defaults to 1, so non-metals set it to 0. Usage: gen_showcase_scene.py OUT_FILE [sheen|matcap]"""
+Other modes: `toon` (five Toon recipes: ramp bands, rim light, highlight ramp, shadow palette, thick outline), `lights`
+(five Toon spheres under five colored lights listed weakest first, to exercise the strength-ordered light slots) and `glass`
+(transmission spheres of roughness 0, 0.15, 0.3, 0.5 and 0.8, no dispersion).
+glTF's metallicFactor defaults to 1, so non-metals set it to 0. Usage: gen_showcase_scene.py OUT_FILE [sheen|matcap|toon|lights|glass]"""
 import base64, json, math, struct, sys
 
 from gen_matcaps import matcap_png
@@ -104,6 +107,37 @@ def main(path, mode="showcase"):
         ]
         materials[5]["pbrMetallicRoughness"]["baseColorFactor"] = [0.15, 0.15, 0.15, 1]
     images, textures = [], []
+    orange = {"baseColorFactor": [0.9, 0.6, 0.2, 1], "metallicFactor": 0, "roughnessFactor": 0.4}
+    stylized = lambda name, ext: {"name": name, "pbrMetallicRoughness": orange,  # noqa: E731
+                                  "extensions": {"VERION_materials_stylization": ext}}
+    hybrid = {"diffuse": 1, "specular": 1, "shadow": 1, "outline": 1}
+    if mode == "toon":
+        ramp = lambda t, f, p: {"thresholds": t, "feather": f, "palette": p}  # noqa: E731
+        materials[:5] = [
+            stylized("two bands", {"hybridSurface": hybrid, "toonRamp": ramp([0.4], 0.0, [[0.35, 0.3, 0.5], [1, 1, 1]]),
+                                   "outlineStyle": {"width": 2}}),
+            stylized("four soft bands", {"hybridSurface": hybrid,
+                                         "toonRamp": ramp([0.15, 0.4, 0.7], 0.08, [[0.2, 0.2, 0.4], [0.5, 0.5, 0.8], [0.8, 0.8, 0.95], [1, 1, 1]]),
+                                         "outlineStyle": {"width": 2}}),
+            stylized("rim light", {"hybridSurface": hybrid, "toonRamp": ramp([0.3], 0.02, [[0.3, 0.3, 0.55], [1, 1, 1]]),
+                                   "rimLight": {"color": [0.6, 0.8, 1], "width": 0.35, "strength": 1.5}}),
+            stylized("highlight ramp", {"hybridSurface": hybrid, "toonRamp": ramp([0.3], 0.02, [[0.3, 0.3, 0.55], [1, 1, 1]]),
+                                        "stylizedSpecular": {"size": 0.12, "ramp": ramp([0.3, 0.7], 0.05, [[0, 0, 0], [0.5, 0.5, 0.5], [1, 1, 1]])},
+                                        "outlineStyle": {"width": 2}}),
+            stylized("shadow palette", {"hybridSurface": hybrid, "toonRamp": ramp([0.3, 0.65], 0.03, [[1, 1, 1], [1, 1, 1], [1, 1, 1]]),
+                                        "shadowPalette": {"direct": {"hueShift": -25, "saturation": 1.3, "value": 0.55}},
+                                        "outlineStyle": {"width": 4, "color": [0.1, 0.02, 0.0]}}),
+        ]
+    if mode == "glass":
+        materials[:5] = [
+            {"name": f"glass roughness {r}", "pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0, "roughnessFactor": r},
+             "extensions": {"KHR_materials_transmission": {"transmissionFactor": 1}, "KHR_materials_ior": {"ior": 1.5}}}
+            for r in (0.0, 0.15, 0.3, 0.5, 0.8)]
+    if mode == "lights":
+        materials[:5] = [stylized(f"toon {k}", {"hybridSurface": hybrid,
+                                                "toonRamp": {"thresholds": [0.3, 0.65], "feather": 0.03,
+                                                             "palette": [[0.3, 0.3, 0.5], [0.7, 0.7, 0.9], [1, 1, 1]]},
+                                                "stylizedSpecular": {"size": 0.06}, "outlineStyle": {"width": 2}}) for k in range(5)]
     if mode == "matcap":
         for kind in ("clay", "metal", "toon"):
             images.append({"uri": "data:image/png;base64," + base64.b64encode(matcap_png(kind)).decode()})
@@ -143,6 +177,15 @@ def main(path, mode="showcase"):
                   {"type": "directional", "color": [1, 1, 1], "intensity": 0.35}]
     nodes.append({"rotation": key, "extensions": {"KHR_lights_punctual": {"light": 0}}})
     nodes.append({"rotation": fill, "extensions": {"KHR_lights_punctual": {"light": 1}}})
+    if mode == "lights":
+        # Five colored lights, weakest first: the light slots follow strength, not this order.
+        nodes.pop(), nodes.pop()
+        lights = []
+        for k, (yaw, color, intensity) in enumerate([(120, [1, 0.3, 1], 0.4), (200, [0.4, 1, 0.5], 0.7), (-110, [1, 1, 0.3], 1.0),
+                                                     (60, [0.4, 0.5, 1], 1.6), (-35, [1, 0.95, 0.9], 3.2)]):
+            lights.append({"type": "directional", "color": color, "intensity": intensity})
+            nodes.append({"rotation": qmul(quat_axis((0, 1, 0), yaw), quat_axis((1, 0, 0), -40)),
+                          "extensions": {"KHR_lights_punctual": {"light": k}}})
     scene_nodes = list(range(len(nodes)))
     gltf = {
         "asset": {"version": "2.0", "generator": "scripts/gen_showcase_scene.py"},
