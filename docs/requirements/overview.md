@@ -88,6 +88,7 @@ Verion は、Blender / Cinema 4D / Maya などの DCC から使える GPU レン
 | REQ-ACC-004 | Neural Radiance Cache | Should | Draft |
 | REQ-ACC-005 | Temporal 再利用と Motion Blur | Should | Draft |
 | REQ-ACC-006 | Adaptive Integrator（研究） | Could | Draft |
+| REQ-ACC-007 | 画素単位の Adaptive Sampling | Should | Draft |
 | REQ-DCC-001 | Blender RenderEngine | Must | Draft |
 | REQ-DCC-002 | Blender IPR | Must | Draft |
 | REQ-DCC-003 | 材質変換 | Should | Draft |

@@ -129,3 +129,27 @@ Motion Vector・Depth・Normal・ID による再投影と履歴破棄。Motion B
 
 - REQ-ACC-002
 - REQ-ACC-004
+
+## REQ-ACC-007: 画素単位の Adaptive Sampling
+
+| 項目 | 内容 |
+|------|------|
+| ID | REQ-ACC-007 |
+| 優先度 | Should |
+| ステータス | Draft |
+
+### 説明
+
+収束した画素のサンプルを止め、残りの GPU 時間を収束していない画素に回す。画素ごとに輝度の平均と分散を持ち、平均の標準誤差が平均に対して閾値以下になった画素を止める。自分の推定値で止めるため僅かに偏るので、出力は非物理として記録する。どの手法で描くかを選ぶ REQ-ACC-006 とは別で、こちらはサンプル数の配分だけを扱う。ADR-0015。
+
+### 受入条件
+
+- [x] Megakernel と Wavefront の両方で動き、両者の画像が一致する（`Renderer::set_adaptive`。閾値 0 は一様サンプリングとビット一致）
+- [x] 非物理として記録し、画素ごとのサンプル数を出力する（EXR の `verion/adaptiveThreshold`・`verion/physical = false`・`SampleCount` チャネル）
+- [x] 同じ GPU 時間で一様サンプリングと比べる（`scripts/eval_adaptive.sh`。難しさが画面内で偏るシーンで PSNR が上がり、一様なシーンでは下がる。ADR-0015）
+- [x] CLI と Viewer から使える（`render-cli --adaptive`、Viewer の Render 欄と Samples ビュー）
+
+### 依存要件
+
+- REQ-GPU-005
+- REQ-IO-003

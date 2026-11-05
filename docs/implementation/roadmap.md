@@ -6,7 +6,7 @@
 |-------|------|---------|
 | M1 | Metal RT、glTF 入力、PBR パストレーシング、カラーマネジメント、EXR、GPU 計測、Mitsuba 3 照合 | Cornell Box・金属・ガラス・HDRI が参照画像と一致 |
 | M2（v0.1） | HybridSurface・ToonRamp・ShadowPalette・StylizedSpecular・RimLight、写実材質の拡充、Lighting AOV、PostProcess の枠と最小の輪郭線、デノイズ、最小 Viewer | 写実から Toon までを連続調整でき、AOV を分離出力 |
-| M3 | Wavefront、Queue Compaction | Megakernel との速度比較 |
+| M3 | Wavefront、Queue Compaction、画素単位の Adaptive Sampling | Megakernel との速度比較、一様サンプリングとの等時間比較 |
 | M4 | Vulkan Backend（RTX 3080）、SER、Octane 比較の基準値 | Metal と Vulkan の画像一致 |
 | M5 | ReSTIR、差分更新、IPR 編集 | 同画質到達時間の短縮を実測 |
 | M6 | Blender 連携（IPR、UDIM、IES、Cryptomatte など） | 実シーンの編集・プレビュー・最終出力 |
