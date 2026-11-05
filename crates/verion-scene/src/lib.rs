@@ -9,7 +9,10 @@ mod scene;
 
 pub use color::{ColorSpace, Oetf, OutputTransform, ToneMap};
 pub use image::{Image, ImageError};
-pub use material::{Aov, BaseBsdf, Material, OutputChannels, StylizationLayer};
+pub use material::{
+    Aov, BaseBsdf, HybridSurface, Material, OutputChannels, StylizationError, StylizationLayer,
+    ToonRamp,
+};
 pub use mesh::{Mesh, MeshError};
 pub use scene::{
     Camera, IDENTITY, ImageId, Instance, InstanceId, Light, LightId, MaterialId, MeshId, Revisions,

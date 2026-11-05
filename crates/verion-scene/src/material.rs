@@ -49,9 +49,116 @@ impl Default for BaseBsdf {
     }
 }
 
-/// No layers are defined yet; variants arrive with REQ-STY-001 to 005.
+/// Stylization is non-physical: Reference mode must skip every layer (ADR-0008).
+/// Variants for REQ-STY-003 to 005 arrive with their own slices.
 #[derive(Clone, Debug, PartialEq)]
-pub enum StylizationLayer {}
+pub enum StylizationLayer {
+    HybridSurface(HybridSurface),
+    ToonRamp(ToonRamp),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StylizationError {
+    /// A parameter is outside its range (NaN counts as outside).
+    OutOfRange(&'static str),
+    /// `ToonRamp` needs one palette color per band.
+    PaletteLength { expected: usize, found: usize },
+}
+
+impl StylizationLayer {
+    pub fn validate(&self) -> Result<(), StylizationError> {
+        match self {
+            Self::HybridSurface(h) => h.validate(),
+            Self::ToonRamp(t) => t.validate(),
+        }
+    }
+}
+
+/// Per-component blend between the physical result and the toon result (REQ-STY-001).
+/// 0 = physical, 1 = fully stylized; each is in `0..=1`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HybridSurface {
+    pub diffuse: f32,
+    pub specular: f32,
+    pub gi: f32,
+    pub shadow: f32,
+    pub outline: f32,
+}
+
+impl HybridSurface {
+    /// Every component fully stylized.
+    pub const TOON: Self = Self {
+        diffuse: 1.0,
+        specular: 1.0,
+        gi: 1.0,
+        shadow: 1.0,
+        outline: 1.0,
+    };
+
+    fn validate(&self) -> Result<(), StylizationError> {
+        for (name, v) in [
+            ("hybrid.diffuse", self.diffuse),
+            ("hybrid.specular", self.specular),
+            ("hybrid.gi", self.gi),
+            ("hybrid.shadow", self.shadow),
+            ("hybrid.outline", self.outline),
+        ] {
+            unit_range(name, v)?;
+        }
+        Ok(())
+    }
+}
+
+/// Quantizes each light's contribution into shadow bands (REQ-STY-002).
+/// Band count is `thresholds.len() + 1`, bands ordered dark to lit.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToonRamp {
+    /// Strictly increasing values in `0..=1` on the light's N·L-style response.
+    pub thresholds: Vec<f32>,
+    /// Soft edge width at each threshold, in `0..=1`; 0 is a hard step.
+    pub feather: f32,
+    /// One linear RGB multiplier per band, dark to lit.
+    pub palette: Vec<[f32; 3]>,
+    /// How far light wraps past the terminator, in `0..=1`.
+    pub light_wrap: f32,
+}
+
+impl ToonRamp {
+    fn validate(&self) -> Result<(), StylizationError> {
+        for &t in &self.thresholds {
+            unit_range("toon.thresholds", t)?;
+        }
+        if !self.thresholds.windows(2).all(|w| w[0] < w[1]) {
+            return Err(StylizationError::OutOfRange("toon.thresholds"));
+        }
+        unit_range("toon.feather", self.feather)?;
+        unit_range("toon.light_wrap", self.light_wrap)?;
+        let expected = self.thresholds.len() + 1;
+        if self.palette.len() != expected {
+            return Err(StylizationError::PaletteLength {
+                expected,
+                found: self.palette.len(),
+            });
+        }
+        if !self
+            .palette
+            .iter()
+            .flatten()
+            .all(|c| c.is_finite() && *c >= 0.0)
+        {
+            return Err(StylizationError::OutOfRange("toon.palette"));
+        }
+        Ok(())
+    }
+}
+
+fn unit_range(name: &'static str, v: f32) -> Result<(), StylizationError> {
+    if (0.0..=1.0).contains(&v) {
+        Ok(())
+    } else {
+        Err(StylizationError::OutOfRange(name))
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OutputChannels {
@@ -65,4 +172,73 @@ pub enum Aov {
     Normal,
     Depth,
     ObjectId,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ramp() -> ToonRamp {
+        ToonRamp {
+            thresholds: vec![0.3, 0.7],
+            feather: 0.05,
+            palette: vec![[0.3; 3], [0.7; 3], [1.0; 3]],
+            light_wrap: 0.0,
+        }
+    }
+
+    #[test]
+    fn accepts_valid_layers() {
+        assert_eq!(
+            StylizationLayer::HybridSurface(HybridSurface::TOON).validate(),
+            Ok(())
+        );
+        assert_eq!(StylizationLayer::ToonRamp(ramp()).validate(), Ok(()));
+    }
+
+    #[test]
+    fn hybrid_rejects_out_of_range_and_nan() {
+        for v in [-0.1, 1.1, f32::NAN] {
+            let h = HybridSurface {
+                gi: v,
+                ..Default::default()
+            };
+            assert_eq!(
+                StylizationLayer::HybridSurface(h).validate(),
+                Err(StylizationError::OutOfRange("hybrid.gi"))
+            );
+        }
+    }
+
+    #[test]
+    fn toon_rejects_bad_ramp() {
+        let check = |r: ToonRamp| StylizationLayer::ToonRamp(r).validate();
+        let unsorted = ToonRamp {
+            thresholds: vec![0.7, 0.3],
+            ..ramp()
+        };
+        assert_eq!(
+            check(unsorted),
+            Err(StylizationError::OutOfRange("toon.thresholds"))
+        );
+        let short = ToonRamp {
+            palette: vec![[1.0; 3]; 2],
+            ..ramp()
+        };
+        assert_eq!(
+            check(short),
+            Err(StylizationError::PaletteLength {
+                expected: 3,
+                found: 2
+            })
+        );
+        let negative = ToonRamp {
+            palette: vec![[-1.0; 3]; 3],
+            ..ramp()
+        };
+        assert_eq!(
+            check(negative),
+            Err(StylizationError::OutOfRange("toon.palette"))
+        );
+    }
 }
