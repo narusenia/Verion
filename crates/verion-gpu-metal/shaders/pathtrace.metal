@@ -2658,7 +2658,7 @@ float3 cosineLocal_0(float u1_2, float u2_2)
 
 #line 787
                         float visLit_4 = visLit_3 + visLit_0;
-                        uint _S189 = min(k_2, 2U);
+                        uint _S189 = (&kernelContext_18)->lights_0[o_6 + 13U];
 
 #line 788
                         float3 _S190 = float3(c_6) ;

@@ -450,6 +450,7 @@ impl Renderer {
         // Environment lights are summed into one uniform sky; the rest go to the NEE table.
         let mut sky = [0.0f32; 3];
         let mut lights = Vec::new();
+        let mut strengths = Vec::new(); // per light in `lights`, to rank them for the light slots
         for light in scene.lights() {
             let mut cone = [0.0f32; 4]; // axis xyz and the angular falloff scale, for spot lights
             let mut offset = 0.0;
@@ -496,6 +497,15 @@ impl Renderer {
                 _ => 0,
             });
             lights.extend(words);
+            strengths.push((0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]) * intensity);
+        }
+        // The strongest lights get their own light slots whatever their order in the scene; the
+        // weaker ones share the last of those slots (word 13). The sort is stable, so equals keep
+        // their order. shortcut: strength is color times intensity, ignoring distance and cone.
+        let mut ranked: Vec<usize> = (0..strengths.len()).collect();
+        ranked.sort_by(|&a, &b| strengths[b].total_cmp(&strengths[a]));
+        for (rank, &i) in ranked.iter().enumerate() {
+            lights[i * LIGHT_WORDS + 13] = rank.min(2) as u32;
         }
 
         Ok(Self {

@@ -1356,6 +1356,43 @@ fn lighting_is_off_unless_requested() {
     assert!(acc.lighting().is_none());
 }
 
+/// With more lights than slots the strongest ones get their own slots whatever their order in the
+/// scene, and the weakest ones share the last slot.
+#[test]
+fn the_strongest_lights_get_the_own_light_slots() {
+    let Some(ctx) = context() else { return };
+    let point = |position: [f32; 3], intensity: f32| Light::Point {
+        position,
+        color: [1.0; 3],
+        intensity,
+    };
+    // Scene order: weak, medium, strongest, weaker. All are the same distance from the center.
+    let mut scene = floor_scene(point([1.0, 0.0, 1.0], 1.0), false);
+    scene.add_light(point([-1.0, 0.0, 1.0], 10.0));
+    scene.add_light(point([0.0, 1.0, 1.0], 20.0));
+    scene.add_light(point([0.0, -1.0, 1.0], 5.0));
+    let r = Renderer::new(&ctx, &scene).unwrap();
+    let mut acc = r.new_accumulation_with_lighting(65, 65).unwrap();
+    r.accumulate(&mut acc, 16).unwrap();
+    let l = acc.lighting().unwrap();
+    let dir = l.light_dir[32 * 65 + 32];
+    let unit = |v: [f32; 3]| {
+        let n = v.iter().map(|c| c * c).sum::<f32>().sqrt();
+        v.map(|c| c / n)
+    };
+    // The pixel is not a point, so the direction to a point light varies a little across it.
+    let close = |a: [f32; 3], b: [f32; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 5e-3);
+    assert!(close(dir[0], unit([0.0, 1.0, 1.0])), "slot 0 {:?}", dir[0]);
+    assert!(close(dir[1], unit([-1.0, 0.0, 1.0])), "slot 1 {:?}", dir[1]);
+    // Slot 2 pools the weaker two: its mean direction leans to the stronger one (y < 0 from the 5).
+    assert!(dir[2][1] < -0.1, "slot 2 {:?}", dir[2]);
+    assert!(
+        dir[2][0] > 0.0,
+        "slot 2 still holds the weakest {:?}",
+        dir[2]
+    );
+}
+
 #[test]
 fn light_slots_hold_potential_diffuse_and_response() {
     let Some(ctx) = context() else { return };

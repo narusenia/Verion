@@ -785,7 +785,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                         float vv = lum(cd + cs);
                         visTotal += vv;
                         visLit += occ ? 0.0 : vv;
-                        addSlot(pixel, min(li, 2u), cd / c, cs / c, wi, occ ? 0.0 : 1.0, occ ? 0.0 : c);
+                        addSlot(pixel, lights[o + 13], cd / c, cs / c, wi, occ ? 0.0 : 1.0, occ ? 0.0 : c);
                     }
                 }
             }
