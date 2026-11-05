@@ -12,6 +12,7 @@ the viewer: `./target/release/viewer scenes/NAME.gltf --hdri assets/hdri/sunny.h
 | `toon_compare.gltf` | five Toon recipes: two hard bands, four soft bands, rim light, highlight ramp, shadow palette with a thick outline | `... OUT toon` |
 | `lights_compare.gltf` | the same Toon sphere under five colored lights listed weakest first (light slots follow strength) | `... OUT lights` |
 | `glass_compare.gltf` | transmission at roughness 0, 0.15, 0.3, 0.5, 0.8 (checks the multiple-scattering compensation; try `--no-multiscatter`) | `... OUT glass` |
+| `cornell_box.gltf` | the Cornell Box of the Mitsuba cross-check (`render_ppm` mode `box`) as glTF; its mean matches the example's render within 0.03% (render with `--no-multiscatter`, as the cross-check does) | `gen_cornell_scene.py OUT` |
 
 `assets/hdri/` holds small procedural environment maps from `scripts/gen_hdri.py assets/hdri`: `sunny` (sun and
 sky), `sunset` (low warm sun), `overcast` (sky gradient, no sun), `softbox` (one broad soft light) and `uniform`
