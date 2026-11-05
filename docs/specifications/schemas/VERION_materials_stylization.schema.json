@@ -8,11 +8,21 @@
       "type": "object",
       "description": "Per-component blend between physical (0) and stylized (1).",
       "properties": {
-        "diffuse": { "$ref": "#/$defs/unit" },
-        "specular": { "$ref": "#/$defs/unit" },
-        "gi": { "$ref": "#/$defs/unit" },
-        "shadow": { "$ref": "#/$defs/unit" },
-        "outline": { "$ref": "#/$defs/unit" }
+        "diffuse": {
+          "$ref": "#/$defs/unit"
+        },
+        "specular": {
+          "$ref": "#/$defs/unit"
+        },
+        "gi": {
+          "$ref": "#/$defs/unit"
+        },
+        "shadow": {
+          "$ref": "#/$defs/unit"
+        },
+        "outline": {
+          "$ref": "#/$defs/unit"
+        }
       }
     },
     "toonRamp": {
@@ -20,26 +30,72 @@
       "properties": {
         "thresholds": {
           "type": "array",
-          "items": { "$ref": "#/$defs/unit" },
+          "items": {
+            "$ref": "#/$defs/unit"
+          },
           "uniqueItems": true
         },
-        "feather": { "$ref": "#/$defs/unit" },
+        "feather": {
+          "$ref": "#/$defs/unit"
+        },
         "palette": {
           "type": "array",
           "minItems": 1,
           "items": {
             "type": "array",
-            "items": { "type": "number", "minimum": 0 },
+            "items": {
+              "type": "number",
+              "minimum": 0
+            },
             "minItems": 3,
             "maxItems": 3
           }
         },
-        "lightWrap": { "$ref": "#/$defs/unit" }
+        "lightWrap": {
+          "$ref": "#/$defs/unit"
+        }
       },
-      "required": ["thresholds", "palette"]
+      "required": [
+        "thresholds",
+        "palette"
+      ]
+    },
+    "shadowPalette": {
+      "type": "object",
+      "description": "Color grade of the shadowed part of the direct and indirect diffuse. Strength comes from hybridSurface.shadow.",
+      "properties": {
+        "direct": {
+          "$ref": "#/$defs/colorAdjust"
+        },
+        "indirect": {
+          "$ref": "#/$defs/colorAdjust"
+        }
+      }
     }
   },
   "$defs": {
-    "unit": { "type": "number", "minimum": 0, "maximum": 1 }
+    "unit": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "colorAdjust": {
+      "type": "object",
+      "properties": {
+        "hueShift": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "saturation": {
+          "type": "number",
+          "minimum": 0
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    }
   }
 }
