@@ -28,6 +28,10 @@ pub struct BaseBsdf {
     pub sheen_color: [f32; 3],
     /// Roughness of the sheen, in `0..=1`.
     pub sheen_roughness: f32,
+    /// Strength of dispersion, `20 / Abbe number`, `>= 0` (`KHR_materials_dispersion`). 0 = none.
+    /// Spreads the IOR of the transmission per color channel: red `ior - h`, green `ior`, blue
+    /// `ior + h` with `h = (ior - 1) * 0.025 * dispersion`.
+    pub dispersion: f32,
     pub emission: [f32; 3],
     /// Textures multiply the factors above (glTF semantics) and hold linear values. Sampling is
     /// repeat-wrapped trilinear; UVs come from the mesh. The image ids must come from the same scene.
@@ -53,6 +57,7 @@ impl Default for BaseBsdf {
             clearcoat_roughness: 0.0,
             sheen_color: [0.0; 3],
             sheen_roughness: 0.0,
+            dispersion: 0.0,
             emission: [0.0; 3],
             base_color_texture: None,
             metallic_roughness_texture: None,

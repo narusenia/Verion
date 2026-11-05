@@ -10,7 +10,7 @@ use verion_scene::{
 };
 
 /// Extensions this importer understands; any other one in `extensionsUsed` is warned about.
-const SUPPORTED: [&str; 7] = [
+const SUPPORTED: [&str; 8] = [
     stylization_ext::NAME,
     "KHR_lights_punctual",
     "KHR_materials_transmission",
@@ -18,6 +18,7 @@ const SUPPORTED: [&str; 7] = [
     "KHR_materials_emissive_strength",
     "KHR_materials_clearcoat",
     "KHR_materials_sheen",
+    "KHR_materials_dispersion",
 ];
 
 pub struct Import {
@@ -278,6 +279,12 @@ impl Importer<'_> {
                     ));
                 }
             }
+        }
+        if let Some(d) = m.extension_value("KHR_materials_dispersion") {
+            base.dispersion = d
+                .get("dispersion")
+                .and_then(|v| v.as_f64())
+                .map_or(0.0, |v| v.max(0.0) as f32);
         }
         if let Some(sh) = m.extension_value("KHR_materials_sheen") {
             let color = sh
@@ -683,6 +690,20 @@ mod tests {
             warnings,
             ["material 0: sheenRoughnessTexture is not supported yet and was ignored"]
         );
+    }
+
+    #[test]
+    fn imports_dispersion() {
+        let json = JSON
+            .replace("KHR_materials_volume", "KHR_materials_dispersion")
+            .replace(
+                r#""roughnessFactor": 0.25}"#,
+                r#""roughnessFactor": 0.25},
+                "extensions": {"KHR_materials_dispersion": {"dispersion": 0.36}}"#,
+            );
+        let Import { scene, warnings } = load_gltf_slice(&glb(&json, &[])).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(scene.materials()[0].base.dispersion, 0.36);
     }
 
     #[test]
