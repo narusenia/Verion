@@ -50,12 +50,13 @@ impl Default for BaseBsdf {
 }
 
 /// Stylization is non-physical: Reference mode must skip every layer (ADR-0008).
-/// Variants for REQ-STY-003 to 005 arrive with their own slices.
+/// The variant for REQ-STY-004 arrives with its own slice.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StylizationLayer {
     HybridSurface(HybridSurface),
     ToonRamp(ToonRamp),
     ShadowPalette(ShadowPalette),
+    RimLight(RimLight),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,6 +73,7 @@ impl StylizationLayer {
             Self::HybridSurface(h) => h.validate(),
             Self::ToonRamp(t) => t.validate(),
             Self::ShadowPalette(s) => s.validate(),
+            Self::RimLight(r) => r.validate(),
         }
     }
 }
@@ -199,6 +201,48 @@ impl ShadowPalette {
             }
         }
         Ok(())
+    }
+}
+
+/// A non-physical rim added to the final color near the silhouette (REQ-STY-005). Its color and
+/// strength do not depend on the light's strength.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RimLight {
+    /// Linear RGB in the working space, each `>= 0`.
+    pub color: [f32; 3],
+    /// Width of the rim band, in `0..=1`: the band starts where `1 - N·V` passes `1 - width`.
+    pub width: f32,
+    /// Soft edge width of the band, in `0..=1`.
+    pub feather: f32,
+    /// 0 = the rim runs all around, 1 = only on the side facing the light.
+    pub follow_light: f32,
+    /// Multiplier on the added rim, `>= 0`; 0 turns it off.
+    pub strength: f32,
+}
+
+impl Default for RimLight {
+    fn default() -> Self {
+        Self {
+            color: [1.0; 3],
+            width: 0.3,
+            feather: 0.05,
+            follow_light: 1.0,
+            strength: 1.0,
+        }
+    }
+}
+
+impl RimLight {
+    fn validate(&self) -> Result<(), StylizationError> {
+        if !self.color.iter().all(|c| c.is_finite() && *c >= 0.0) {
+            return Err(StylizationError::OutOfRange("rim.color"));
+        }
+        if !(self.strength.is_finite() && self.strength >= 0.0) {
+            return Err(StylizationError::OutOfRange("rim.strength"));
+        }
+        unit_range("rim.width", self.width)?;
+        unit_range("rim.feather", self.feather)?;
+        unit_range("rim.follow_light", self.follow_light)
     }
 }
 
