@@ -211,7 +211,7 @@ Stylization 後段の画面空間 Pass。M2 は Pass の枠と最小の色調整
 
 - [x] Stylization の後段に PostProcess の Pass を並べられる（輪郭線、色調整の順）
 - [x] 色調整を適用でき、Reference モードでは無効になる（`render-cli` が Reference での指定をエラーにする）
-- [ ] 適用した PostProcess を EXR のメタデータに記録する（今は非物理の印のみ。適用した種類と値は未記録）
+- [x] 適用した PostProcess を EXR のメタデータに記録する（非物理の印に加え、色調整を適用したときは `verion/exposure`・`verion/saturation`・`verion/whiteBalance` を書く。輪郭線は材質側の設定で、`verion/stylizationRevision` が識別する）
 
 ### 依存要件
 
