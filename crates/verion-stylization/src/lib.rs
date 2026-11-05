@@ -3,12 +3,11 @@
 //!
 //! Implemented so far: `HybridSurface::diffuse` blending the direct diffuse toward a `ToonRamp`
 //! applied per light, and `ShadowPalette` grading the shadowed part of the direct and indirect
-//! diffuse (strength from `HybridSurface::shadow`).
+//! diffuse (strength from `HybridSurface::shadow`), and `RimLight` adding a rim to the final color.
 //! The other components pass through unchanged until their layers land.
 
 use verion_scene::{
-    Camera, ColorAdjust, HybridSurface, LIGHT_SLOTS, Material, ShadowPalette, StylizationLayer,
-    ToonRamp,
+    Camera, ColorAdjust, LIGHT_SLOTS, Material, RimLight, ShadowPalette, StylizationLayer, ToonRamp,
 };
 
 /// The first-hit lighting split of one pixel, in the working space (see `LightingAovs`).
@@ -120,56 +119,92 @@ pub fn ramp_color(ramp: &ToonRamp, response: f32) -> [f32; 3] {
 /// shortcut: emissive triangles and the environment share one slot, so their ramp input is the
 /// contribution-weighted mean response of the samples; soft edges from area lights are averaged.
 pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
-    let hybrid = layers.iter().find_map(|l| match l {
-        StylizationLayer::HybridSurface(h) => Some(*h),
-        _ => None,
-    });
-    let ramp = layers.iter().find_map(|l| match l {
-        StylizationLayer::ToonRamp(t) => Some(t),
-        _ => None,
-    });
-    let palette = layers.iter().find_map(|l| match l {
-        StylizationLayer::ShadowPalette(s) => Some(*s),
-        _ => None,
-    });
+    // HybridSurface only carries the blend strengths the other layers read.
+    let hybrid = layers
+        .iter()
+        .find_map(|l| match l {
+            StylizationLayer::HybridSurface(h) => Some(*h),
+            _ => None,
+        })
+        .unwrap_or_default();
     let mut diffuse = p.direct_diffuse;
     let mut indirect = p.indirect_diffuse;
-    if let (Some(HybridSurface { diffuse: k, .. }), Some(ramp)) = (hybrid, ramp) {
-        let mut toon = [0.0f32; 3];
-        for (u, &r) in p.light_u.iter().zip(&p.light_response) {
-            let band = ramp_color(ramp, r);
-            for i in 0..3 {
-                toon[i] += u[i] * band[i];
+    let mut added = [0.0f32; 3];
+    // Layers apply in the order the material lists them, so the same kind may appear twice.
+    for layer in layers {
+        match layer {
+            StylizationLayer::HybridSurface(_) => {}
+            StylizationLayer::ToonRamp(ramp) => {
+                let mut toon = [0.0f32; 3];
+                for (u, &r) in p.light_u.iter().zip(&p.light_response) {
+                    let band = ramp_color(ramp, r);
+                    for i in 0..3 {
+                        toon[i] += u[i] * band[i];
+                    }
+                }
+                let k = hybrid.diffuse;
+                diffuse = std::array::from_fn(|i| diffuse[i] + (toon[i] - diffuse[i]) * k);
+            }
+            StylizationLayer::ShadowPalette(ShadowPalette {
+                direct,
+                indirect: ind,
+            }) => {
+                // Shadowness: how much of the light the pixel could receive it does not (0 lit, 1 dark).
+                let potential: [f32; 3] =
+                    std::array::from_fn(|i| p.light_u.iter().map(|u| u[i]).sum());
+                let full = lum(potential);
+                let w = if full > 1.0e-6 {
+                    (1.0 - lum(diffuse) / full).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                } * hybrid.shadow;
+                let mix = |c: [f32; 3], a: &ColorAdjust| {
+                    let g = grade(c, a);
+                    std::array::from_fn(|i| c[i] + (g[i] - c[i]) * w)
+                };
+                diffuse = mix(diffuse, direct);
+                indirect = mix(indirect, ind);
+            }
+            StylizationLayer::RimLight(rim) => {
+                let r = rim_light(rim, p);
+                added = std::array::from_fn(|i| added[i] + r[i]);
             }
         }
-        diffuse = std::array::from_fn(|i| diffuse[i] + (toon[i] - diffuse[i]) * k);
-    }
-    if let (
-        Some(HybridSurface { shadow: k, .. }),
-        Some(ShadowPalette {
-            direct,
-            indirect: ind,
-        }),
-    ) = (hybrid, palette)
-    {
-        // Shadowness: how much of the light the pixel could receive it does not (0 lit, 1 dark).
-        let potential: [f32; 3] = std::array::from_fn(|i| p.light_u.iter().map(|u| u[i]).sum());
-        let full = lum(potential);
-        let w = if full > 1.0e-6 {
-            (1.0 - lum(diffuse) / full).clamp(0.0, 1.0)
-        } else {
-            0.0
-        } * k;
-        let mix = |c: [f32; 3], a: &ColorAdjust| {
-            let g = grade(c, a);
-            std::array::from_fn(|i| c[i] + (g[i] - c[i]) * w)
-        };
-        diffuse = mix(diffuse, &direct);
-        indirect = mix(indirect, &ind);
     }
     std::array::from_fn(|i| {
-        diffuse[i] + indirect[i] + p.specular[i] + p.transmission[i] + p.emission[i]
+        diffuse[i] + indirect[i] + p.specular[i] + p.transmission[i] + p.emission[i] + added[i]
     })
+}
+
+/// The rim added by a `RimLight` (REQ-STY-005): a band where the surface turns away from the
+/// camera, weighted per light slot by its share of the contribution, how much it faces the light
+/// and how much of it is unshadowed. Independent of the light's strength.
+pub fn rim_light(rim: &RimLight, p: &PixelInput) -> [f32; 3] {
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    if rim.strength == 0.0 || dot(p.normal, p.normal) < 0.5 {
+        return [0.0; 3]; // off, or no surface (a zero normal)
+    }
+    let x = 1.0 - dot(p.normal, p.view).max(0.0);
+    let edge = 1.0 - rim.width;
+    let band = if rim.feather > 0.0 {
+        smoothstep(edge - 0.5 * rim.feather, edge + 0.5 * rim.feather, x)
+    } else {
+        (x >= edge) as u8 as f32
+    };
+    let weight = |k: usize| lum(p.light_u[k]) + lum(p.light_s[k]);
+    let total: f32 = (0..LIGHT_SLOTS).map(weight).sum();
+    if total <= 0.0 {
+        return [0.0; 3];
+    }
+    let lit: f32 = (0..LIGHT_SLOTS)
+        .map(|k| {
+            let face = dot(p.normal, p.light_dir[k]).clamp(0.0, 1.0);
+            let follow = 1.0 + (face - 1.0) * rim.follow_light;
+            weight(k) / total * follow * p.light_lit[k]
+        })
+        .sum();
+    let s = rim.strength * band * lit;
+    rim.color.map(|c| c * s)
 }
 
 /// Per-pixel inputs for a whole frame; every slice has the same length.
@@ -227,6 +262,7 @@ pub fn stylize_image(materials: &[Material], f: &Frame) -> Vec<[f32; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use verion_scene::HybridSurface;
 
     fn ramp(feather: f32, light_wrap: f32) -> ToonRamp {
         ToonRamp {
@@ -260,6 +296,76 @@ mod tests {
         p.light_u[0] = [1.0 / PI; 3];
         p.light_response[0] = r;
         p
+    }
+
+    /// A surface seen edge-on (N ⟂ V) with one fully lit light in slot 0 straight along the normal.
+    fn rim_px() -> PixelInput {
+        let mut p = PixelInput {
+            normal: [0.0, 0.0, 1.0],
+            view: [1.0, 0.0, 0.0],
+            ..Default::default()
+        };
+        p.light_u[0] = [1.0; 3];
+        p.light_dir[0] = [0.0, 0.0, 1.0];
+        p.light_lit[0] = 1.0;
+        p
+    }
+
+    fn rim(f: impl FnOnce(&mut RimLight)) -> RimLight {
+        let mut r = RimLight {
+            feather: 0.0,
+            ..Default::default()
+        };
+        f(&mut r);
+        r
+    }
+
+    #[test]
+    fn rim_appears_only_toward_the_silhouette() {
+        let r = rim(|r| r.width = 0.3);
+        assert_eq!(rim_light(&r, &rim_px()), [1.0; 3]); // N ⟂ V: x = 1
+        let mut facing = rim_px();
+        facing.view = [0.0, 0.0, 1.0]; // N = V: x = 0
+        assert_eq!(rim_light(&r, &facing), [0.0; 3]);
+        // x = 1 - cos(45°) = 0.29 is just short of the edge at 1 - 0.3 = 0.7 ... and inside at width 0.9.
+        let mut slanted = rim_px();
+        slanted.view = [0.5f32.sqrt(), 0.0, 0.5f32.sqrt()];
+        assert_eq!(rim_light(&r, &slanted), [0.0; 3]);
+        assert_eq!(rim_light(&rim(|r| r.width = 0.9), &slanted), [1.0; 3]);
+    }
+
+    #[test]
+    fn rim_follows_the_light_and_its_shadow() {
+        let mut away = rim_px();
+        away.light_dir[0] = [0.0, 0.0, -1.0];
+        assert_eq!(rim_light(&rim(|r| r.follow_light = 1.0), &away), [0.0; 3]);
+        assert_eq!(rim_light(&rim(|r| r.follow_light = 0.0), &away), [1.0; 3]);
+        let mut shadowed = rim_px();
+        shadowed.light_lit[0] = 0.0;
+        assert_eq!(rim_light(&rim(|_| {}), &shadowed), [0.0; 3]);
+    }
+
+    #[test]
+    fn rim_splits_by_each_lights_share_and_scales_with_color_and_strength() {
+        let mut two = rim_px();
+        two.light_u[1] = [1.0; 3]; // same weight, but shadowed
+        two.light_dir[1] = [0.0, 0.0, 1.0];
+        let out = rim_light(
+            &rim(|r| (r.color, r.strength) = ([0.5, 1.0, 2.0], 2.0)),
+            &two,
+        );
+        assert_eq!(out, [0.5, 1.0, 2.0]); // half the share is lit: 0.5 * 2 = 1
+        assert_eq!(rim_light(&rim(|r| r.strength = 0.0), &two), [0.0; 3]);
+        // No surface (zero normal) or no light: nothing.
+        assert_eq!(rim_light(&rim(|_| {}), &PixelInput::default()), [0.0; 3]);
+    }
+
+    #[test]
+    fn layers_apply_in_order_and_a_kind_can_repeat() {
+        let p = rim_px();
+        let l = |s| StylizationLayer::RimLight(rim(|r| r.strength = s));
+        assert_eq!(stylize(&[l(1.0)], &p), [1.0; 3]);
+        assert_eq!(stylize(&[l(1.0), l(0.5)], &p), [1.5; 3]);
     }
 
     #[test]
