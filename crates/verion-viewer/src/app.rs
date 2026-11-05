@@ -441,11 +441,16 @@ impl App {
         }
     }
 
+    /// Only the stylized beauty reads the per-component lighting buffers, which are ~65 floats per
+    /// pixel; skipping them keeps a restart per frame cheap while the camera moves.
     fn restart(&mut self) {
-        match self
-            .renderer
-            .new_accumulation_with_lighting(self.width, self.height)
-        {
+        let (w, h) = (self.width, self.height);
+        let acc = if self.stylized {
+            self.renderer.new_accumulation_with_lighting(w, h)
+        } else {
+            self.renderer.new_accumulation(w, h)
+        };
+        match acc {
             Ok(acc) => self.acc = acc,
             Err(e) => eprintln!("render: {e:?}"),
         }
@@ -512,7 +517,23 @@ impl App {
     fn upload_due(&self) -> bool {
         let spp = self.acc.samples();
         let wait = Duration::from_millis((u64::from(spp) / 2).clamp(30, 500));
-        spp >= self.max_spp || self.paused || self.last_upload.elapsed() >= wait
+        let moving = self.last_move.elapsed() < MOTION_SETTLE;
+        moving || spp >= self.max_spp || self.paused || self.last_upload.elapsed() >= wait
+    }
+
+    /// Stylization needs the lighting buffers, so switching it starts a new accumulation.
+    fn set_stylized(&mut self, on: bool) {
+        self.stylized = on;
+        self.restart();
+    }
+
+    fn refresh_picture(&mut self, ctx: &egui::Context) {
+        if self.samples_dirty && self.upload_due() {
+            self.dirty = true;
+        }
+        if self.dirty {
+            self.upload(ctx);
+        }
     }
 
     fn upload(&mut self, ctx: &egui::Context) {
@@ -585,8 +606,7 @@ impl App {
             }
         }
         if pressed(Key::T) {
-            self.stylized = !self.stylized;
-            self.dirty = true;
+            self.set_stylized(!self.stylized);
         }
         if pressed(Key::Space) {
             self.paused = !self.paused;
@@ -644,8 +664,7 @@ impl App {
                 let r = ui
                     .selectable_label(self.stylized, (ICON_AUTO_FIX_HIGH.rich_text(), "Stylized"));
                 if r.on_hover_text("Non-physical stylization (T)").clicked() {
-                    self.stylized = !self.stylized;
-                    self.dirty = true;
+                    self.set_stylized(!self.stylized);
                 }
                 ui.separator();
                 let (icon, label) = if self.paused {
@@ -1213,18 +1232,16 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Show the samples `logic` just gathered before input can restart the accumulation;
+        // the other way round, a camera that moves every frame would never reach the screen.
+        self.refresh_picture(&ctx);
         self.keys(&ctx);
         self.toolbar(ui);
         self.statusbar(ui);
         if self.show_panels {
             self.inspector(ui);
         }
-        if self.samples_dirty && self.upload_due() {
-            self.dirty = true;
-        }
-        if self.dirty {
-            self.upload(&ctx);
-        }
+        self.refresh_picture(&ctx);
         self.viewport(ui, &ctx);
         self.help(&ctx);
     }
