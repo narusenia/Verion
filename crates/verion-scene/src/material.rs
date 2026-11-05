@@ -55,6 +55,7 @@ impl Default for BaseBsdf {
 pub enum StylizationLayer {
     HybridSurface(HybridSurface),
     ToonRamp(ToonRamp),
+    ShadowPalette(ShadowPalette),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,6 +71,7 @@ impl StylizationLayer {
         match self {
             Self::HybridSurface(h) => h.validate(),
             Self::ToonRamp(t) => t.validate(),
+            Self::ShadowPalette(s) => s.validate(),
         }
     }
 }
@@ -152,6 +154,54 @@ impl ToonRamp {
     }
 }
 
+/// Color grade applied to the shadowed part of a component (REQ-STY-003). The default changes nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ColorAdjust {
+    /// Degrees, in `-180..=180`.
+    pub hue_shift: f32,
+    /// Multiplier on saturation, `>= 0`; 1 keeps it.
+    pub saturation: f32,
+    /// Multiplier on value (brightness), `>= 0`; 1 keeps it.
+    pub value: f32,
+}
+
+impl Default for ColorAdjust {
+    fn default() -> Self {
+        Self {
+            hue_shift: 0.0,
+            saturation: 1.0,
+            value: 1.0,
+        }
+    }
+}
+
+/// Separate grades for the direct shadow (the direct diffuse where light is missing) and the
+/// indirect shadow (the bounce light that fills it). Strength comes from `HybridSurface::shadow`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ShadowPalette {
+    pub direct: ColorAdjust,
+    pub indirect: ColorAdjust,
+}
+
+impl ShadowPalette {
+    fn validate(&self) -> Result<(), StylizationError> {
+        for (name, a) in [
+            ("shadow.direct", self.direct),
+            ("shadow.indirect", self.indirect),
+        ] {
+            let ok = (-180.0..=180.0).contains(&a.hue_shift)
+                && a.saturation.is_finite()
+                && a.saturation >= 0.0
+                && a.value.is_finite()
+                && a.value >= 0.0;
+            if !ok {
+                return Err(StylizationError::OutOfRange(name));
+            }
+        }
+        Ok(())
+    }
+}
+
 fn unit_range(name: &'static str, v: f32) -> Result<(), StylizationError> {
     if (0.0..=1.0).contains(&v) {
         Ok(())
@@ -194,6 +244,35 @@ mod tests {
             Ok(())
         );
         assert_eq!(StylizationLayer::ToonRamp(ramp()).validate(), Ok(()));
+    }
+
+    #[test]
+    fn shadow_palette_defaults_to_identity_and_rejects_bad_grades() {
+        let ok = StylizationLayer::ShadowPalette(ShadowPalette::default());
+        assert_eq!(ok.validate(), Ok(()));
+        for adjust in [
+            ColorAdjust {
+                hue_shift: 181.0,
+                ..Default::default()
+            },
+            ColorAdjust {
+                saturation: -0.1,
+                ..Default::default()
+            },
+            ColorAdjust {
+                value: f32::NAN,
+                ..Default::default()
+            },
+        ] {
+            let layer = StylizationLayer::ShadowPalette(ShadowPalette {
+                indirect: adjust,
+                ..Default::default()
+            });
+            assert_eq!(
+                layer.validate(),
+                Err(StylizationError::OutOfRange("shadow.indirect"))
+            );
+        }
     }
 
     #[test]
