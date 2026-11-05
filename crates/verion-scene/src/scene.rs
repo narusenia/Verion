@@ -195,6 +195,11 @@ impl Scene {
         MaterialId(self.materials.len() as u32 - 1)
     }
 
+    /// The id of the `index`-th material, for tools that list materials by position.
+    pub fn material_id(&self, index: usize) -> Option<MaterialId> {
+        (index < self.materials.len()).then_some(MaterialId(index as u32))
+    }
+
     pub fn set_material(&mut self, id: MaterialId, material: Material) {
         self.revisions.material += 1;
         if self.materials[id.index()].stylization != material.stylization {

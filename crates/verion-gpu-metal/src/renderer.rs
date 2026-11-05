@@ -8,7 +8,7 @@ use objc2_metal::{
     MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder,
     MTLComputePipelineState, MTLDevice, MTLLibrary, MTLResourceOptions, MTLResourceUsage, MTLSize,
 };
-use verion_scene::{Image, LIGHT_SLOTS, Light, Scene, Transform};
+use verion_scene::{Camera, Image, LIGHT_SLOTS, Light, Scene, Transform};
 
 use crate::{Blas, Error, Instance, MetalContext, Obj, Tlas};
 
@@ -190,6 +190,17 @@ fn mip_chain(image: &Image) -> (Vec<f32>, u32) {
     }
 }
 
+/// The camera record the shaders read: tan(fov/2) at 2, the camera-to-world rows from 4 (0 and 1
+/// are the image size, filled per dispatch).
+fn camera_params(cam: &Camera) -> [f32; 16] {
+    let mut camera = [0.0f32; 16];
+    camera[2] = (cam.vertical_fov * 0.5).tan();
+    for (dst, src) in camera[4..].iter_mut().zip(cam.transform.iter().flatten()) {
+        *dst = *src;
+    }
+    camera
+}
+
 /// Primary-ray AOVs, row-major from the top-left. Misses are zero in every field.
 pub struct Aovs {
     /// Base color factor times the base color texture at the hit.
@@ -350,11 +361,7 @@ impl Renderer {
         let tlas = Tlas::build(ctx, &blas_refs, &tlas_instances)?;
 
         let cam = scene.camera();
-        let mut camera = [0.0f32; 16];
-        camera[2] = (cam.vertical_fov * 0.5).tan();
-        for (dst, src) in camera[4..].iter_mut().zip(cam.transform.iter().flatten()) {
-            *dst = *src;
-        }
+        let camera = camera_params(cam);
 
         // Selection probability proportional to emitted power; the CDF drives light sampling.
         let total: f32 = powers.iter().sum();
@@ -511,6 +518,14 @@ impl Renderer {
             pathtrace: pipeline(ctx, PATHTRACE_MSL, "pathtrace")?,
             no_lighting: upload::<f32>(ctx, &[])?,
         })
+    }
+
+    /// Replaces the camera without rebuilding the acceleration structures. Start a new
+    /// accumulation afterwards; samples gathered from the old camera no longer match.
+    pub fn set_camera(&mut self, cam: &Camera) {
+        self.camera = camera_params(cam);
+        self.aperture = cam.aperture_radius;
+        self.focus = cam.focus_distance;
     }
 
     /// Turns the multiple-scattering compensation of rough metals on (the default) or off. Off gives
