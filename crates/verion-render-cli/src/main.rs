@@ -82,9 +82,42 @@ struct Args {
     /// Emission, Visibility); costs about 260 bytes of GPU memory per pixel
     #[arg(long)]
     lighting_aovs: bool,
+    /// Gain in stops, applied last (needs `--mode stylized`; write it as `--exposure=-1` for a negative value)
+    #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
+    exposure: f32,
+    /// Saturation multiplier, applied last (needs `--mode stylized`)
+    #[arg(long, default_value_t = 1.0)]
+    saturation: f32,
+    /// White balance as per-channel multipliers `R,G,B`, applied last (needs `--mode stylized`)
+    #[arg(long, value_delimiter = ',', default_values_t = [1.0, 1.0, 1.0])]
+    white_balance: Vec<f32>,
     /// Write timing metrics as JSON
     #[arg(long)]
     metrics: Option<PathBuf>,
+}
+
+impl Args {
+    /// The color grade the flags ask for. Non-physical, so only `--mode stylized` may use it.
+    fn color_grade(&self) -> Result<verion_stylization::ColorGrade, String> {
+        let white_balance: [f32; 3] = self
+            .white_balance
+            .as_slice()
+            .try_into()
+            .map_err(|_| "--white-balance takes three values: R,G,B")?;
+        let grade = verion_stylization::ColorGrade {
+            exposure: self.exposure,
+            saturation: self.saturation,
+            white_balance,
+        };
+        grade.validate()?;
+        if !grade.is_identity() && self.mode != Mode::Stylized {
+            return Err(
+                "--exposure, --saturation and --white-balance are non-physical; use --mode stylized"
+                    .into(),
+            );
+        }
+        Ok(grade)
+    }
 }
 
 fn json_str(s: &str) -> String {
@@ -146,6 +179,7 @@ fn run(args: &Args) -> Result<(), String> {
     if args.width == 0 || args.height == 0 || args.spp == 0 {
         return Err("width, height and spp must be at least 1".into());
     }
+    let grade = args.color_grade()?;
     let total = Instant::now();
     let t = Instant::now();
     let import = load_gltf_in(&args.scene, args.working_space.color())
@@ -237,6 +271,7 @@ fn run(args: &Args) -> Result<(), String> {
             },
             &mut beauty,
         );
+        verion_stylization::color_grade(&mut beauty, &grade);
     }
     let aov_s = t.elapsed().as_secs_f64();
 
@@ -331,6 +366,37 @@ mod tests {
         );
         assert!(Mode::Reference.physical());
         assert!(Args::try_parse_from(["render-cli", "a.gltf"]).is_err());
+    }
+
+    #[test]
+    fn color_grade_flags_need_the_stylized_mode() {
+        let parse = |extra: &[&str]| {
+            let mut v = vec!["render-cli", "a.gltf", "-o", "o.exr"];
+            v.extend_from_slice(extra);
+            Args::try_parse_from(v).unwrap()
+        };
+        assert!(parse(&[]).color_grade().unwrap().is_identity());
+        let g = parse(&[
+            "--mode",
+            "stylized",
+            "--exposure=-1",
+            "--saturation",
+            "0.8",
+            "--white-balance",
+            "1.1,1,0.9",
+        ])
+        .color_grade()
+        .unwrap();
+        assert_eq!((g.exposure, g.saturation), (-1.0, 0.8));
+        assert_eq!(g.white_balance, [1.1, 1.0, 0.9]);
+        assert!(parse(&["--exposure", "1"]).color_grade().is_err()); // reference mode
+        assert!(
+            parse(&["--mode", "stylized", "--saturation=-1"])
+                .color_grade()
+                .is_err()
+        );
+        let two = parse(&["--mode", "stylized", "--white-balance", "1,1"]);
+        assert!(two.color_grade().is_err()); // needs three values
     }
 
     #[test]
