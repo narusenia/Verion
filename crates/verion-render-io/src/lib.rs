@@ -3,6 +3,7 @@
 mod exr_out;
 mod gltf_import;
 mod hdri;
+mod stylization_ext;
 
 pub use exr_out::{ExrAovs, ExrError, ExrFrame, ExrLighting, RenderInfo, write_exr};
 pub use gltf_import::{

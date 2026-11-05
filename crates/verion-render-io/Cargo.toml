@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 gltf = { version = "1.4", features = [
+    "extensions",
     "KHR_lights_punctual",
     "KHR_materials_transmission",
     "KHR_materials_ior",

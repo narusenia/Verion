@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, fmt, path::Path};
 
+use crate::stylization_ext;
 use gltf::{Document, camera::Projection, khr_lights_punctual::Kind, mesh::Mode};
 use verion_scene::{
     BaseBsdf, Camera, ColorSpace, IDENTITY, Image, ImageId, Instance, Light, Material, MaterialId,
@@ -9,7 +10,8 @@ use verion_scene::{
 };
 
 /// Extensions this importer understands; any other one in `extensionsUsed` is warned about.
-const SUPPORTED: [&str; 4] = [
+const SUPPORTED: [&str; 5] = [
+    stylization_ext::NAME,
     "KHR_lights_punctual",
     "KHR_materials_transmission",
     "KHR_materials_ior",
@@ -30,6 +32,11 @@ pub enum Error {
         source: MeshError,
     },
     Scene(SceneError),
+    /// `VERION_materials_stylization` holds an invalid value.
+    Stylization {
+        material: String,
+        why: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -38,6 +45,9 @@ impl fmt::Display for Error {
             Self::Gltf(e) => write!(f, "glTF load failed: {e}"),
             Self::Mesh { node, source } => write!(f, "mesh on node {node}: {source}"),
             Self::Scene(e) => write!(f, "{e}"),
+            Self::Stylization { material, why } => {
+                write!(f, "material {material}: {}: {why}", stylization_ext::NAME)
+            }
         }
     }
 }
@@ -219,14 +229,14 @@ impl Importer<'_> {
         let ir = Mesh::new(positions, normals, uvs, indices)
             .map_err(|source| Error::Mesh { node, source })?;
         let mesh_id = self.scene.add_mesh(ir);
-        let material_id = self.material(&prim.material());
+        let material_id = self.material(&prim.material())?;
         self.meshes.insert(key, (mesh_id, material_id));
         Ok(Some((mesh_id, material_id)))
     }
 
-    fn material(&mut self, m: &gltf::Material) -> MaterialId {
+    fn material(&mut self, m: &gltf::Material) -> Result<MaterialId, Error> {
         if let Some(&id) = self.materials.get(&m.index()) {
-            return id;
+            return Ok(id);
         }
         let pbr = m.pbr_metallic_roughness();
         let [r, g, b, _] = pbr.base_color_factor();
@@ -304,12 +314,27 @@ impl Importer<'_> {
             ));
         }
 
+        let mut stylization = Vec::new();
+        if let Some(value) = m.extension_value(stylization_ext::NAME) {
+            let (layers, warnings) =
+                stylization_ext::parse(value, self.space).map_err(|why| Error::Stylization {
+                    material: name.clone(),
+                    why,
+                })?;
+            stylization = layers;
+            self.warnings.extend(
+                warnings
+                    .into_iter()
+                    .map(|w| format!("material {name}: {w}")),
+            );
+        }
         let id = self.scene.add_material(Material {
             base,
+            stylization,
             ..Material::default()
         });
         self.materials.insert(m.index(), id);
-        id
+        Ok(id)
     }
 
     /// Imports the texture's image as linear data; `None` (with a warning) when it cannot be used.
@@ -563,6 +588,47 @@ mod tests {
             warnings,
             ["extension KHR_materials_clearcoat is not supported and was ignored"]
         );
+    }
+
+    fn with_stylization(ext: &str) -> String {
+        JSON.replace(
+            r#""pbrMetallicRoughness": {"baseColorFactor": [1, 0, 0, 1], "metallicFactor": 0.5, "roughnessFactor": 0.25}"#,
+            &format!(
+                r#""pbrMetallicRoughness": {{"baseColorFactor": [1, 0, 0, 1]}},
+                "extensions": {{"VERION_materials_stylization": {ext}}}"#
+            ),
+        )
+        .replace(
+            r#""extensionsUsed": ["KHR_lights_punctual", "KHR_materials_clearcoat"]"#,
+            r#""extensionsUsed": ["KHR_lights_punctual", "VERION_materials_stylization"]"#,
+        )
+    }
+
+    #[test]
+    fn imports_the_stylization_extension() {
+        let json = with_stylization(
+            r#"{"hybridSurface": {"diffuse": 1}, "toonRamp": {"thresholds": [0.5], "palette": [[0.2, 0.2, 0.2], [1, 1, 1]]}}"#,
+        );
+        let Import { scene, warnings } = load_gltf_slice(&glb(&json, &[])).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(scene.materials()[0].stylization.len(), 2);
+        assert_eq!(scene.revisions().stylization, 1);
+    }
+
+    #[test]
+    fn a_material_without_the_extension_has_no_layers() {
+        let Import { scene, .. } = load_gltf_slice(&glb(JSON, &[])).unwrap();
+        assert!(scene.materials()[0].stylization.is_empty());
+        assert_eq!(scene.revisions().stylization, 0);
+    }
+
+    #[test]
+    fn an_invalid_stylization_value_is_an_import_error() {
+        let json = with_stylization(r#"{"hybridSurface": {"diffuse": 2}}"#);
+        assert!(matches!(
+            load_gltf_slice(&glb(&json, &[])),
+            Err(Error::Stylization { .. })
+        ));
     }
 
     #[test]
