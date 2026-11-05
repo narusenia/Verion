@@ -33,8 +33,11 @@ pub struct Args {
     max_spp: u32,
 }
 
-/// Samples per GPU dispatch; one dispatch per UI frame keeps the window responsive.
-const CHUNK_SPP: u32 = 4;
+/// Samples per GPU dispatch start here and adapt: a dispatch blocks the UI, so each one is sized to
+/// take about `FRAME_BUDGET`.
+const START_CHUNK: f32 = 4.0;
+const MAX_CHUNK: f32 = 16.0;
+const FRAME_BUDGET: f32 = 0.014;
 
 /// Longest side of the render. The accumulation is read back to the CPU every frame, so a bigger
 /// window does not mean a bigger render.
@@ -42,6 +45,8 @@ const MAX_SIDE: f32 = 1024.0;
 const MIN_SIDE: f32 = 64.0;
 /// A window resize re-renders only after the size has been stable this long.
 const RESIZE_SETTLE: Duration = Duration::from_millis(300);
+/// After this long without camera motion the first-hit AOVs are redone.
+const MOTION_SETTLE: Duration = Duration::from_millis(150);
 const DRAG_RAD_PER_PX: f32 = 0.005;
 
 /// Orbit camera around `target`; the scene camera is rebuilt from it on every change.
@@ -82,22 +87,24 @@ impl Orbit {
         }
     }
 
-    /// Orbits the scene's bounding-box center, measured along the view; falls back to
-    /// `from_camera` when the center is behind the camera or the scene is empty.
-    fn about(cam: &Camera, center: Option<V3>) -> Self {
-        let o = Self::from_camera(cam);
-        let Some(c) = center else { return o };
-        let (_, _, z) = o.axes();
-        let eye = o.eye();
+    /// Puts the pivot on the view axis at the depth of `center`, so orbiting keeps turning around
+    /// the scene after the eye has moved. A center behind the camera leaves the pivot alone.
+    fn repivot(&mut self, center: Option<V3>) {
+        let Some(c) = center else { return };
+        let (_, _, z) = self.axes();
+        let eye = self.eye();
         let along: f32 = (0..3).map(|a| (eye[a] - c[a]) * z[a]).sum();
-        if along <= 1e-3 {
-            return o;
+        if along > 1e-3 {
+            self.target = std::array::from_fn(|a| eye[a] - z[a] * along);
+            self.dist = along;
         }
-        Self {
-            target: std::array::from_fn(|a| eye[a] - z[a] * along),
-            dist: along,
-            ..o
-        }
+    }
+
+    /// Orbits the scene's bounding-box center, measured along the view.
+    fn about(cam: &Camera, center: Option<V3>) -> Self {
+        let mut o = Self::from_camera(cam);
+        o.repivot(center);
+        o
     }
 
     /// Right, up and back axes of the camera.
@@ -202,6 +209,15 @@ pub struct App {
     hover: Option<(usize, usize)>,
     orbit: Orbit,
     home: Camera,
+    /// Bounding-box center and half-diagonal of the instances.
+    bounds: Option<(V3, f32)>,
+    /// The camera moved recently: samples are kept small and the AOVs wait.
+    last_move: Instant,
+    aov_stale: bool,
+    /// New samples wait here until the picture may be rebuilt (see `upload_due`).
+    samples_dirty: bool,
+    chunk: f32,
+    last_upload: Instant,
     material: usize,
     original_materials: Vec<Material>,
     clipboard: Clipboard,
@@ -256,7 +272,7 @@ impl App {
         let aov = renderer
             .render_aovs(w, h)
             .map_err(|e| format!("aovs: {e:?}"))?;
-        let orbit = Orbit::about(scene.camera(), Self::scene_center(&scene));
+        let orbit = Orbit::about(scene.camera(), Self::scene_bounds(&scene).map(|b| b.0));
         let tris = |i: &verion_scene::Instance| scene.meshes()[i.mesh.index()].indices().len() / 3;
         let stats = Stats {
             meshes: scene.meshes().len(),
@@ -272,6 +288,12 @@ impl App {
         Ok(Self {
             ctx,
             home: *scene.camera(),
+            bounds: Self::scene_bounds(&scene),
+            last_move: Instant::now() - MOTION_SETTLE,
+            aov_stale: false,
+            samples_dirty: false,
+            chunk: START_CHUNK,
+            last_upload: Instant::now(),
             original_materials: scene.materials().to_vec(),
             scene,
             renderer,
@@ -305,8 +327,8 @@ impl App {
         })
     }
 
-    /// The first-hit AOVs belong to the camera and the size, so they are redone when either changes.
-    fn refresh_aovs(&mut self) {
+    /// The first-hit AOVs belong to the camera and the size.
+    fn fetch_aovs(&mut self) {
         let (w, h) = (self.width, self.height);
         match (
             self.renderer.render_normals(w, h),
@@ -315,15 +337,29 @@ impl App {
             (Ok(n), Ok(a)) => (self.normals, self.aov) = (n, a),
             (n, a) => eprintln!("aovs: {:?}", n.err().or(a.err())),
         }
+        self.aov_stale = false;
+    }
+
+    /// New AOVs and a new accumulation, for a change of size, scene or renderer.
+    fn refresh_aovs(&mut self) {
+        self.fetch_aovs();
         self.restart();
     }
 
-    /// Pushes the scene camera (orbit pose plus lens) to the renderer.
+    /// Pushes the scene camera (orbit pose plus lens) to the renderer. The AOVs only matter to the
+    /// stylized and AOV views, so for the beauty pass they are redone once the camera settles;
+    /// reading them back every frame is what makes flying choppy.
     fn move_camera(&mut self) {
         let cam = self.orbit.camera(self.scene.camera());
         self.scene.set_camera(cam);
         self.renderer.set_camera(&cam);
-        self.refresh_aovs();
+        self.last_move = Instant::now();
+        if self.view == View::Beauty && !self.stylized {
+            self.aov_stale = true;
+            self.restart();
+        } else {
+            self.refresh_aovs();
+        }
     }
 
     /// shortcut: a material or light edit rebuilds the whole renderer (acceleration structures
@@ -341,7 +377,7 @@ impl App {
     }
 
     /// Center of the instances' bounding box in world space.
-    fn scene_center(scene: &Scene) -> Option<V3> {
+    fn scene_bounds(scene: &Scene) -> Option<(V3, f32)> {
         let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
         for inst in scene.instances() {
             for p in scene.meshes()[inst.mesh.index()].positions() {
@@ -353,7 +389,15 @@ impl App {
                 }
             }
         }
-        (lo[0] <= hi[0]).then(|| std::array::from_fn(|a| (lo[a] + hi[a]) / 2.0))
+        (lo[0] <= hi[0]).then(|| {
+            let center = std::array::from_fn(|a| (lo[a] + hi[a]) / 2.0);
+            let radius = (0..3).map(|a| (hi[a] - lo[a]).powi(2)).sum::<f32>().sqrt() / 2.0;
+            (center, radius)
+        })
+    }
+
+    fn center(&self) -> Option<V3> {
+        self.bounds.map(|b| b.0)
     }
 
     fn frame_scene(&mut self) {
@@ -361,14 +405,14 @@ impl App {
         self.scene.frame_camera();
         let mut cam = *self.scene.camera();
         (cam.vertical_fov, cam.aperture_radius) = (lens.vertical_fov, lens.aperture_radius);
-        self.orbit = Orbit::about(&cam, Self::scene_center(&self.scene));
+        self.orbit = Orbit::about(&cam, self.center());
         self.scene.set_camera(cam);
         self.move_camera();
     }
 
     fn reset_camera(&mut self) {
         self.scene.set_camera(self.home);
-        self.orbit = Orbit::about(&self.home, Self::scene_center(&self.scene));
+        self.orbit = Orbit::about(&self.home, self.center());
         self.move_camera();
     }
 
@@ -463,6 +507,14 @@ impl App {
         }
     }
 
+    /// Rebuilding the picture reads the whole accumulation back and converts every pixel, so it is
+    /// done often while the image is rough (few samples) and rarely once it has converged.
+    fn upload_due(&self) -> bool {
+        let spp = self.acc.samples();
+        let wait = Duration::from_millis((u64::from(spp) / 2).clamp(30, 500));
+        spp >= self.max_spp || self.paused || self.last_upload.elapsed() >= wait
+    }
+
     fn upload(&mut self, ctx: &egui::Context) {
         // A fresh accumulation has no samples and averages to black; keep the last picture until
         // the first samples land. After a resize the old picture no longer fits, so show black then.
@@ -492,6 +544,8 @@ impl App {
             }
         }
         self.dirty = false;
+        self.samples_dirty = false;
+        self.last_upload = Instant::now();
     }
 
     /// Keyboard: WASD / arrows fly, Q / E down / up, Shift fast, Ctrl slow; the rest are toggles.
@@ -560,9 +614,11 @@ impl App {
             } else {
                 1.0
             };
-            let step = self.orbit.dist * self.speed * gear * dt;
+            let reach = self.orbit.dist.max(self.bounds.map_or(0.0, |b| b.1 * 0.05));
+            let step = reach * self.speed * gear * dt;
             self.orbit
                 .walk(axis[0] * step, axis[1] * step, axis[2] * step);
+            self.orbit.repivot(self.center());
             self.move_camera();
             ctx.request_repaint();
         }
@@ -987,11 +1043,13 @@ impl App {
         } else {
             (0.0, 1.0)
         };
+        let center = self.center();
         let mut moved = false;
         if d != egui::Vec2::ZERO {
             let o = &mut self.orbit;
             if r.dragged_by(PointerButton::Secondary) {
                 o.look(d.x, d.y);
+                o.repivot(center);
                 ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
             } else if r.dragged_by(PointerButton::Middle)
                 || (shift && r.dragged_by(PointerButton::Primary))
@@ -1129,12 +1187,25 @@ impl eframe::App for App {
         let dt = now.duration_since(self.last_tick).as_secs_f32().max(1e-4);
         self.last_tick = now;
         self.fps += (1.0 / dt - self.fps) * 0.1;
+        let moving = self.last_move.elapsed() < MOTION_SETTLE;
+        if self.aov_stale {
+            if moving {
+                ctx.request_repaint_after(MOTION_SETTLE / 3);
+            } else {
+                self.fetch_aovs();
+            }
+        }
         if !self.paused && self.acc.samples() < self.max_spp {
-            let n = CHUNK_SPP.min(self.max_spp - self.acc.samples());
+            let chunk = if moving { 1 } else { self.chunk.round() as u32 };
+            let n = chunk.min(self.max_spp - self.acc.samples());
+            let started = Instant::now();
             match self.renderer.accumulate(&mut self.acc, n) {
-                Ok(()) => self.dirty = true,
+                Ok(()) => self.samples_dirty = true,
                 Err(e) => eprintln!("render: {e:?}"),
             }
+            let took = started.elapsed().as_secs_f32().max(1e-4);
+            let fit = n as f32 * FRAME_BUDGET / took;
+            self.chunk = (self.chunk * 0.7 + fit * 0.3).clamp(1.0, MAX_CHUNK);
             self.spp_rate += (n as f32 / dt - self.spp_rate) * 0.1;
             ctx.request_repaint();
         }
@@ -1147,6 +1218,9 @@ impl eframe::App for App {
         self.statusbar(ui);
         if self.show_panels {
             self.inspector(ui);
+        }
+        if self.samples_dirty && self.upload_due() {
+            self.dirty = true;
         }
         if self.dirty {
             self.upload(&ctx);
@@ -1206,6 +1280,20 @@ mod tests {
         );
         // A center behind the camera keeps the glTF pivot.
         assert_eq!(Orbit::about(&cam, Some([0.0, 0.0, 20.0])).dist, 5.0);
+    }
+
+    #[test]
+    fn walking_keeps_the_pivot_at_the_scene_depth() {
+        let cam = camera();
+        let center = Some([1.0, 2.0, -3.0]);
+        let mut o = Orbit::about(&cam, center);
+        o.walk(2.0, 0.5, 0.0);
+        o.repivot(center);
+        // 2 units closer, and the pivot sits on the view axis at that depth.
+        assert!((o.dist - 6.0).abs() < 1e-4, "{}", o.dist);
+        let (_, _, z) = o.axes();
+        let eye = o.eye();
+        assert!((0..3).all(|a| (o.target[a] - (eye[a] - z[a] * o.dist)).abs() < 1e-4));
     }
 
     #[test]
