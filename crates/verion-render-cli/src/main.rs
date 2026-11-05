@@ -232,6 +232,7 @@ fn run(args: &Args) -> Result<(), String> {
                 normal: &normals,
                 albedo: &aov.albedo,
                 material_id: &aov.material_id,
+                images: scene.images(),
                 camera: *scene.camera(),
                 width: w as usize,
             },

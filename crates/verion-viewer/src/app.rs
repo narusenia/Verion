@@ -274,6 +274,10 @@ impl App {
                 StylizationLayer::OutlineStyle(o) => {
                     ui.add(egui::Slider::new(&mut o.width, 1.0..=8.0).text("outline px"));
                 }
+                StylizationLayer::MatCap(mc) => {
+                    unit(ui, &mut mc.strength, "matcap strength");
+                    unit(ui, &mut mc.albedo, "matcap albedo");
+                }
                 StylizationLayer::ShadowPalette(_) => {}
             }
         }
@@ -325,6 +329,7 @@ impl App {
                             normal: &self.normals,
                             albedo: &self.aov.albedo,
                             material_id: &self.aov.material_id,
+                            images: self.scene.images(),
                             camera: *self.scene.camera(),
                             width: self.width as usize,
                         },

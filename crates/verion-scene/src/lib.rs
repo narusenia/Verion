@@ -11,8 +11,8 @@ mod shading;
 pub use color::{ColorSpace, Oetf, OutputTransform, ToneMap};
 pub use image::{Image, ImageError};
 pub use material::{
-    Aov, BaseBsdf, ColorAdjust, HybridSurface, Material, OutlineStyle, OutputChannels, RimLight,
-    ShadowPalette, StylizationError, StylizationLayer, StylizedSpecular, ToonRamp,
+    Aov, BaseBsdf, ColorAdjust, HybridSurface, MatCap, Material, OutlineStyle, OutputChannels,
+    RimLight, ShadowPalette, StylizationError, StylizationLayer, StylizedSpecular, ToonRamp,
 };
 pub use mesh::{Mesh, MeshError};
 pub use scene::{

@@ -77,6 +77,7 @@ pub enum StylizationLayer {
     RimLight(RimLight),
     StylizedSpecular(StylizedSpecular),
     OutlineStyle(OutlineStyle),
+    MatCap(MatCap),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,7 +97,27 @@ impl StylizationLayer {
             Self::RimLight(r) => r.validate(),
             Self::StylizedSpecular(s) => s.validate(),
             Self::OutlineStyle(o) => o.validate(),
+            Self::MatCap(m) => m.validate(),
         }
+    }
+}
+
+/// Shading looked up from an image by the view-space normal (REQ-STY-012): the diffuse and the
+/// specular are replaced by the image color, `strength` blending it with the physical result.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MatCap {
+    /// A square picture of a lit sphere seen head-on, in the working space.
+    pub image: ImageId,
+    /// 0 keeps the physical shading, 1 replaces it.
+    pub strength: f32,
+    /// How much the image color is multiplied by the base color (0 uses the image as is).
+    pub albedo: f32,
+}
+
+impl MatCap {
+    fn validate(&self) -> Result<(), StylizationError> {
+        unit_range("matcap.strength", self.strength)?;
+        unit_range("matcap.albedo", self.albedo)
     }
 }
 
@@ -427,6 +448,24 @@ mod tests {
                 layer.validate(),
                 Err(StylizationError::OutOfRange("shadow.indirect"))
             );
+        }
+    }
+
+    #[test]
+    fn matcap_rejects_out_of_range_and_nan() {
+        let mut scene = crate::Scene::new();
+        let image = scene.add_image(crate::Image::new(1, 1, vec![[1.0; 3]]).unwrap());
+        for v in [-0.1, 1.1, f32::NAN] {
+            for (strength, albedo, field) in
+                [(v, 0.0, "matcap.strength"), (1.0, v, "matcap.albedo")]
+            {
+                let layer = StylizationLayer::MatCap(MatCap {
+                    image,
+                    strength,
+                    albedo,
+                });
+                assert_eq!(layer.validate(), Err(StylizationError::OutOfRange(field)));
+            }
         }
     }
 

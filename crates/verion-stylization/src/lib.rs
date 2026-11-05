@@ -12,7 +12,7 @@ mod postprocess;
 pub use postprocess::{ColorGrade, PostFrame, color_grade, outline};
 
 use verion_scene::{
-    Camera, ColorAdjust, HybridSurface, LIGHT_SLOTS, Material, RimLight, ShadowPalette,
+    Camera, ColorAdjust, HybridSurface, Image, LIGHT_SLOTS, Material, RimLight, ShadowPalette,
     StylizationLayer, StylizedSpecular, ToonRamp,
 };
 
@@ -23,6 +23,8 @@ pub struct PixelInput {
     pub normal: [f32; 3],
     /// World-space unit vector from the hit toward the camera (see `view_directions`).
     pub view: [f32; 3],
+    /// The normal's components along the camera's right and up axes, for the `MatCap` lookup.
+    pub normal_view: [f32; 2],
     /// Base color at the hit (the Albedo AOV).
     pub albedo: [f32; 3],
     /// The material's mean indirect diffuse divided by albedo over the frame (see
@@ -130,6 +132,12 @@ pub fn ramp_color(ramp: &ToonRamp, response: f32) -> [f32; 3] {
 /// shortcut: emissive triangles and the environment share one slot, so their ramp input is the
 /// contribution-weighted mean response of the samples; soft edges from area lights are averaged.
 pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
+    stylize_with(layers, p, &[])
+}
+
+/// `stylize` with the scene's images (`Scene::images`) for the layers that sample one; a layer
+/// whose image is not in `images` is skipped.
+pub fn stylize_with(layers: &[StylizationLayer], p: &PixelInput, images: &[Image]) -> [f32; 3] {
     let hybrid = hybrid_of(layers);
     let mut diffuse = p.direct_diffuse;
     // `gi` flattens the indirect diffuse toward a uniform ambient fill before the layers grade it.
@@ -149,6 +157,7 @@ pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
         est.clamp(0.0, p.specular[i].max(0.0))
     });
     let reflections: [f32; 3] = std::array::from_fn(|i| p.specular[i] - specular[i]);
+    let mut reflection_kept = 1.0 - hybrid.reflection;
     let mut added = [0.0f32; 3];
     // Layers apply in the order the material lists them, so the same kind may appear twice.
     for layer in layers {
@@ -190,6 +199,20 @@ pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
                 let r = rim_light(rim, p);
                 added = std::array::from_fn(|i| added[i] + r[i]);
             }
+            StylizationLayer::MatCap(mc) => {
+                let Some(image) = images.get(mc.image.index()) else {
+                    continue;
+                };
+                // shortcut: the picture stands in for the diffuse and the specular together, so it
+                // goes into the diffuse term and the specular terms fade out; a second picture for
+                // the specular (REQ-STY-012, later) takes over the specular term instead.
+                let m = matcap_color(mc.albedo, image, p);
+                let k = mc.strength;
+                diffuse = std::array::from_fn(|i| diffuse[i] + (m[i] - diffuse[i]) * k);
+                indirect = indirect.map(|c| c * (1.0 - k));
+                specular = specular.map(|c| c * (1.0 - k));
+                reflection_kept *= 1.0 - k;
+            }
             StylizationLayer::StylizedSpecular(sp) => {
                 let st = stylized_specular(sp, p);
                 let k = hybrid.specular;
@@ -198,8 +221,26 @@ pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
         }
     }
     std::array::from_fn(|i| {
-        let kept = reflections[i] * (1.0 - hybrid.reflection);
+        let kept = reflections[i] * reflection_kept;
         diffuse[i] + indirect[i] + specular[i] + kept + p.transmission[i] + p.emission[i] + added[i]
+    })
+}
+
+/// The `MatCap` image at the pixel's view-space normal (`u = 0.5 + 0.5 n_x`, `v = 0.5 - 0.5 n_y`),
+/// bilinear, times `lerp(1, albedo, mc_albedo)`.
+fn matcap_color(mc_albedo: f32, image: &Image, p: &PixelInput) -> [f32; 3] {
+    let (w, h) = (image.width() as usize, image.height() as usize);
+    let x = ((0.5 + 0.5 * p.normal_view[0]) * w as f32 - 0.5).clamp(0.0, (w - 1) as f32);
+    let y = ((0.5 - 0.5 * p.normal_view[1]) * h as f32 - 0.5).clamp(0.0, (h - 1) as f32);
+    let (x0, y0) = (x as usize, y as usize);
+    let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+    let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+    let px = image.pixels();
+    std::array::from_fn(|c| {
+        let top = px[y0 * w + x0][c] + (px[y0 * w + x1][c] - px[y0 * w + x0][c]) * fx;
+        let bottom = px[y1 * w + x0][c] + (px[y1 * w + x1][c] - px[y1 * w + x0][c]) * fx;
+        let tint = 1.0 + (p.albedo[c] - 1.0) * mc_albedo;
+        (top + (bottom - top) * fy) * tint
     })
 }
 
@@ -305,6 +346,8 @@ pub struct Frame<'a> {
     pub albedo: &'a [[f32; 3]],
     /// Material index plus one; 0 (background) is left unstylized.
     pub material_id: &'a [u32],
+    /// The scene's images (`Scene::images`), for layers that sample one.
+    pub images: &'a [Image],
     /// The camera and image width the frame was rendered with; the height follows from the length.
     pub camera: Camera,
     pub width: usize,
@@ -315,6 +358,10 @@ pub struct Frame<'a> {
 pub fn stylize_image(materials: &[Material], f: &Frame) -> Vec<[f32; 3]> {
     let n = f.material_id.len();
     let view = view_directions(&f.camera, f.width, n / f.width);
+    let m = &f.camera.transform;
+    let right: [f32; 3] = std::array::from_fn(|r| m[r][0]);
+    let up: [f32; 3] = std::array::from_fn(|r| m[r][1]);
+    let dot3 = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     // Per material: the sums of indirect diffuse and albedo, so `ambient` is a ratio of sums.
     // shortcut: a material's ambient is one value per frame, so objects sharing a material share
     // it, and it moves with the view; per-object or temporally smoothed values come with M8.
@@ -339,6 +386,7 @@ pub fn stylize_image(materials: &[Material], f: &Frame) -> Vec<[f32; 3]> {
             let p = PixelInput {
                 normal: f.normal[i],
                 view: view[i],
+                normal_view: [dot3(f.normal[i], right), dot3(f.normal[i], up)],
                 albedo: f.albedo[i],
                 ambient: match f.material_id[i] {
                     0 => [0.0; 3],
@@ -359,7 +407,7 @@ pub fn stylize_image(materials: &[Material], f: &Frame) -> Vec<[f32; 3]> {
                 0 => &[],
                 id => &materials[id as usize - 1].stylization,
             };
-            stylize(layers, &p)
+            stylize_with(layers, &p, f.images)
         })
         .collect()
 }
@@ -600,6 +648,84 @@ mod tests {
         );
     }
 
+    /// A 2 x 2 picture (top row 0.1, 0.2; bottom row 0.3, 0.4) as the scene's only image.
+    fn matcap_scene() -> (verion_scene::Scene, verion_scene::ImageId) {
+        let mut scene = verion_scene::Scene::new();
+        let px = [0.1, 0.2, 0.3, 0.4].map(|v| [v; 3]).to_vec();
+        let id = scene.add_image(Image::new(2, 2, px).unwrap());
+        (scene, id)
+    }
+
+    fn matcap(id: verion_scene::ImageId, strength: f32, albedo: f32) -> [StylizationLayer; 1] {
+        [StylizationLayer::MatCap(verion_scene::MatCap {
+            image: id,
+            strength,
+            albedo,
+        })]
+    }
+
+    #[test]
+    fn matcap_reads_the_picture_at_the_view_space_normal() {
+        let (scene, id) = matcap_scene();
+        let at = |n: [f32; 2]| {
+            let p = PixelInput {
+                normal_view: n,
+                ..Default::default()
+            };
+            stylize_with(&matcap(id, 1.0, 0.0), &p, scene.images())[0]
+        };
+        // Facing the camera is the picture's center (the mean of the four pixels); the corners of
+        // the disk are the corner pixels, with +y at the top of the picture.
+        assert!((at([0.0, 0.0]) - 0.25).abs() < 1e-6);
+        assert!((at([-1.0, 1.0]) - 0.1).abs() < 1e-6);
+        assert!((at([1.0, 1.0]) - 0.2).abs() < 1e-6);
+        assert!((at([-1.0, -1.0]) - 0.3).abs() < 1e-6);
+        assert!((at([1.0, -1.0]) - 0.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn matcap_replaces_the_shading_but_keeps_emission_and_transmission() {
+        let (scene, id) = matcap_scene();
+        let p = PixelInput {
+            direct_diffuse: [0.3; 3],
+            indirect_diffuse: [0.1; 3],
+            specular: [0.05; 3], // reflections only: no light slot carries any
+            emission: [0.2; 3],
+            transmission: [0.07; 3],
+            ..Default::default()
+        };
+        let at = |k: f32| stylize_with(&matcap(id, k, 0.0), &p, scene.images())[0];
+        let rest = 0.2 + 0.07;
+        assert!((at(0.0) - (0.3 + 0.1 + 0.05 + rest)).abs() < 1e-6); // physical
+        assert!((at(1.0) - (0.25 + rest)).abs() < 1e-6); // the picture alone
+        // Halfway: every shading term fades by half and the picture comes in at half.
+        assert!((at(0.5) - (0.5 * (0.3 + 0.1 + 0.05) + 0.5 * 0.25 + rest)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn matcap_albedo_multiplies_the_base_color() {
+        let (scene, id) = matcap_scene();
+        let p = PixelInput {
+            albedo: [0.5; 3],
+            ..Default::default()
+        };
+        let at = |a: f32| stylize_with(&matcap(id, 1.0, a), &p, scene.images())[0];
+        assert!((at(0.0) - 0.25).abs() < 1e-6);
+        assert!((at(1.0) - 0.125).abs() < 1e-6);
+        assert!((at(0.5) - 0.25 * 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn matcap_without_its_image_is_skipped() {
+        let (_, id) = matcap_scene();
+        let p = px(0.4);
+        assert_eq!(
+            stylize(&matcap(id, 1.0, 0.0), &p),
+            stylize(&[], &p),
+            "no image to sample, so the shading stays physical"
+        );
+    }
+
     #[test]
     fn gi_flattens_the_indirect_diffuse_toward_albedo_times_ambient() {
         let p = PixelInput {
@@ -651,6 +777,7 @@ mod tests {
                 normal: &z,
                 albedo: &alb,
                 material_id: &[1, 1, 1, 1, 0],
+                images: &[],
                 camera: Camera::default(),
                 width: 5,
             },
@@ -852,6 +979,7 @@ mod tests {
                 normal: &z,
                 albedo: &z,
                 material_id: &[0, 1, 2],
+                images: &[],
                 camera: Camera::default(),
                 width: 3,
             },
