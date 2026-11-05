@@ -14,6 +14,9 @@
 | 7 | Memory Budget の使用量メトリクス | REQ-PERF-006 | 済（手順 2。`MetalContext::memory()` と metrics の `gpu_budget_bytes`・`gpu_peak_bytes`・`upload_bytes`・`wavefront_bytes`。挙動は変えない。ピークは段の境目で測った最大値） |
 | 8 | 採否の決定 | REQ-GPU-005 | 済（ADR-0014: Metal の既定は Megakernel のまま。Wavefront は選択肢として残し、M4 の Vulkan（SER）と M5 以降の段の分離で再評価） |
 | 9 | Viewer と CLI からの切替 | （補助） | 済（`render-cli --integrator`、Viewer の Render 欄の「integrator」） |
+| 10 | 画素単位の Adaptive Sampling | REQ-ACC-007 | 済（ADR-0015。判定は `pt_core.slang` の `pixelActive`。Wavefront は `wf_select` で深さ 0 のキューを作り、Megakernel は収束した画素で戻る。両者ビット一致。`render-cli --adaptive`、EXR の `SampleCount`、Viewer の Render 欄と Samples ビュー） |
+| 11 | 一様サンプリングとの等時間比較 | REQ-ACC-007 | 済（`scripts/eval_adaptive.sh`。空の多いシーンで PSNR +2.2 dB、一様な cornell_box では −1.0 dB。既定は無効） |
+| 12 | Megakernel の 1 スレッド複数サンプル | REQ-GPU-005 | 済（最大 8 サンプルを続けて処理。画像は変わらず 7〜37% 速い。下の表の再計測） |
 
 ## 速度比較（2026-11-06、Apple M5、AC 電源、1024×768、256 spp、3 回の最小値）
 
@@ -26,6 +29,17 @@
 | toon_compare（Stylized） | 55,298 | sunny HDRI | 2.498 | 3.907 | 1.56 |
 | scale | 5,000,002 | 一様な空 | 0.226 | 0.364 | 1.61 |
 
+再計測（2026-11-06、項目 12 の後、2 回の最小値）:
+
+| シーン | Megakernel s | Wavefront s | 比 |
+|---|---|---|---|
+| cube | 0.110 | 0.298 | 2.71 |
+| cornell_box | 2.708 | 3.688 | 1.36 |
+| showcase | 1.836 | 2.386 | 1.30 |
+| glass_compare | 2.266 | 2.827 | 1.25 |
+| toon_compare（Stylized） | 2.046 | 3.722 | 1.82 |
+| scale | 0.142 | 0.332 | 2.34 |
+
 - 段の内訳（64 spp）: showcase は extend 0.18 s・shade 0.48 s、scale は extend 0.05 s・shade 0.06 s
 - 差はパス状態の読み書き（メモリ帯域）で、解像度に比例する（cube で 256 幅 1.5 倍、2048 幅 4.2 倍だったものが、深さ 0 の状態を省いて 1.7 倍まで縮んだ）。バウンスが多く 1 パスの計算が重いシーンほど差が小さい
 - Lighting AOV を持つと状態が倍になり、差が広がる（toon_compare）
@@ -33,3 +47,4 @@
 ## 完了条件
 
 - [x] Megakernel との速度比較（上の表。採否は ADR-0014）
+- [x] 画素単位の Adaptive Sampling と一様サンプリングとの等時間比較（ADR-0015）

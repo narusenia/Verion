@@ -29,4 +29,5 @@ Apple M5、1024×768、256 spp（`docs/implementation/M3-wavefront/README.md` �
 ## 結果
 
 - trace / shade の時間の分離（REQ-GPU-004）は Wavefront の段別計測（`--stage-timing`）で得られる。Megakernel の分離計測は持たない
+- 追記（2026-11-06、ADR-0015）: Megakernel を 1 スレッド最大 8 サンプルにして 7〜37% 速くなり、Wavefront との差は 1.25〜2.71 倍に広がった。既定は変えない
 - Wavefront の状態とキューは 1024×768 で約 69 MB（Lighting AOV ありで約 120 MB）。キューの容量は画素数で固定（1 パス / 画素）。複数サンプルを 1 回の波に載せる案は、同じ画素への加算が競合するので採っていない
