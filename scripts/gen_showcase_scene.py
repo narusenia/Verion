@@ -3,8 +3,12 @@
 (clearcoat, sheen, dispersion, toon stylization, rough metal), lit by two directional lights.
 The geometry is embedded, so the file is self-contained. With a second argument `sheen` it writes the sheen comparison instead: the same dark
 red base with no sheen, three sheen roughnesses and a blue sheen, lit mostly from behind.
-glTF's metallicFactor defaults to 1, so non-metals set it to 0. Usage: gen_showcase_scene.py OUT_FILE [sheen]"""
+With `matcap` it writes the MatCap comparison instead: the same clay-colored base lit physically, then clay, metal and toon
+MatCap pictures (scripts/gen_matcaps.py, embedded) at strength 1, and the clay one at strength 0.5.
+glTF's metallicFactor defaults to 1, so non-metals set it to 0. Usage: gen_showcase_scene.py OUT_FILE [sheen|matcap]"""
 import base64, json, math, struct, sys
+
+from gen_matcaps import matcap_png
 
 RINGS, SEGS = 48, 96
 
@@ -99,6 +103,23 @@ def main(path, mode="showcase"):
             cloth("blue sheen roughness 0.5", [0.5, 0.6, 1], 0.5),
         ]
         materials[5]["pbrMetallicRoughness"]["baseColorFactor"] = [0.15, 0.15, 0.15, 1]
+    images, textures = [], []
+    if mode == "matcap":
+        for kind in ("clay", "metal", "toon"):
+            images.append({"uri": "data:image/png;base64," + base64.b64encode(matcap_png(kind)).decode()})
+            textures.append({"source": len(images) - 1})
+
+        def shaded(name, texture, strength):
+            ext = {"matcap": {"texture": {"index": texture}, "strength": strength}} if texture is not None else {}
+            return {"name": name, "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.7, 0.6, 1], "metallicFactor": 0, "roughnessFactor": 0.5},
+                    "extensions": {"VERION_materials_stylization": ext}}
+        materials[:5] = [
+            shaded("physical", None, 0),
+            shaded("clay matcap", 0, 1.0),
+            shaded("metal matcap", 1, 1.0),
+            shaded("toon matcap", 2, 1.0),
+            shaded("clay matcap half", 0, 0.5),
+        ]
     nodes, scene_nodes = [], []
     for k in range(5):
         meshes_k = json.loads(json.dumps(meshes[0]))
@@ -135,6 +156,8 @@ def main(path, mode="showcase"):
         "buffers": [{"byteLength": len(blob), "uri": "data:application/octet-stream;base64," + base64.b64encode(bytes(blob)).decode()}],
         "bufferViews": views, "accessors": accs,
     }
+    if images:
+        gltf["images"], gltf["textures"] = images, textures
     with open(path, "w") as f:
         json.dump(gltf, f, separators=(",", ":"))
 
