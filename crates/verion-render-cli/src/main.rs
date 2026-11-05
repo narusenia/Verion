@@ -209,12 +209,13 @@ fn run(args: &Args) -> Result<(), String> {
         beauty = verion_stylization::stylize_image(
             scene.materials(),
             &verion_stylization::Frame {
-                albedo: &aov.albedo,
                 direct_diffuse: &l.direct_diffuse,
                 indirect_diffuse: &l.indirect_diffuse,
                 specular: &l.specular,
                 transmission: &l.transmission,
                 emission: &l.emission,
+                light_u: &l.light_u,
+                light_response: &l.light_response,
                 material_id: &aov.material_id,
             },
         );
