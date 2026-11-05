@@ -126,6 +126,14 @@ struct Args {
     /// submits each stage separately, so the total gets slower)
     #[arg(long)]
     stage_timing: bool,
+    /// Per-pixel adaptive sampling: a pixel stops once the standard error of its mean is at most
+    /// this fraction of the mean (e.g. 0.02). `--spp` becomes the most a pixel takes. The
+    /// output is marked non-physical (stopping on the pixel's own estimate biases it)
+    #[arg(long, value_name = "THRESHOLD")]
+    adaptive: Option<f32>,
+    /// Samples every pixel takes before `--adaptive` may stop it
+    #[arg(long, default_value_t = 16)]
+    adaptive_min_spp: u32,
     /// Write timing metrics as JSON
     #[arg(long)]
     metrics: Option<PathBuf>,
@@ -186,6 +194,9 @@ fn run(args: &Args) -> Result<(), String> {
         return Err("width, height and spp must be at least 1".into());
     }
     let grade = args.color_grade()?;
+    if args.adaptive.is_some_and(|t| !(t.is_finite() && t >= 0.0)) {
+        return Err("--adaptive takes a threshold of 0 or more".into());
+    }
     let total = Instant::now();
     let t = Instant::now();
     let import = load_gltf_in(&args.scene, args.working_space.color())
@@ -214,6 +225,10 @@ fn run(args: &Args) -> Result<(), String> {
         IntegratorArg::Wavefront => verion_gpu_metal::Integrator::Wavefront,
     });
     renderer.set_stage_timing(args.stage_timing);
+    renderer.set_adaptive(args.adaptive.map(|threshold| verion_gpu_metal::Adaptive {
+        threshold,
+        min_spp: args.adaptive_min_spp,
+    }));
     // shortcut: the peak is the largest of the samples taken at stage boundaries, not a true high-water mark.
     let mut peak = ctx.memory().allocated;
     let build_s = t.elapsed().as_secs_f64();
@@ -236,6 +251,9 @@ fn run(args: &Args) -> Result<(), String> {
             .accumulate(&mut acc, n)
             .map_err(|e| format!("render: {e:?}"))?;
         bar.set_position(acc.samples() as u64);
+        if acc.active_pixels() == 0 {
+            break; // adaptive sampling: every pixel converged
+        }
     }
     bar.finish_and_clear();
     let gpu_s = acc.gpu_seconds();
@@ -243,6 +261,10 @@ fn run(args: &Args) -> Result<(), String> {
     peak = peak.max(ctx.memory().allocated);
     let stages = acc.stage_seconds().map_or(String::new(), |[e, s]| {
         format!("\"extend_s\":{e},\"shade_s\":{s},")
+    });
+    let sample_count = acc.sample_counts();
+    let mean_spp = sample_count.as_ref().map_or(acc.samples() as f64, |n| {
+        n.iter().map(|&n| n as f64).sum::<f64>() / n.len() as f64
     });
     let mut beauty = acc.mean();
     let mut lighting = acc.lighting();
@@ -343,6 +365,7 @@ fn run(args: &Args) -> Result<(), String> {
             depth: Some(&aov.depth),
             object_id: Some(&aov.object_id),
             material_id: Some(&aov.material_id),
+            sample_count: sample_count.as_deref(),
             lighting: lighting.as_ref().map(|l| ExrLighting {
                 direct_diffuse: &l.direct_diffuse,
                 indirect_diffuse: &l.indirect_diffuse,
@@ -362,6 +385,7 @@ fn run(args: &Args) -> Result<(), String> {
                 white_balance: grade.white_balance,
             }),
             denoiser: args.denoise.then_some("oidn"),
+            adaptive_threshold: args.adaptive,
         },
     };
     let t = Instant::now();
@@ -375,7 +399,7 @@ fn run(args: &Args) -> Result<(), String> {
 
     if let Some(path) = &args.metrics {
         let json = format!(
-            "{{\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\"integrator\":\"{:?}\",\"wavefront_bytes\":{wavefront_bytes},\"gpu_budget_bytes\":{},\"gpu_peak_bytes\":{peak},\"upload_bytes\":{},\
+            "{{\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\"integrator\":\"{:?}\",\"adaptive\":{},\"mean_spp\":{mean_spp},\"wavefront_bytes\":{wavefront_bytes},\"gpu_budget_bytes\":{},\"gpu_peak_bytes\":{peak},\"upload_bytes\":{},\
 \"load_s\":{load_s},\"build_s\":{build_s},\"render_s\":{render_s},\"gpu_s\":{gpu_s},{stages}\"aov_s\":{aov_s},\"denoise_s\":{denoise_s},\"stylize_s\":{stylize_s},\
 \"write_s\":{write_s},\"total_s\":{}}}\n",
             json_str(&args.scene.display().to_string()),
@@ -383,6 +407,7 @@ fn run(args: &Args) -> Result<(), String> {
             args.spp,
             json_str(args.mode.name()),
             args.integrator,
+            args.adaptive.map_or("null".into(), |t| t.to_string()),
             memory.budget,
             memory.uploaded,
             total.elapsed().as_secs_f64(),
