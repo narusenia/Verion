@@ -152,6 +152,11 @@ impl Scene {
         &self.images
     }
 
+    /// Ids of every image, in `images()` order (for pickers that refer to one).
+    pub fn image_ids(&self) -> Vec<ImageId> {
+        (0..self.images.len() as u32).map(ImageId).collect()
+    }
+
     pub fn instances(&self) -> &[Instance] {
         &self.instances
     }

@@ -2,8 +2,8 @@
 
 use eframe::egui::{self, Ui};
 use verion_scene::{
-    BaseBsdf, ColorAdjust, HighlightShape, HybridSurface, Material, OutlineStyle, RimLight,
-    ShadowPalette, StylizationLayer, StylizedSpecular, ToonRamp,
+    BaseBsdf, ColorAdjust, HighlightShape, HybridSurface, ImageId, Material, OutlineStyle,
+    RimLight, ShadowPalette, StylizationLayer, StylizedSpecular, ToonRamp,
 };
 
 use egui_material_icons::icons::*;
@@ -13,7 +13,14 @@ use crate::widgets::{checkbox, color, hdr, kv, section, slider, unit};
 /// Stylization layers copied from one material, ready to paste onto another.
 pub type Clipboard = Option<Vec<StylizationLayer>>;
 
-pub fn edit(ui: &mut Ui, m: &mut Material, original: &Material, clip: &mut Clipboard) {
+/// `images` are the scene's images a layer may refer to (`Scene::image_ids`).
+pub fn edit(
+    ui: &mut Ui,
+    m: &mut Material,
+    original: &Material,
+    clip: &mut Clipboard,
+    images: &[ImageId],
+) {
     ui.horizontal(|ui| {
         if ui
             .button((ICON_UNDO.rich_text(), "Revert"))
@@ -45,7 +52,7 @@ pub fn edit(ui: &mut Ui, m: &mut Material, original: &Material, clip: &mut Clipb
         ICON_AUTO_FIX_HIGH,
         "Stylization (non-physical)",
         true,
-        |ui| stylization(ui, m),
+        |ui| stylization(ui, m, images),
     );
 }
 
@@ -152,7 +159,7 @@ fn layer_name(l: &StylizationLayer) -> &'static str {
     }
 }
 
-fn stylization(ui: &mut Ui, m: &mut Material) {
+fn stylization(ui: &mut Ui, m: &mut Material, images: &[ImageId]) {
     let layers = &mut m.stylization;
     ui.horizontal(|ui| {
         if layers.is_empty()
@@ -214,7 +221,7 @@ fn stylization(ui: &mut Ui, m: &mut Material) {
                 {
                     remove = Some(i);
                 }
-                layer_ui(ui, layer, i);
+                layer_ui(ui, layer, i, images);
             });
     }
     if let Some(i) = remove {
@@ -222,7 +229,7 @@ fn stylization(ui: &mut Ui, m: &mut Material) {
     }
 }
 
-fn layer_ui(ui: &mut Ui, layer: &mut StylizationLayer, id: usize) {
+fn layer_ui(ui: &mut Ui, layer: &mut StylizationLayer, id: usize, images: &[ImageId]) {
     match layer {
         StylizationLayer::HybridSurface(h) => {
             for (v, name) in [
@@ -270,9 +277,28 @@ fn layer_ui(ui: &mut Ui, layer: &mut StylizationLayer, id: usize) {
                         angle: 0.0,
                     };
                 }
-                // shortcut: an image shape comes from the glTF only; picking an image here needs the scene's image list.
-                if let HighlightShape::Image { image, .. } = s.shape {
-                    ui.label(format!("image {}", image.index()));
+                let picked = match s.shape {
+                    HighlightShape::Image { image, .. } => Some(image),
+                    _ => None,
+                };
+                if !images.is_empty() {
+                    egui::ComboBox::new(("highlight image", id), "image")
+                        .selected_text(
+                            picked.map_or("none".into(), |i| format!("image {}", i.index())),
+                        )
+                        .show_ui(ui, |ui| {
+                            for &image in images {
+                                let label = format!("image {}", image.index());
+                                if ui.selectable_label(picked == Some(image), label).clicked() {
+                                    let angle = match s.shape {
+                                        HighlightShape::Ellipse { angle, .. }
+                                        | HighlightShape::Image { angle, .. } => angle,
+                                        HighlightShape::Band => 0.0,
+                                    };
+                                    s.shape = HighlightShape::Image { image, angle };
+                                }
+                            }
+                        });
                 }
             });
             match &mut s.shape {
@@ -371,11 +397,18 @@ mod tests {
     use super::*;
 
     fn harness(m: Material) -> Harness<'static, (Material, Material, Clipboard)> {
+        harness_with(m, Vec::new())
+    }
+
+    fn harness_with(
+        m: Material,
+        images: Vec<ImageId>,
+    ) -> Harness<'static, (Material, Material, Clipboard)> {
         let original = m.clone();
         Harness::new_ui_state(
-            |ui, (m, original, clip)| {
+            move |ui, (m, original, clip)| {
                 egui_material_icons::initialize(ui.ctx());
-                edit(ui, m, original, clip);
+                edit(ui, m, original, clip, &images);
             },
             (m, original, None),
         )
@@ -425,6 +458,27 @@ mod tests {
             panic!()
         };
         assert_eq!((mc.strength, mc.albedo), (0.25, 0.0));
+    }
+
+    #[test]
+    fn highlight_image_is_picked_from_the_scene_images() {
+        let mut scene = verion_scene::Scene::new();
+        let image = scene.add_image(verion_scene::Image::new(1, 1, vec![[1.0; 3]]).unwrap());
+        let m = Material {
+            stylization: vec![StylizationLayer::StylizedSpecular(
+                StylizedSpecular::default(),
+            )],
+            ..Material::default()
+        };
+        let mut h = harness_with(m, scene.image_ids());
+        h.get_by_label("image").click();
+        h.run();
+        h.get_by_label("image 0").click();
+        h.run();
+        let StylizationLayer::StylizedSpecular(s) = &h.state().0.stylization[0] else {
+            panic!()
+        };
+        assert_eq!(s.shape, HighlightShape::Image { image, angle: 0.0 });
     }
 
     #[test]

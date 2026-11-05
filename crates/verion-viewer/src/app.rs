@@ -989,6 +989,7 @@ impl App {
             &mut edited,
             &self.original_materials[i],
             &mut self.clipboard,
+            &self.scene.image_ids(),
         );
         if edited != current
             && let Some(id) = self.scene.material_id(i)
