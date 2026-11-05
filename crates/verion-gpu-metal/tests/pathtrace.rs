@@ -2,7 +2,7 @@
 #![cfg(target_os = "macos")]
 
 use std::collections::HashMap;
-use verion_gpu_metal::{Error, MetalContext, Renderer};
+use verion_gpu_metal::{Adaptive, Error, Integrator, MetalContext, Renderer};
 
 use verion_scene::{BaseBsdf, Camera, IDENTITY, Image, Instance, Light, Material, Mesh, Scene};
 
@@ -157,6 +157,54 @@ fn progressive_accumulation_equals_one_shot_sample_count() {
     assert_eq!(acc.samples(), 16);
     assert!(acc.gpu_seconds() > 0.0);
     assert!((mean(&acc.mean()) - 1.99).abs() < 0.1);
+}
+
+fn accumulate(r: &Renderer, samples: u32) -> verion_gpu_metal::Accumulation {
+    let mut acc = r.new_accumulation(16, 16).unwrap();
+    r.accumulate(&mut acc, samples).unwrap();
+    acc
+}
+
+#[test]
+fn wavefront_matches_the_megakernel() {
+    let Some(ctx) = context() else { return };
+    let mut r = Renderer::new(&ctx, &furnace_room(0.5, 1.0)).unwrap();
+    let mega = accumulate(&r, 8).mean();
+    r.set_integrator(Integrator::Wavefront);
+    assert_eq!(accumulate(&r, 8).mean(), mega);
+}
+
+#[test]
+fn adaptive_with_a_zero_threshold_samples_every_pixel_like_uniform() {
+    let Some(ctx) = context() else { return };
+    let mut r = Renderer::new(&ctx, &furnace_room(0.5, 1.0)).unwrap();
+    r.set_integrator(Integrator::Wavefront);
+    let uniform = accumulate(&r, 8).mean();
+    r.set_adaptive(Some(Adaptive {
+        threshold: 0.0,
+        min_spp: 2,
+    }));
+    let acc = accumulate(&r, 8);
+    assert_eq!(acc.mean(), uniform);
+    assert_eq!(acc.sample_counts().unwrap(), vec![8; 256]);
+    assert_eq!(acc.last_sampled(), 256);
+}
+
+#[test]
+fn adaptive_stops_converged_pixels_at_the_minimum() {
+    let Some(ctx) = context() else { return };
+    let mut r = Renderer::new(&ctx, &furnace_room(0.5, 1.0)).unwrap();
+    r.set_adaptive(Some(Adaptive {
+        threshold: 1e9,
+        min_spp: 4,
+    }));
+    let mut acc = accumulate(&r, 8);
+    assert_eq!(acc.sample_counts().unwrap(), vec![4; 256]);
+    assert_eq!(acc.last_sampled(), 0);
+    assert!((mean(&acc.mean()) - 1.99).abs() < 0.2);
+    // Switching it off mid-accumulation would leave the per-pixel counts stale.
+    r.set_adaptive(None);
+    assert!(r.accumulate(&mut acc, 1).is_err());
 }
 
 /// Albedo-1 floor lit by one light and seen from above; center pixel radiance is analytic.

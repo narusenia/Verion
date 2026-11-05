@@ -23,10 +23,20 @@ const PATHTRACE_MSL: &str = include_str!("../shaders/pathtrace.metal");
 /// Path length limit. Radiance beyond it is dropped, so closed furnaces read slightly dark.
 const MAX_DEPTH: u32 = 8;
 
+/// Per-pixel adaptive sampling (REQ-ACC-007): a pixel stops taking samples once it has `min_spp`
+/// and the standard error of its luminance mean is at most `threshold` times the mean (with a
+/// floor of 0.05 for dark pixels). Stopping on the pixel's own estimate biases it slightly, so
+/// the result is non-physical. Runs on the wavefront path tracer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Adaptive {
+    pub threshold: f32,
+    pub min_spp: u32,
+}
+
 type CommandBuffer = Obj<dyn objc2_metal::MTLCommandBuffer>;
 type Encoder = Obj<dyn MTLComputeCommandEncoder>;
 /// Words of the parameter block; must match `params` in `shaders/include/pt_core.slang`.
-const PARAM_WORDS: usize = 32;
+const PARAM_WORDS: usize = 36;
 const MATERIAL_WORDS: usize = 22;
 const LIGHT_WORDS: usize = 16;
 /// Words per emissive triangle; must match `shaders/pathtrace.slang`.
@@ -327,6 +337,7 @@ pub struct Renderer {
     integrator: Integrator,
     /// Wavefront only: time extend and shade separately (see `run_wavefront`).
     stage_timing: bool,
+    adaptive: Option<Adaptive>,
     /// Compiled on first use, so megakernel-only users skip the compile.
     wavefront: OnceCell<Result<wavefront::Pipelines, Error>>,
 }
@@ -584,6 +595,7 @@ impl Renderer {
             no_lighting: upload::<f32>(ctx, &[])?,
             integrator: Integrator::default(),
             stage_timing: false,
+            adaptive: None,
             wavefront: OnceCell::new(),
         })
     }
@@ -617,6 +629,17 @@ impl Renderer {
     /// time into extend (closest-hit tracing) and shade (REQ-GPU-004). Slows the render down.
     pub fn set_stage_timing(&mut self, on: bool) {
         self.stage_timing = on;
+    }
+
+    /// Turns per-pixel adaptive sampling on or off for accumulations started afterwards; it runs
+    /// the wavefront whatever `set_integrator` chose. `accumulate` then takes `samples` as the most
+    /// each pixel gets, and `Accumulation::last_sampled` tells how many pixels still take samples.
+    pub fn set_adaptive(&mut self, adaptive: Option<Adaptive>) {
+        self.adaptive = adaptive;
+    }
+
+    pub fn adaptive(&self) -> Option<Adaptive> {
+        self.adaptive
     }
 
     /// World-space normal of the first hit per pixel, row-major from the top-left; misses are zero.
@@ -786,6 +809,10 @@ pub struct Accumulation {
     wavefront: Option<wavefront::Buffers>,
     /// GPU seconds of the extend and shade stages, when stage timing is on.
     stage_seconds: Option<[f64; 2]>,
+    /// Adaptive sampling only: samples, luminance sum and luminance square sum per pixel.
+    pixel_stats: Option<Obj<dyn MTLBuffer>>,
+    /// Pixels the latest sample traced.
+    last_sampled: u32,
 }
 
 impl Accumulation {
@@ -800,12 +827,13 @@ impl Accumulation {
                 n * LIGHTING_STRIDE,
             )
         };
-        let inv = 1.0 / self.samples.max(1) as f32;
+        let inv = self.inverse_samples();
         let part = |k: usize| -> Vec<[f32; 3]> {
             data.as_chunks::<LIGHTING_STRIDE>()
                 .0
                 .iter()
-                .map(|r| std::array::from_fn(|i| r[3 * k + i] * inv))
+                .zip(&inv)
+                .map(|(r, inv)| std::array::from_fn(|i| r[3 * k + i] * inv))
                 .collect()
         };
         Some(LightingAovs {
@@ -818,7 +846,8 @@ impl Accumulation {
                 .as_chunks::<LIGHTING_STRIDE>()
                 .0
                 .iter()
-                .map(|r| {
+                .zip(&inv)
+                .map(|(r, inv)| {
                     std::array::from_fn(|s| {
                         std::array::from_fn(|i| r[17 + SLOT_WORDS * s + i] * inv)
                     })
@@ -843,7 +872,8 @@ impl Accumulation {
                 .as_chunks::<LIGHTING_STRIDE>()
                 .0
                 .iter()
-                .map(|r| {
+                .zip(&inv)
+                .map(|(r, inv)| {
                     std::array::from_fn(|s| {
                         std::array::from_fn(|i| r[17 + SLOT_WORDS * s + 5 + i] * inv)
                     })
@@ -914,12 +944,52 @@ impl Accumulation {
         let data = unsafe {
             std::slice::from_raw_parts(self.buffer.contents().as_ptr().cast::<f32>(), n * 3)
         };
-        let inv = 1.0 / self.samples.max(1) as f32;
         data.as_chunks::<3>()
             .0
             .iter()
-            .map(|c| [c[0] * inv, c[1] * inv, c[2] * inv])
+            .zip(self.inverse_samples())
+            .map(|(c, inv)| [c[0] * inv, c[1] * inv, c[2] * inv])
             .collect()
+    }
+
+    /// Samples each pixel took, row-major from the top-left; `None` unless adaptive sampling ran.
+    pub fn sample_counts(&self) -> Option<Vec<u32>> {
+        let stats = self.stats()?;
+        Some(
+            stats
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|s| s[0] as u32)
+                .collect(),
+        )
+    }
+
+    /// Pixels the latest `accumulate` sample traced: all of them unless adaptive sampling stopped
+    /// some. 0 means every pixel has converged and more samples change nothing.
+    pub fn last_sampled(&self) -> u32 {
+        self.last_sampled
+    }
+
+    fn stats(&self) -> Option<&[f32]> {
+        let buffer = self.pixel_stats.as_ref()?;
+        let n = self.width as usize * self.height as usize;
+        // SAFETY: 3 floats per pixel, and `accumulate` waits for the GPU.
+        Some(unsafe { std::slice::from_raw_parts(buffer.contents().as_ptr().cast::<f32>(), n * 3) })
+    }
+
+    /// 1 / samples per pixel, for turning the sums into means.
+    fn inverse_samples(&self) -> Vec<f32> {
+        let n = self.width as usize * self.height as usize;
+        match self.stats() {
+            Some(stats) => stats
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|s| 1.0 / s[0].max(1.0))
+                .collect(),
+            None => vec![1.0 / self.samples.max(1) as f32; n],
+        }
     }
 }
 
@@ -946,6 +1016,8 @@ impl Renderer {
             lighting: None,
             wavefront: None,
             stage_seconds: None,
+            pixel_stats: None,
+            last_sampled: 0,
         })
     }
 
@@ -993,7 +1065,30 @@ impl Renderer {
         params[28] = acc.lighting.is_some() as u32;
         params[29] = self.multiscatter as u32;
 
-        if self.integrator == Integrator::Wavefront && acc.wavefront.is_none() {
+        if acc.samples == 0 && acc.pixel_stats.is_none() && self.adaptive.is_some() {
+            let len = acc.width as usize * acc.height as usize * 3 * size_of::<f32>();
+            self.ctx.check_fits(len)?;
+            acc.pixel_stats = Some(
+                self.ctx
+                    .device
+                    .newBufferWithLength_options(len, MTLResourceOptions::StorageModeShared)
+                    .ok_or(Error::Resource("pixel stats buffer"))?,
+            );
+        }
+        // The stats count every sample from the first one on, or the means come out wrong.
+        if acc.pixel_stats.is_some() != self.adaptive.is_some() {
+            return Err(Error::Scene(
+                "adaptive sampling was switched mid-accumulation; start a new accumulation".into(),
+            ));
+        }
+        let wavefront = self.integrator == Integrator::Wavefront || self.adaptive.is_some();
+        if let Some(a) = self.adaptive {
+            params[32] = 1;
+            params[33] = a.threshold.to_bits();
+            params[34] = a.min_spp;
+        }
+
+        if wavefront && acc.wavefront.is_none() {
             let paths = acc.width as usize * acc.height as usize;
             acc.wavefront = Some(wavefront::Buffers::new(
                 &self.ctx,
@@ -1002,11 +1097,12 @@ impl Renderer {
             )?);
         }
 
-        if self.integrator == Integrator::Wavefront {
+        acc.last_sampled = acc.width * acc.height;
+        if wavefront {
             self.run_wavefront(acc, &mut params, samples)?;
         } else {
             let (cb, enc) = self.open_encoder(acc)?;
-            // SAFETY: `open_encoder` set bindings 0..17.
+            // SAFETY: `open_encoder` set bindings 0..18.
             unsafe { self.encode_megakernel(&enc, acc, &mut params, samples) };
             enc.endEncoding();
             cb.commit();
@@ -1017,7 +1113,7 @@ impl Renderer {
         Ok(())
     }
 
-    /// A command buffer and a compute encoder with the path tracer's bindings 0..17 set.
+    /// A command buffer and a compute encoder with the path tracer's bindings 0..18 set.
     fn open_encoder(&self, acc: &Accumulation) -> Result<(CommandBuffer, Encoder), Error> {
         let cb = self
             .ctx
@@ -1032,7 +1128,7 @@ impl Renderer {
             enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
         }
         // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional, uvs, texels, texInfo, vnormals, lighting). Dispatches in one encoder run in
+        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional, uvs, texels, texInfo, vnormals, lighting, pixelStats). Dispatches in one encoder run in
         // order, so the `+=` on `accum` never races.
         unsafe {
             enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
@@ -1056,12 +1152,17 @@ impl Renderer {
                 0,
                 17,
             );
+            enc.setBuffer_offset_atIndex(
+                Some(acc.pixel_stats.as_ref().unwrap_or(&self.no_lighting)),
+                0,
+                18,
+            );
         }
         Ok((cb, enc))
     }
 
     /// # Safety
-    /// `enc` must have bindings 0..17 of `shaders/pathtrace.slang` set.
+    /// `enc` must have bindings 0..18 of `shaders/pathtrace.slang` set.
     unsafe fn encode_megakernel(
         &self,
         enc: &ProtocolObject<dyn MTLComputeCommandEncoder>,

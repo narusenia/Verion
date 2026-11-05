@@ -1,19 +1,23 @@
 // Wavefront path state (REQ-GPU-005): the path core plus the queues and the structure-of-arrays
-// state that carry paths between the generate, extend and shade kernels. Mirrored in
+// state that carry paths between the select, extend and shade kernels. Mirrored in
 // crates/verion-gpu-metal/src/wavefront.rs.
 //
 // params[30] is the bounce depth a dispatch works on, params[31] the path count N (one path per pixel).
 // Path state word f of path p is at state[f * N + p]; WF_BASE words, then WF_SPLIT more when the
 // lighting AOVs are on (params[28]).
+//
+// Adaptive sampling (params[32], REQ-ACC-007): before each sample, wf_select puts only the pixels
+// that have not converged into the depth-0 queue (counts[0]); the other pixels take no more samples.
 
 #include "pt_core.slang"
 
-RWStructuredBuffer<uint> state;    // 18: path state, see above
-RWStructuredBuffer<uint> hits;     // 19: 4 words per path: hit flag, instance, primitive, t (bits)
-StructuredBuffer<uint> queueIn;    // 20: path ids live at this depth
-RWStructuredBuffer<uint> queueOut; // 21: path ids that go on to the next depth
-RWStructuredBuffer<uint> counts;   // 22: live paths per depth (counts[d] = length of the depth-d queue)
-RWStructuredBuffer<uint> args;     // 23: indirect dispatch arguments, 3 words per depth
+RWStructuredBuffer<uint> state;    // 19: path state, see above
+RWStructuredBuffer<uint> hits;     // 20: 4 words per path: hit flag, instance, primitive, t (bits)
+StructuredBuffer<uint> queueIn;    // 21: path ids live at this depth
+RWStructuredBuffer<uint> queueOut; // 22: path ids that go on to the next depth
+RWStructuredBuffer<uint> counts;   // 23: live paths per depth (counts[d] = length of the depth-d queue), then
+                                   // the depth-0 count of the latest sample at counts[max depth + 1]
+RWStructuredBuffer<uint> args;     // 24: indirect dispatch arguments, 3 words per depth
 
 static const uint WF_GROUP = 64;
 static const uint WF_BASE = 16;
@@ -85,5 +89,6 @@ PathState loadPath(uint p, uint depth)
     return s;
 }
 
-// The path a thread of the depth's queue works on; depth 0 takes every pixel in order, with no queue.
-uint queuedPath(uint i, uint depth) { return depth == 0 ? i : queueIn[i]; }
+// The path a thread of the depth's queue works on. Depth 0 takes every pixel in order with no queue,
+// unless adaptive sampling chose the pixels (wf_select).
+uint queuedPath(uint i, uint depth) { return depth == 0 && params[32] == 0 ? i : queueIn[i]; }

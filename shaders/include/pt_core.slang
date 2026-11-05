@@ -19,7 +19,9 @@ StructuredBuffer<float> materials;  // 22 words: base color rgb, emission rgb, m
 StructuredBuffer<uint> lights;      // 16 words: kind (0 point, 1 directional, 2 spot), color rgb, intensity, position or travel direction xyz,
                                     // spot axis xyz, spot falloff scale, spot falloff offset, 3 pad (floats as bits)
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
-                                    // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle, 28 lighting AOV enable, 29 multiple-scattering compensation enable
+                                    // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle, 28 lighting AOV enable, 29 multiple-scattering compensation enable,
+                                    // 30 / 31 wavefront depth and path count, 32 adaptive sampling enable, 33 adaptive threshold
+                                    // (float), 34 adaptive minimum samples
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
 StructuredBuffer<float> emitters;   // 16 words per emissive world-space triangle: p0, p1, p2, radiance rgb, area, selection pdf, 2 pad
 StructuredBuffer<float> emitCdf;    // cumulative selection probability per emitter triangle, last entry 1
@@ -39,6 +41,8 @@ RWStructuredBuffer<float> lighting; // used only when params[28] != 0; 65 floats
                                     // reaches the point, and wd = lum(u) + lum(s). The physical diffuse is u * r.
                                     // Slots 0..2 hold point / directional / spot lights by index (later ones share slot 2);
                                     // slot 3 holds emissive triangles and the environment map.
+RWStructuredBuffer<float> pixelStats; // used only when params[32] != 0; 3 floats per pixel: samples taken, sum of
+                                      // luminance, sum of squared luminance (adaptive sampling, REQ-ACC-007)
 
 static const float PI = 3.14159265358979;
 static const uint LIGHTING_STRIDE = 65;
@@ -1052,6 +1056,13 @@ void finishPath(PathState st, uint pixel)
     accum[o] += radiance.x;
     accum[o + 1] += radiance.y;
     accum[o + 2] += radiance.z;
+    if (params[32] != 0)
+    {
+        float l = lum(radiance);
+        pixelStats[3 * pixel] += 1.0;
+        pixelStats[3 * pixel + 1] += l;
+        pixelStats[3 * pixel + 2] += l * l;
+    }
 
     if (params[28] != 0)
     {

@@ -19,6 +19,7 @@ use crate::{Error, MetalContext};
 const ARGS_MSL: &str = include_str!("../../shaders/wf_args.metal");
 const EXTEND_MSL: &str = include_str!("../../shaders/wf_extend.metal");
 const SHADE_MSL: &str = include_str!("../../shaders/wf_shade.metal");
+const SELECT_MSL: &str = include_str!("../../shaders/wf_select.metal");
 
 /// Path-state words per path; must match `shaders/include/wf_state.slang`.
 const BASE_WORDS: usize = 16;
@@ -40,6 +41,7 @@ pub(super) struct Pipelines {
     args: Obj<dyn MTLComputePipelineState>,
     extend: Obj<dyn MTLComputePipelineState>,
     shade: Obj<dyn MTLComputePipelineState>,
+    select: Obj<dyn MTLComputePipelineState>,
 }
 
 impl Pipelines {
@@ -48,6 +50,7 @@ impl Pipelines {
             args: pipeline(ctx, ARGS_MSL, "wf_args")?,
             extend: pipeline(ctx, EXTEND_MSL, "wf_extend")?,
             shade: pipeline(ctx, SHADE_MSL, "wf_shade")?,
+            select: pipeline(ctx, SELECT_MSL, "wf_select")?,
         })
     }
 }
@@ -75,9 +78,31 @@ impl Buffers {
             state: private(paths * words * 4)?,
             hits: private(paths * 16)?,
             queues: [private(paths * 4)?, private(paths * 4)?],
-            counts: private((depth + 1) * 4)?,
+            // Shared: the host reads back how many pixels the latest sample took (the last word).
+            counts: {
+                ctx.check_fits((depth + 2) * 4)?;
+                ctx.device
+                    .newBufferWithLength_options(
+                        (depth + 2) * 4,
+                        MTLResourceOptions::StorageModeShared,
+                    )
+                    .ok_or(Error::Resource("wavefront buffer"))?
+            },
             args: private(depth * 12)?,
         })
+    }
+
+    /// Pixels the latest sample traced (all of them unless adaptive sampling stopped some).
+    pub(super) fn last_sampled(&self) -> u32 {
+        // SAFETY: shared buffer of MAX_DEPTH + 2 words; read after the command buffer completed.
+        unsafe {
+            *self
+                .counts
+                .contents()
+                .as_ptr()
+                .cast::<u32>()
+                .add(MAX_DEPTH as usize + 1)
+        }
     }
 
     /// Bytes of GPU memory, for the metrics.
@@ -124,8 +149,13 @@ impl Renderer {
             params[6] = acc.samples + k;
             for d in 0..MAX_DEPTH as usize {
                 params[30] = d as u32;
-                for (stage, pipe) in [(0, &p.args), (0, &p.extend), (1, &p.shade)] {
-                    if timed && !(k == 0 && d == 0 && pipe == &p.args) {
+                let select = (d == 0 && params[32] != 0).then_some((0, &p.select));
+                let stages =
+                    select
+                        .into_iter()
+                        .chain([(0, &p.args), (0, &p.extend), (1, &p.shade)]);
+                for (n, (stage, pipe)) in stages.enumerate() {
+                    if timed && !(k == 0 && d == 0 && n == 0) {
                         enc.endEncoding();
                         cb.commit();
                         done.push((stage_of_cb, cb));
@@ -134,7 +164,23 @@ impl Renderer {
                     stage_of_cb = stage;
                     bind(&enc, b, params, d);
                     enc.setComputePipelineState(pipe);
-                    if pipe == &p.args {
+                    if pipe == &p.select {
+                        // The depth-0 queue is what wf_select writes.
+                        // SAFETY: binding 22 is `queueOut` in wf_state.slang.
+                        unsafe { enc.setBuffer_offset_atIndex(Some(&b.queues[0]), 0, 22) };
+                        enc.dispatchThreads_threadsPerThreadgroup(
+                            MTLSize {
+                                width: w,
+                                height: h,
+                                depth: 1,
+                            },
+                            MTLSize {
+                                width: 8,
+                                height: 8,
+                                depth: 1,
+                            },
+                        );
+                    } else if pipe == &p.args {
                         enc.dispatchThreads_threadsPerThreadgroup(size(1), size(1));
                     } else {
                         // SAFETY: `args` holds 3 words per depth, written by the args dispatch above.
@@ -153,6 +199,7 @@ impl Renderer {
         cb.commit();
         cb.waitUntilCompleted();
         done.push((stage_of_cb, cb));
+        acc.last_sampled = b.last_sampled();
         for (stage, cb) in &done {
             let t = cb.GPUEndTime() - cb.GPUStartTime();
             acc.gpu_seconds += t;
@@ -172,17 +219,17 @@ fn size(n: usize) -> MTLSize {
     }
 }
 
-/// Binds the wavefront buffers (`shaders/include/wf_state.slang`, 18..23), the queues of depth `d`
+/// Binds the wavefront buffers (`shaders/include/wf_state.slang`, 19..24), the queues of depth `d`
 /// and the parameter block. Bindings stay with the encoder, so this is redone for each new one.
 fn bind(enc: &Encoder, b: &Buffers, params: &[u32; PARAM_WORDS], d: usize) {
     // SAFETY: the indices match the slang declarations; `params` outlives the call and Metal copies it.
     unsafe {
-        enc.setBuffer_offset_atIndex(Some(&b.state), 0, 18);
-        enc.setBuffer_offset_atIndex(Some(&b.hits), 0, 19);
-        enc.setBuffer_offset_atIndex(Some(&b.queues[d % 2]), 0, 20);
-        enc.setBuffer_offset_atIndex(Some(&b.queues[(d + 1) % 2]), 0, 21);
-        enc.setBuffer_offset_atIndex(Some(&b.counts), 0, 22);
-        enc.setBuffer_offset_atIndex(Some(&b.args), 0, 23);
+        enc.setBuffer_offset_atIndex(Some(&b.state), 0, 19);
+        enc.setBuffer_offset_atIndex(Some(&b.hits), 0, 20);
+        enc.setBuffer_offset_atIndex(Some(&b.queues[d % 2]), 0, 21);
+        enc.setBuffer_offset_atIndex(Some(&b.queues[(d + 1) % 2]), 0, 22);
+        enc.setBuffer_offset_atIndex(Some(&b.counts), 0, 23);
+        enc.setBuffer_offset_atIndex(Some(&b.args), 0, 24);
         enc.setBytes_length_atIndex(
             std::ptr::NonNull::from(params).cast(),
             size_of_val(params),

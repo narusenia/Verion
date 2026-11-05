@@ -39,7 +39,7 @@ using namespace metal;
                 }
             
 
-#line 12 "shaders/include/wf_state.slang"
+#line 15 "shaders/include/wf_state.slang"
 struct KernelContext_0
 {
     uint device* params_0;
@@ -51,37 +51,58 @@ struct KernelContext_0
 };
 
 
-#line 89
+#line 94
 uint queuedPath_0(uint i_0, uint depth_0, KernelContext_0 thread* kernelContext_0)
 {
 
-#line 89
-    uint _S1;
+#line 94
+    bool _S1;
 
-#line 89
+#line 94
     if(depth_0 == 0U)
     {
 
-#line 89
-        _S1 = i_0;
+#line 94
+        _S1 = kernelContext_0->params_0[int(32)] == 0U;
 
-#line 89
+#line 94
     }
     else
     {
 
-#line 89
-        _S1 = kernelContext_0->queueIn_0[i_0];
+#line 94
+        _S1 = false;
 
-#line 89
+#line 94
     }
 
-#line 89
-    return _S1;
+#line 94
+    uint _S2;
+
+#line 94
+    if(_S1)
+    {
+
+#line 94
+        _S2 = i_0;
+
+#line 94
+    }
+    else
+    {
+
+#line 94
+        _S2 = kernelContext_0->queueIn_0[i_0];
+
+#line 94
+    }
+
+#line 94
+    return _S2;
 }
 
 
-#line 47 "shaders/include/pt_core.slang"
+#line 51 "shaders/include/pt_core.slang"
 uint pcg_0(uint v_0)
 {
     uint s_0 = v_0 * 747796405U + 2891336453U;
@@ -90,34 +111,34 @@ uint pcg_0(uint v_0)
 }
 
 
-#line 64
+#line 68
 float pf_0(uint i_1, KernelContext_0 thread* kernelContext_1)
 {
 
-#line 64
+#line 68
     return (as_type<float>((kernelContext_1->params_0[i_1])));
 }
 
 
-#line 54
+#line 58
 struct Rng_0
 {
     uint state_1;
 };
 
 
-#line 57
+#line 61
 float Rng_next_0(Rng_0 thread* this_0)
 {
-    uint _S2 = pcg_0(this_0->state_1);
+    uint _S3 = pcg_0(this_0->state_1);
 
-#line 59
-    this_0->state_1 = _S2;
-    return float(_S2 >> 8U) * 5.9604644775390625e-08f;
+#line 63
+    this_0->state_1 = _S3;
+    return float(_S3 >> 8U) * 5.9604644775390625e-08f;
 }
 
 
-#line 439
+#line 443
 struct Parts_0
 {
     float3 total_0;
@@ -129,7 +150,7 @@ struct Parts_0
 };
 
 
-#line 516
+#line 520
 struct PathState_0
 {
     float3 org_0;
@@ -147,7 +168,7 @@ struct PathState_0
 };
 
 
-#line 542
+#line 546
 PathState_0 generatePath_0(uint px_0, uint py_0, KernelContext_0 thread* kernelContext_2)
 {
     uint w_1 = kernelContext_2->params_0[int(0)];
@@ -156,89 +177,89 @@ PathState_0 generatePath_0(uint px_0, uint py_0, KernelContext_0 thread* kernelC
     thread Rng_0 rng_1;
     (&rng_1)->state_1 = pcg_0((py_0 * w_1 + px_0) ^ (pcg_0(kernelContext_2->params_0[int(6)] * 2654435769U + 2135587861U)));
 
-#line 548
-    float _S3 = pf_0(2U, kernelContext_2);
-
-    float _S4 = float(w_1);
-
-#line 550
-    float _S5 = float(h_0);
-
-#line 550
-    float aspect_0 = _S4 / _S5;
-    float _S6 = float(px_0);
-
-#line 551
-    float _S7 = Rng_next_0(&rng_1);
-
-#line 551
-    float u_0 = (2.0f * (_S6 + _S7) / _S4 - 1.0f) * aspect_0 * _S3;
-    float _S8 = float(py_0);
-
 #line 552
-    float _S9 = Rng_next_0(&rng_1);
-    float3 _S10 = float3(u_0, (1.0f - 2.0f * (_S8 + _S9) / _S5) * _S3, -1.0f);
+    float _S4 = pf_0(2U, kernelContext_2);
 
-#line 553
-    float _S11 = pf_0(4U, kernelContext_2);
-
-#line 553
-    float3 focal_0 = _S10 * float3(_S11) ;
-
-#line 553
-    float _S12 = pf_0(3U, kernelContext_2);
-    float _S13 = Rng_next_0(&rng_1);
+    float _S5 = float(w_1);
 
 #line 554
-    float lensR_0 = _S12 * sqrt(_S13);
-    float _S14 = Rng_next_0(&rng_1);
+    float _S6 = float(h_0);
+
+#line 554
+    float aspect_0 = _S5 / _S6;
+    float _S7 = float(px_0);
 
 #line 555
-    float lensA_0 = 6.2831854820251465f * _S14;
-    float _S15 = lensR_0 * cos(lensA_0);
+    float _S8 = Rng_next_0(&rng_1);
+
+#line 555
+    float u_0 = (2.0f * (_S7 + _S8) / _S5 - 1.0f) * aspect_0 * _S4;
+    float _S9 = float(py_0);
 
 #line 556
-    float _S16 = lensR_0 * sin(lensA_0);
-    float3 _S17 = normalize(focal_0 - float3(_S15, _S16, 0.0f));
-    thread PathState_0 s_1;
+    float _S10 = Rng_next_0(&rng_1);
+    float3 _S11 = float3(u_0, (1.0f - 2.0f * (_S9 + _S10) / _S6) * _S4, -1.0f);
+
+#line 557
+    float _S12 = pf_0(4U, kernelContext_2);
+
+#line 557
+    float3 focal_0 = _S11 * float3(_S12) ;
+
+#line 557
+    float _S13 = pf_0(3U, kernelContext_2);
+    float _S14 = Rng_next_0(&rng_1);
 
 #line 558
+    float lensR_0 = _S13 * sqrt(_S14);
+    float _S15 = Rng_next_0(&rng_1);
+
+#line 559
+    float lensA_0 = 6.2831854820251465f * _S15;
+    float _S16 = lensR_0 * cos(lensA_0);
+
+#line 560
+    float _S17 = lensR_0 * sin(lensA_0);
+    float3 _S18 = normalize(focal_0 - float3(_S16, _S17, 0.0f));
+    thread PathState_0 s_1;
+
+#line 562
     uint r_0 = 0U;
     for(;;)
     {
 
-#line 559
+#line 563
         if(r_0 < 3U)
         {
         }
         else
         {
 
-#line 559
+#line 563
             break;
         }
-        uint _S18 = 4U * r_0;
+        uint _S19 = 4U * r_0;
 
-#line 561
-        uint _S19 = 8U + _S18;
+#line 565
+        uint _S20 = 8U + _S19;
 
-#line 561
-        uint _S20 = 9U + _S18;
+#line 565
+        uint _S21 = 9U + _S19;
 
-#line 561
-        uint _S21 = 10U + _S18;
+#line 565
+        uint _S22 = 10U + _S19;
 
-#line 561
-        (&s_1)->org_0[r_0] = (as_type<float>((kernelContext_2->params_0[_S19]))) * _S15 + (as_type<float>((kernelContext_2->params_0[_S20]))) * _S16 + (as_type<float>((kernelContext_2->params_0[_S21]))) * 0.0f + (as_type<float>((kernelContext_2->params_0[11U + _S18])));
-        (&s_1)->dir_0[r_0] = (as_type<float>((kernelContext_2->params_0[_S19]))) * _S17.x + (as_type<float>((kernelContext_2->params_0[_S20]))) * _S17.y + (as_type<float>((kernelContext_2->params_0[_S21]))) * _S17.z;
+#line 565
+        (&s_1)->org_0[r_0] = (as_type<float>((kernelContext_2->params_0[_S20]))) * _S16 + (as_type<float>((kernelContext_2->params_0[_S21]))) * _S17 + (as_type<float>((kernelContext_2->params_0[_S22]))) * 0.0f + (as_type<float>((kernelContext_2->params_0[11U + _S19])));
+        (&s_1)->dir_0[r_0] = (as_type<float>((kernelContext_2->params_0[_S20]))) * _S18.x + (as_type<float>((kernelContext_2->params_0[_S21]))) * _S18.y + (as_type<float>((kernelContext_2->params_0[_S22]))) * _S18.z;
 
-#line 559
+#line 563
         r_0 = r_0 + 1U;
 
-#line 559
+#line 563
     }
 
-#line 564
+#line 568
     (&s_1)->dir_0 = normalize((&s_1)->dir_0);
     (&s_1)->thr_0 = float3(1.0f) ;
     (&s_1)->rng_0 = (&rng_1)->state_1;
@@ -249,67 +270,67 @@ PathState_0 generatePath_0(uint px_0, uint py_0, KernelContext_0 thread* kernelC
     (&s_1)->qPrev_0 = 0.0f;
     (&s_1)->visLit_0 = 0.0f;
     (&s_1)->visTotal_0 = 0.0f;
-    float3 _S22 = float3(0.0f) ;
+    float3 _S23 = float3(0.0f) ;
 
-#line 574
-    (&(&s_1)->parts_0)->total_0 = _S22;
+#line 578
+    (&(&s_1)->parts_0)->total_0 = _S23;
 
-#line 574
-    (&(&s_1)->parts_0)->directDiffuse_0 = _S22;
+#line 578
+    (&(&s_1)->parts_0)->directDiffuse_0 = _S23;
 
-#line 574
-    (&(&s_1)->parts_0)->indirectDiffuse_0 = _S22;
+#line 578
+    (&(&s_1)->parts_0)->indirectDiffuse_0 = _S23;
 
-#line 574
-    (&(&s_1)->parts_0)->specular_0 = _S22;
+#line 578
+    (&(&s_1)->parts_0)->specular_0 = _S23;
 
-#line 574
-    (&(&s_1)->parts_0)->transmission_0 = _S22;
+#line 578
+    (&(&s_1)->parts_0)->transmission_0 = _S23;
 
-#line 574
-    (&(&s_1)->parts_0)->emission_0 = _S22;
+#line 578
+    (&(&s_1)->parts_0)->emission_0 = _S23;
     return s_1;
 }
 
 
-#line 22 "shaders/include/wf_state.slang"
+#line 26 "shaders/include/wf_state.slang"
 uint pathCount_0(KernelContext_0 thread* kernelContext_3)
 {
 
-#line 22
+#line 26
     return kernelContext_3->params_0[int(31)];
 }
 
 float getF_0(uint f_0, uint p_0, KernelContext_0 thread* kernelContext_4)
 {
 
-#line 25
-    uint _S23 = pathCount_0(kernelContext_4);
+#line 29
+    uint _S24 = pathCount_0(kernelContext_4);
 
-#line 25
-    return (as_type<float>((*(kernelContext_4->state_0+(f_0 * _S23 + p_0)))));
+#line 29
+    return (as_type<float>((*(kernelContext_4->state_0+(f_0 * _S24 + p_0)))));
 }
 
 
-#line 27
+#line 31
 float3 get3_0(uint f_1, uint p_1, KernelContext_0 thread* kernelContext_5)
 {
 
-#line 27
-    float _S24 = getF_0(f_1, p_1, kernelContext_5);
+#line 31
+    float _S25 = getF_0(f_1, p_1, kernelContext_5);
 
-#line 27
-    float _S25 = getF_0(f_1 + 1U, p_1, kernelContext_5);
+#line 31
+    float _S26 = getF_0(f_1 + 1U, p_1, kernelContext_5);
 
-#line 27
-    float _S26 = getF_0(f_1 + 2U, p_1, kernelContext_5);
+#line 31
+    float _S27 = getF_0(f_1 + 2U, p_1, kernelContext_5);
 
-#line 27
-    return float3(_S24, _S25, _S26);
+#line 31
+    return float3(_S25, _S26, _S27);
 }
 
 
-#line 533 "shaders/include/pt_core.slang"
+#line 537 "shaders/include/pt_core.slang"
 struct Hit_0
 {
     bool hit_0;
@@ -329,7 +350,7 @@ struct RayDesc_0
 };
 
 
-#line 578 "shaders/include/pt_core.slang"
+#line 582 "shaders/include/pt_core.slang"
 Hit_0 traceClosest_0(float3 org_1, float3 dir_1, KernelContext_0 thread* kernelContext_6)
 {
     thread RayDesc_0 ray_0;
@@ -342,108 +363,108 @@ Hit_0 traceClosest_0(float3 org_1, float3 dir_1, KernelContext_0 thread* kernelC
     for(;;)
     {
 
-#line 587
-        bool _S27 = ((&q_0)->next());
+#line 591
+        bool _S28 = ((&q_0)->next());
 
-#line 587
-        if(_S27)
+#line 591
+        if(_S28)
         {
         }
         else
         {
 
-#line 587
+#line 591
             break;
         }
 
-#line 587
+#line 591
     }
     thread Hit_0 h_1;
-    uint _S28 = (_slang_committed_intersection_type_to_uint((&q_0)->get_committed_intersection_type()));
+    uint _S29 = (_slang_committed_intersection_type_to_uint((&q_0)->get_committed_intersection_type()));
 
-#line 589
-    bool _S29 = _S28 == 1U;
+#line 593
+    bool _S30 = _S29 == 1U;
 
-#line 589
-    (&h_1)->hit_0 = _S29;
+#line 593
+    (&h_1)->hit_0 = _S30;
 
-#line 589
-    uint _S30;
-    if(_S29)
+#line 593
+    uint _S31;
+    if(_S30)
     {
 
-#line 590
-        uint _S31 = ((&q_0)->get_committed_instance_id());
+#line 594
+        uint _S32 = ((&q_0)->get_committed_instance_id());
 
-#line 590
-        _S30 = _S31;
+#line 594
+        _S31 = _S32;
 
-#line 590
+#line 594
     }
     else
     {
 
-#line 590
-        _S30 = 0U;
+#line 594
+        _S31 = 0U;
 
-#line 590
+#line 594
     }
 
-#line 590
-    (&h_1)->inst_0 = _S30;
+#line 594
+    (&h_1)->inst_0 = _S31;
     if((&h_1)->hit_0)
     {
 
-#line 591
-        uint _S32 = ((&q_0)->get_committed_primitive_id());
+#line 595
+        uint _S33 = ((&q_0)->get_committed_primitive_id());
 
-#line 591
-        _S30 = _S32;
+#line 595
+        _S31 = _S33;
 
-#line 591
+#line 595
     }
     else
     {
 
-#line 591
-        _S30 = 0U;
+#line 595
+        _S31 = 0U;
 
-#line 591
+#line 595
     }
 
-#line 591
-    (&h_1)->prim_0 = _S30;
+#line 595
+    (&h_1)->prim_0 = _S31;
 
-#line 591
-    float _S33;
+#line 595
+    float _S34;
     if((&h_1)->hit_0)
     {
 
-#line 592
-        float _S34 = ((&q_0)->get_committed_distance());
+#line 596
+        float _S35 = ((&q_0)->get_committed_distance());
 
-#line 592
-        _S33 = _S34;
+#line 596
+        _S34 = _S35;
 
-#line 592
+#line 596
     }
     else
     {
 
-#line 592
-        _S33 = 0.0f;
+#line 596
+        _S34 = 0.0f;
 
-#line 592
+#line 596
     }
 
-#line 592
-    (&h_1)->t_0 = _S33;
+#line 596
+    (&h_1)->t_0 = _S34;
     return h_1;
 }
 
 
 #line 6 "shaders/wf_extend.slang"
-[[kernel]] void wf_extend(uint3 tid_0 [[thread_position_in_grid]], uint device* params_1 [[buffer(6)]], uint device* counts_1 [[buffer(22)]], uint device* queueIn_1 [[buffer(20)]], uint device* state_2 [[buffer(18)]], metal::raytracing::acceleration_structure<metal::raytracing::instancing> scene_1 [[buffer(0)]], uint device* hits_1 [[buffer(19)]])
+[[kernel]] void wf_extend(uint3 tid_0 [[thread_position_in_grid]], uint device* params_1 [[buffer(6)]], uint device* counts_1 [[buffer(23)]], uint device* queueIn_1 [[buffer(21)]], uint device* state_2 [[buffer(19)]], metal::raytracing::acceleration_structure<metal::raytracing::instancing> scene_1 [[buffer(0)]], uint device* hits_1 [[buffer(20)]])
 {
 
 #line 6
@@ -477,7 +498,7 @@ Hit_0 traceClosest_0(float3 org_1, float3 dir_1, KernelContext_0 thread* kernelC
     }
 
 #line 11
-    uint _S35 = queuedPath_0(i_2, d_0, &kernelContext_7);
+    uint _S36 = queuedPath_0(i_2, d_0, &kernelContext_7);
 
 #line 11
     float3 org_2;
@@ -488,19 +509,19 @@ Hit_0 traceClosest_0(float3 org_1, float3 dir_1, KernelContext_0 thread* kernelC
 
     if(d_0 == 0U)
     {
-        uint _S36 = _S35 % (&kernelContext_7)->params_0[int(0)];
+        uint _S37 = _S36 % (&kernelContext_7)->params_0[int(0)];
 
 #line 16
-        uint _S37 = _S35 / (&kernelContext_7)->params_0[int(0)];
+        uint _S38 = _S36 / (&kernelContext_7)->params_0[int(0)];
 
 #line 16
-        PathState_0 _S38 = generatePath_0(_S36, _S37, &kernelContext_7);
+        PathState_0 _S39 = generatePath_0(_S37, _S38, &kernelContext_7);
 
 #line 16
-        org_2 = _S38.org_0;
+        org_2 = _S39.org_0;
 
 #line 16
-        dir_2 = _S38.dir_0;
+        dir_2 = _S39.dir_0;
 
 #line 14
     }
@@ -508,38 +529,38 @@ Hit_0 traceClosest_0(float3 org_1, float3 dir_1, KernelContext_0 thread* kernelC
     {
 
 #line 14
-        float3 _S39 = get3_0(0U, _S35, &kernelContext_7);
+        float3 _S40 = get3_0(0U, _S36, &kernelContext_7);
 
 #line 14
-        float3 _S40 = get3_0(3U, _S35, &kernelContext_7);
+        float3 _S41 = get3_0(3U, _S36, &kernelContext_7);
 
 #line 14
-        org_2 = _S39;
+        org_2 = _S40;
 
 #line 14
-        dir_2 = _S40;
+        dir_2 = _S41;
 
 #line 14
     }
 
 #line 14
-    Hit_0 _S41 = traceClosest_0(org_2, dir_2, &kernelContext_7);
+    Hit_0 _S42 = traceClosest_0(org_2, dir_2, &kernelContext_7);
 
 #line 26
-    uint _S42 = 4U * _S35;
+    uint _S43 = 4U * _S36;
 
 #line 26
-    uint device* _S43 = (&kernelContext_7)->hits_0+_S42;
+    uint device* _S44 = (&kernelContext_7)->hits_0+_S43;
 
 #line 26
-    uint _S44;
+    uint _S45;
 
 #line 26
-    if(_S41.hit_0)
+    if(_S42.hit_0)
     {
 
 #line 26
-        _S44 = 1U;
+        _S45 = 1U;
 
 #line 26
     }
@@ -547,16 +568,16 @@ Hit_0 traceClosest_0(float3 org_1, float3 dir_1, KernelContext_0 thread* kernelC
     {
 
 #line 26
-        _S44 = 0U;
+        _S45 = 0U;
 
 #line 26
     }
 
 #line 26
-    *_S43 = _S44;
-    *((&kernelContext_7)->hits_0+(_S42 + 1U)) = _S41.inst_0;
-    *((&kernelContext_7)->hits_0+(_S42 + 2U)) = _S41.prim_0;
-    *((&kernelContext_7)->hits_0+(_S42 + 3U)) = (as_type<uint>((_S41.t_0)));
+    *_S44 = _S45;
+    *((&kernelContext_7)->hits_0+(_S43 + 1U)) = _S42.inst_0;
+    *((&kernelContext_7)->hits_0+(_S43 + 2U)) = _S42.prim_0;
+    *((&kernelContext_7)->hits_0+(_S43 + 3U)) = (as_type<uint>((_S42.t_0)));
     return;
 }
 

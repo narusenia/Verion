@@ -5,7 +5,7 @@ mod accel;
 mod renderer;
 
 pub use accel::{Blas, Instance, Tlas};
-pub use renderer::{Accumulation, Aovs, Integrator, LightingAovs, Renderer};
+pub use renderer::{Accumulation, Adaptive, Aovs, Integrator, LightingAovs, Renderer};
 
 use std::{
     fmt,
