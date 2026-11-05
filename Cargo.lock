@@ -794,6 +794,7 @@ dependencies = [
  "verion-gpu-metal",
  "verion-render-io",
  "verion-scene",
+ "verion-stylization",
 ]
 
 [[package]]
