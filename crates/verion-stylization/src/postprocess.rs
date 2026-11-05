@@ -83,10 +83,132 @@ pub fn outline(materials: &[Material], f: &PostFrame, beauty: &mut [[f32; 3]]) {
     }
 }
 
+/// Whole-image color grade (REQ-STY-011): gain in stops, saturation and white balance. The
+/// default changes nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ColorGrade {
+    /// Gain in stops: the image is multiplied by `2^exposure`.
+    pub exposure: f32,
+    /// Multiplier on the distance from the luminance; 0 is grey, 1 keeps the color.
+    pub saturation: f32,
+    /// Per-channel multiplier (a warm shift raises red and lowers blue).
+    pub white_balance: [f32; 3],
+}
+
+impl Default for ColorGrade {
+    fn default() -> Self {
+        Self {
+            exposure: 0.0,
+            saturation: 1.0,
+            white_balance: [1.0; 3],
+        }
+    }
+}
+
+impl ColorGrade {
+    pub fn is_identity(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.exposure.is_finite() {
+            return Err("exposure must be finite".into());
+        }
+        if !(self.saturation.is_finite() && self.saturation >= 0.0) {
+            return Err("saturation must be 0 or more".into());
+        }
+        if !self
+            .white_balance
+            .iter()
+            .all(|w| w.is_finite() && *w >= 0.0)
+        {
+            return Err("white balance must be 0 or more per channel".into());
+        }
+        Ok(())
+    }
+}
+
+/// Applies `grade` to every pixel of `beauty`: white balance and gain first, then saturation
+/// around the luminance. Values stay HDR (no upper clamp); a saturation above 1 cannot go below 0.
+///
+/// shortcut: the luminance uses Rec.709 weights even when the working space is wider (ACEScg), so
+/// saturation 0 is only approximately grey there.
+pub fn color_grade(beauty: &mut [[f32; 3]], grade: &ColorGrade) {
+    let gain = grade.exposure.exp2();
+    for px in beauty {
+        let c: [f32; 3] = std::array::from_fn(|i| px[i] * gain * grade.white_balance[i]);
+        let l = super::lum(c);
+        *px = std::array::from_fn(|i| (l + (c[i] - l) * grade.saturation).max(0.0));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use verion_scene::{HybridSurface, OutlineStyle};
+
+    #[test]
+    fn color_grade_gain_saturation_and_white_balance() {
+        let base = [[0.5, 0.25, 0.125]; 2];
+        let run = |g: ColorGrade| {
+            let mut img = base;
+            color_grade(&mut img, &g);
+            img[0]
+        };
+        assert_eq!(run(ColorGrade::default()), base[0]);
+        assert_eq!(
+            run(ColorGrade {
+                exposure: 1.0,
+                ..Default::default()
+            }),
+            [1.0, 0.5, 0.25]
+        );
+        assert_eq!(
+            run(ColorGrade {
+                white_balance: [2.0, 1.0, 0.0],
+                ..Default::default()
+            }),
+            [1.0, 0.25, 0.0]
+        );
+        let grey = run(ColorGrade {
+            saturation: 0.0,
+            ..Default::default()
+        });
+        assert!(grey.iter().all(|c| (c - grey[0]).abs() < 1e-6));
+        assert!((grey[0] - super::super::lum(base[0])).abs() < 1e-6);
+        // Over-saturating a dark, strongly colored pixel cannot push a channel below zero.
+        let mut dark = [[0.4, 0.0, 0.0]];
+        color_grade(
+            &mut dark,
+            &ColorGrade {
+                saturation: 4.0,
+                ..Default::default()
+            },
+        );
+        assert!(dark[0].iter().all(|c| *c >= 0.0));
+    }
+
+    #[test]
+    fn color_grade_validation() {
+        assert!(ColorGrade::default().validate().is_ok());
+        assert!(ColorGrade::default().is_identity());
+        for bad in [
+            ColorGrade {
+                exposure: f32::NAN,
+                ..Default::default()
+            },
+            ColorGrade {
+                saturation: -1.0,
+                ..Default::default()
+            },
+            ColorGrade {
+                white_balance: [1.0, -1.0, 1.0],
+                ..Default::default()
+            },
+        ] {
+            assert!(bad.validate().is_err());
+        }
+    }
 
     fn material(opacity: f32, style: OutlineStyle) -> Material {
         Material {

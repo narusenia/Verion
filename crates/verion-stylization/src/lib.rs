@@ -9,7 +9,7 @@
 
 mod postprocess;
 
-pub use postprocess::{PostFrame, outline};
+pub use postprocess::{ColorGrade, PostFrame, color_grade, outline};
 
 use verion_scene::{
     Camera, ColorAdjust, HybridSurface, LIGHT_SLOTS, Material, RimLight, ShadowPalette,
