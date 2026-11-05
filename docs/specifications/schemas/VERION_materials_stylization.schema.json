@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VERION_materials_stylization",
+  "description": "Stylization settings of a glTF material. Also required but not expressible here: toonRamp.thresholds strictly increasing, and palette length equal to thresholds length + 1.",
+  "type": "object",
+  "properties": {
+    "hybridSurface": {
+      "type": "object",
+      "description": "Per-component blend between physical (0) and stylized (1).",
+      "properties": {
+        "diffuse": { "$ref": "#/$defs/unit" },
+        "specular": { "$ref": "#/$defs/unit" },
+        "gi": { "$ref": "#/$defs/unit" },
+        "shadow": { "$ref": "#/$defs/unit" },
+        "outline": { "$ref": "#/$defs/unit" }
+      }
+    },
+    "toonRamp": {
+      "type": "object",
+      "properties": {
+        "thresholds": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/unit" },
+          "uniqueItems": true
+        },
+        "feather": { "$ref": "#/$defs/unit" },
+        "palette": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0 },
+            "minItems": 3,
+            "maxItems": 3
+          }
+        },
+        "lightWrap": { "$ref": "#/$defs/unit" }
+      },
+      "required": ["thresholds", "palette"]
+    }
+  },
+  "$defs": {
+    "unit": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}

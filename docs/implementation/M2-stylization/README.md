@@ -5,7 +5,7 @@
 
 | # | 項目 | REQ | 状態 |
 |---|------|-----|------|
-| 1 | Stylization 用 glTF 拡張のスキーマ確定（仕様書） | REQ-IO-002 | 未着手 |
+| 1 | Stylization 用 glTF 拡張のスキーマ確定（仕様書） | REQ-IO-002 | 済（仕様書と JSON Schema は確定。ローダーへの取り込みは未実装） |
 | 2 | Material IR の 3 分離と `ShadingContext` | REQ-STY-008 | 済（`Base BSDF` / `Stylization Layers` / `Output Channels` の分離は M1 から。`ShadingContext`（光ごとの成分を保持）と `Revisions.stylization`、EXR の `verion/stylizationRevision` を追加。`ShadingContext` の Slang 側対応は項目 3 以降） |
 | 3 | HybridSurface | REQ-STY-001 | 進行中（IR の `HybridSurface` と検証は済。GPU 評価は未着手） |
 | 4 | ToonRamp・ShadowPalette | REQ-STY-002 / 003 | 進行中（`ToonRamp` の IR と検証は済。`ShadowPalette` と GPU 評価は未着手） |

@@ -33,11 +33,11 @@ v0.1 のシーン入力は glTF 2.0 と HDRI（ADR-0003）。glTF を読んで S
 
 ### 説明
 
-材質の `extensions` に HybridSurface の設定を載せる JSON 拡張。スキーマの詳細は M2 着手時に仕様書で決める。
+材質の `extensions` に HybridSurface の設定を載せる JSON 拡張。スキーマは `docs/specifications/gltf-stylization-extension.md`。
 
 ### 受入条件
 
-- [ ] JSON Schema を公開する
+- [x] JSON Schema を公開する（`docs/specifications/schemas/`）
 - [ ] 拡張がないシーンは通常の PBR として描画する
 
 ### 依存要件
