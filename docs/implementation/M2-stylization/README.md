@@ -16,7 +16,7 @@
 | 9 | Viewer の GUI 技術を決める | REQ-VIEW-002 | 済（winit + egui。ADR-0012） |
 | 10 | 最小 Viewer（累積・AOV 切替・パラメータ変更→再累積） | REQ-VIEW-002 | 未着手 |
 | 11 | Stylization 評価の初期版（Art Direction 一致・デノイズによる消失） | REQ-QA-003 | 未着手 |
-| 12 | 写実材質の拡充（多重散乱補償・clearcoat・sheen・Dispersion の RGB 近似） | REQ-CORE-003 | 未着手 |
+| 12 | 写実材質の拡充（多重散乱補償・clearcoat・sheen・Dispersion の RGB 近似） | REQ-CORE-003 | 進行中（多重散乱補償は済: 金属の鏡面に係数を掛ける方式で、白炉が 1 に戻る。E の表は `scripts/gen_ggx_albedo.py` で生成。既定で有効、`render-cli --no-multiscatter` と `Renderer::set_multiscatter` で切替。clearcoat・sheen・Dispersion は未着手） |
 | 13 | PostProcess の枠と最小の色調整 | REQ-STY-011 | 済（`verion-stylization::postprocess` に `PostFrame`・`outline`・`color_grade`（ゲイン・彩度・ホワイトバランス）。色調整は `render-cli --exposure / --saturation / --white-balance`（`--mode stylized` のみ）。EXR には非物理の印（`physical` = false）だけを残し、適用した値は残していない） |
 | 14 | 間接光の平坦化（`HybridSurface.gi`） | REQ-STY-001 | 済（間接拡散を「アルベド × 材質ごとの一定の環境光」へ混ぜる。一定値はフレーム内の間接拡散の和 ÷ アルベドの和。Albedo AOV を Pass に渡す。実画像は未確認） |
 | 15 | 最小の輪郭線（Normal・Depth・Object ID・Material ID から画面空間で作る。項目 13 の枠の最初の Pass。時間的安定性は M8） | REQ-STY-009 / 011 | 済（材質ごとの `outlineStyle` と `hybridSurface.outline`（不透明度）。線は近い側の物体の内側に引き、太さは画素単位。実画像（球と床）で確認） |
