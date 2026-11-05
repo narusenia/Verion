@@ -65,8 +65,8 @@ Diffuse、GGX Conductor、Dielectric（透過）。glTF の metallic-roughness �
 - [x] 白炉テストでエネルギー保存が許容誤差内（REQ-QA-002。多重散乱補正なしの損失を除く）
 - [x] 金属・ガラスの基礎シーンが参照画像と一致する（Cornell Box の金属・ガラスを Mitsuba 3 で照合）
 - [x] GGX 金属に多重散乱の補償を入れ、粗い金属の白炉テストが 1 に戻る（方式は鏡面ローブへの係数 `1 + F0 (1/E − 1)`。E は単一散乱 GGX の方向アルベドの表。既定で有効、`--no-multiscatter` で単一散乱に戻せる。Mitsuba 3 の照合は無効で行う。誘電体の鏡面は未対応）
-- [ ] clearcoat と sheen を glTF 拡張から読み、追加ローブとして評価できる（`gltf` クレート 1.4 は未対応のため自前でパースする。clearcoat・sheen は済: `KHR_materials_clearcoat` は IOR 1.5 の GGX 層、`KHR_materials_sheen` は Charlie 分布の層（基底を方向アルベドで減衰。表は `scripts/gen_sheen_albedo.py`）。層の順は基底 → sheen → coat。層間の屈折・吸収は省略。テクスチャは未対応）
-- [ ] Dispersion を IOR のチャンネル別の値で近似できる（`KHR_materials_dispersion`。仕様の確認が要る）
+- [x] clearcoat と sheen を glTF 拡張から読み、追加ローブとして評価できる（`gltf` クレート 1.4 は未対応のため自前でパースする。clearcoat・sheen は済: `KHR_materials_clearcoat` は IOR 1.5 の GGX 層、`KHR_materials_sheen` は Charlie 分布の層（基底を方向アルベドで減衰。表は `scripts/gen_sheen_albedo.py`）。層の順は基底 → sheen → coat。層間の屈折・吸収は省略。テクスチャは未対応）
+- [x] Dispersion を IOR のチャンネル別の値で近似できる（`KHR_materials_dispersion`。IOR は R `ior−h`・G `ior`・B `ior+h`、`h = (ior−1)·0.025·dispersion`（仕様の実装メモの式）。パスが最初の分散ヒットで 1 チャンネルを選んで追従する。`KHR_materials_volume` は未対応）
 
 ### 依存要件
 
