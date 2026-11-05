@@ -9,9 +9,9 @@ RaytracingAccelerationStructure scene;
 StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
 StructuredBuffer<uint> instances;   // 16 words: vertex offset, index offset, material, emitter base + 1 (0 = not emissive), 12 floats (row-major 3x4)
-StructuredBuffer<float> materials;  // 21 words: base color rgb, emission rgb, metallic, roughness, transmission, ior,
+StructuredBuffer<float> materials;  // 22 words: base color rgb, emission rgb, metallic, roughness, transmission, ior,
                                     // base color / metallic-roughness / emission / normal texture + 1 (0 = none), normal scale,
-                                    // clearcoat, clearcoat roughness, sheen roughness, sheen color rgb
+                                    // clearcoat, clearcoat roughness, sheen roughness, sheen color rgb, dispersion
 StructuredBuffer<uint> lights;      // 16 words: kind (0 point, 1 directional, 2 spot), color rgb, intensity, position or travel direction xyz,
                                     // spot axis xyz, spot falloff scale, spot falloff offset, 3 pad (floats as bits)
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
@@ -526,6 +526,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
     bool hasEnv = params[24] > 0;
     // Probability that next-event estimation samples the environment map instead of an emitter.
     float pEnv = hasEnv ? (emitterCount > 0 ? 0.5 : 1.0) : 0.0;
+    int chan = -1; // color channel this path follows after its first dispersive hit, -1 until then
     float pathLen = 0.0; // distance travelled so far, widens the texture-filter cone
     bool misPrev = false;
     float qPrev = 0.0;
@@ -599,7 +600,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         }
         float3 n = outside ? ns : -ns;
 
-        uint mi = instances[inst + 2] * 21;
+        uint mi = instances[inst + 2] * 22;
         float3 albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
         // Textures multiply the material factors. The filter footprint comes from the ray cone.
         uint texBase = uint(materials[mi + 10]);
@@ -667,6 +668,18 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         float rough = materials[mi + 7] * texRM.x;
         float transmission = materials[mi + 8];
         float ior = materials[mi + 9];
+        float dispersion = materials[mi + 21];
+        if (dispersion > 0.0 && transmission > 0.0)
+        {
+            // RGB dispersion (KHR_materials_dispersion): the path follows one channel from its first
+            // dispersive hit on, chosen at random, and carries three times that channel so the mean stays right.
+            if (chan < 0)
+            {
+                chan = min(int(rng.next() * 3.0), 2);
+                thr *= 3.0 * float3(chan == 0 ? 1.0 : 0.0, chan == 1 ? 1.0 : 0.0, chan == 2 ? 1.0 : 0.0);
+            }
+            ior = max(ior + float(chan - 1) * (ior - 1.0) * 0.025 * dispersion, 1.0);
+        }
         float alpha = max(rough * rough, 1.0e-3);
         float eta = outside ? ior : 1.0 / ior; // relative index n_transmitted / n_incident
 

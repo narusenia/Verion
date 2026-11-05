@@ -614,6 +614,80 @@ fn sheen_furnace_conserves_energy() {
     }
 }
 
+fn center_rgb(img: &[[f32; 3]], w: usize, size: usize) -> [f32; 3] {
+    let lo = (w - size) / 2;
+    let mut sum = [0.0; 3];
+    for y in lo..lo + size {
+        for x in lo..lo + size {
+            for c in 0..3 {
+                sum[c] += img[y * w + x][c];
+            }
+        }
+    }
+    sum.map(|v| v / (size * size) as f32)
+}
+
+#[test]
+fn dispersion_gives_each_channel_its_own_fresnel_reflection() {
+    let Some(ctx) = context() else { return };
+    // A smooth glass plane over a black metal floor: only the plane's reflection reaches the camera.
+    // dispersion 4 gives h = 0.5 * 0.025 * 4 = 0.05, so the IORs are 1.45 / 1.5 / 1.55 and the
+    // normal-incidence reflectance ((n - 1) / (n + 1))^2 is 0.0293 / 0.04 / 0.0465.
+    let mut s = Scene::new();
+    let glass = s.add_material(bsdf(BaseBsdf {
+        base_color: [1.0; 3],
+        roughness: 0.0,
+        transmission: 1.0,
+        dispersion: 4.0,
+        ..BaseBsdf::default()
+    }));
+    let floor = s.add_material(bsdf(BaseBsdf {
+        base_color: [0.0; 3],
+        metallic: 1.0,
+        roughness: 1.0,
+        ..BaseBsdf::default()
+    }));
+    for (mesh, material) in [(plane(5.0, 0.0), glass), (plane(5.0, -1.0), floor)] {
+        let mesh = s.add_mesh(mesh);
+        s.add_instance(Instance {
+            mesh,
+            material,
+            transform: IDENTITY,
+        })
+        .unwrap();
+    }
+    s.add_light(Light::Environment { color: [1.0; 3] });
+    s.set_camera(camera_at_z(3.0));
+    let img = Renderer::new(&ctx, &s)
+        .unwrap()
+        .render(32, 32, 512)
+        .unwrap();
+    let got = center_rgb(&img, 32, 16);
+    for (c, want) in [0.0293, 0.04, 0.0465].into_iter().enumerate() {
+        assert!((got[c] - want).abs() < 0.006, "channel {c}: {got:?}");
+    }
+    assert!(got[0] < got[1] && got[1] < got[2], "{got:?}");
+}
+
+#[test]
+fn dispersive_glass_furnace_conserves_energy() {
+    let Some(ctx) = context() else { return };
+    let m = bsdf(BaseBsdf {
+        base_color: [1.0; 3],
+        roughness: 0.0,
+        transmission: 1.0,
+        dispersion: 2.0,
+        ..BaseBsdf::default()
+    });
+    let img = Renderer::new(&ctx, &sky_scene(icosphere(0.5), m, 3.0))
+        .unwrap()
+        .render(32, 32, 256)
+        .unwrap();
+    for (c, got) in center_rgb(&img, 32, 16).into_iter().enumerate() {
+        assert!(got > 0.97 && got < 1.03, "channel {c}: {got}");
+    }
+}
+
 #[test]
 fn metal_tints_by_base_color() {
     let Some(ctx) = context() else { return };
