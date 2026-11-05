@@ -7,12 +7,17 @@
 //! The other components pass through unchanged until their layers land.
 
 use verion_scene::{
-    ColorAdjust, HybridSurface, LIGHT_SLOTS, Material, ShadowPalette, StylizationLayer, ToonRamp,
+    Camera, ColorAdjust, HybridSurface, LIGHT_SLOTS, Material, ShadowPalette, StylizationLayer,
+    ToonRamp,
 };
 
 /// The first-hit lighting split of one pixel, in the working space (see `LightingAovs`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PixelInput {
+    /// World-space unit normal of the hit (zero on the background).
+    pub normal: [f32; 3],
+    /// World-space unit vector from the hit toward the camera (see `view_directions`).
+    pub view: [f32; 3],
     pub direct_diffuse: [f32; 3],
     pub indirect_diffuse: [f32; 3],
     pub specular: [f32; 3],
@@ -22,6 +27,35 @@ pub struct PixelInput {
     pub light_u: [[f32; 3]; LIGHT_SLOTS],
     /// Per light slot: cos(N, L) times visibility. The physical diffuse is `u * response`.
     pub light_response: [f32; LIGHT_SLOTS],
+    /// Per light slot: the specular contribution without cos and without shadowing.
+    pub light_s: [[f32; 3]; LIGHT_SLOTS],
+    /// Per light slot: unit vector from the hit toward the light (zero where it never reaches).
+    pub light_dir: [[f32; 3]; LIGHT_SLOTS],
+    /// Per light slot: share of the contribution that is not shadowed, the visibility of `light_s`.
+    pub light_lit: [f32; LIGHT_SLOTS],
+}
+
+/// World-space unit vector from the surface toward the camera for every pixel, row-major from the
+/// top-left. Pinhole model: it depends on the pixel only, not on depth.
+/// shortcut: the lens aperture is ignored, so with depth of field the vector is the chief ray's;
+/// use the per-pixel position and the camera origin when a layer needs the exact one.
+pub fn view_directions(camera: &Camera, width: usize, height: usize) -> Vec<[f32; 3]> {
+    let t = (camera.vertical_fov * 0.5).tan();
+    let aspect = width as f32 / height as f32;
+    let m = &camera.transform;
+    (0..width * height)
+        .map(|i| {
+            let (x, y) = ((i % width) as f32, (i / width) as f32);
+            let d = [
+                (2.0 * (x + 0.5) / width as f32 - 1.0) * aspect * t,
+                (1.0 - 2.0 * (y + 0.5) / height as f32) * t,
+                -1.0,
+            ];
+            let n = (d[0] * d[0] + d[1] * d[1] + 1.0).sqrt();
+            // The camera-to-world rotation is the 3x3 block; negate to point toward the camera.
+            std::array::from_fn(|r| -(m[r][0] * d[0] + m[r][1] * d[1] + m[r][2] * d[2]) / n)
+        })
+        .collect()
 }
 
 fn lum(c: [f32; 3]) -> f32 {
@@ -148,16 +182,31 @@ pub struct Frame<'a> {
     pub emission: &'a [[f32; 3]],
     pub light_u: &'a [[[f32; 3]; LIGHT_SLOTS]],
     pub light_response: &'a [[f32; LIGHT_SLOTS]],
+    pub light_s: &'a [[[f32; 3]; LIGHT_SLOTS]],
+    pub light_dir: &'a [[[f32; 3]; LIGHT_SLOTS]],
+    pub light_lit: &'a [[f32; LIGHT_SLOTS]],
+    /// World-space unit normals (the Normal AOV).
+    pub normal: &'a [[f32; 3]],
     /// Material index plus one; 0 (background) is left unstylized.
     pub material_id: &'a [u32],
+    /// The camera and image width the frame was rendered with; the height follows from the length.
+    pub camera: Camera,
+    pub width: usize,
 }
 
 /// Stylizes a frame. `materials` is the scene's material table (`Scene::materials`).
 /// Panics when a slice length differs from `material_id.len()` or an id is out of range.
 pub fn stylize_image(materials: &[Material], f: &Frame) -> Vec<[f32; 3]> {
-    (0..f.material_id.len())
+    let n = f.material_id.len();
+    let view = view_directions(&f.camera, f.width, n / f.width);
+    (0..n)
         .map(|i| {
             let p = PixelInput {
+                normal: f.normal[i],
+                view: view[i],
+                light_s: f.light_s[i],
+                light_dir: f.light_dir[i],
+                light_lit: f.light_lit[i],
                 direct_diffuse: f.direct_diffuse[i],
                 indirect_diffuse: f.indirect_diffuse[i],
                 specular: f.specular[i],
@@ -211,6 +260,22 @@ mod tests {
         p.light_u[0] = [1.0 / PI; 3];
         p.light_response[0] = r;
         p
+    }
+
+    #[test]
+    fn view_points_back_toward_the_camera() {
+        let cam = Camera::default();
+        // A single pixel looks straight down -z, so the view vector points to +z.
+        assert_eq!(view_directions(&cam, 1, 1), [[0.0, 0.0, 1.0]]);
+        // Left pixels see the scene to the left of the axis, so the view leans to the right (+x);
+        // top pixels lean down (-y).
+        let v = view_directions(&cam, 2, 2);
+        assert!(v[0][0] > 0.0 && v[1][0] < 0.0, "x: {v:?}");
+        assert!(v[0][1] < 0.0 && v[2][1] > 0.0, "y: {v:?}");
+        assert!(
+            v.iter()
+                .all(|d| (d.iter().map(|c| c * c).sum::<f32>() - 1.0).abs() < 1e-6)
+        );
     }
 
     #[test]
@@ -361,6 +426,7 @@ mod tests {
         let dd = [p.direct_diffuse; 3];
         let z = [[0.0; 3]; 3];
         let (u, r) = ([p.light_u; 3], [p.light_response; 3]);
+        let (s, dir, lit) = ([p.light_s; 3], [p.light_dir; 3], [p.light_lit; 3]);
         let out = stylize_image(
             &materials,
             &Frame {
@@ -371,7 +437,13 @@ mod tests {
                 emission: &z,
                 light_u: &u,
                 light_response: &r,
+                light_s: &s,
+                light_dir: &dir,
+                light_lit: &lit,
+                normal: &z,
                 material_id: &[0, 1, 2],
+                camera: Camera::default(),
+                width: 3,
             },
         );
         assert_eq!(out[0], [0.6 / PI; 3]); // background: untouched

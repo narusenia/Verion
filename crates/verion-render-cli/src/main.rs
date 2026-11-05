@@ -216,7 +216,13 @@ fn run(args: &Args) -> Result<(), String> {
                 emission: &l.emission,
                 light_u: &l.light_u,
                 light_response: &l.light_response,
+                light_s: &l.light_s,
+                light_dir: &l.light_dir,
+                light_lit: &l.light_lit,
+                normal: &normals,
                 material_id: &aov.material_id,
+                camera: *scene.camera(),
+                width: w as usize,
             },
         );
     }
