@@ -7,6 +7,10 @@
 //! and `StylizedSpecular` replacing the specular by per-light banded highlights.
 //! The other components pass through unchanged until their layers land.
 
+mod postprocess;
+
+pub use postprocess::{PostFrame, outline};
+
 use verion_scene::{
     Camera, ColorAdjust, HybridSurface, LIGHT_SLOTS, Material, RimLight, ShadowPalette,
     StylizationLayer, StylizedSpecular, ToonRamp,

@@ -226,6 +226,17 @@ fn run(args: &Args) -> Result<(), String> {
                 width: w as usize,
             },
         );
+        verion_stylization::outline(
+            scene.materials(),
+            &verion_stylization::PostFrame {
+                width: w as usize,
+                depth: &aov.depth,
+                normal: &normals,
+                object_id: &aov.object_id,
+                material_id: &aov.material_id,
+            },
+            &mut beauty,
+        );
     }
     let aov_s = t.elapsed().as_secs_f64();
 
