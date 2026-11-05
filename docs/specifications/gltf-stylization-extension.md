@@ -84,13 +84,15 @@
 | `feather` | number | 0〜1 | 0.02 | 縁のぼかし幅 |
 | `color` | number[3] | 各値 0 以上の有限値 | [1, 1, 1] | ハイライトの色（線形 Rec.709） |
 | `strength` | number | 0 以上の有限値 | 1 | ハイライトの強さ。光の強さには依存しない |
+| `ramp` | object | `toonRamp` と同じ形 | なし | ハイライトを複数の段にする（芯と暈など）。省略すると 1 本の帯 |
 
 - すべて省略できる。`hybridSurface.specular` が 0 より大きいときだけ効く
+- `ramp` があるとき、帯の代わりに段で決める。応答は `clamp(1 − (1 − N·H) / size, 0, 1)`（ハイライトの中心が 1、`size` の縁が 0）で、`thresholds` はこの値に対する境界。`palette` はハイライトの色の乗数で、`palette[0]` がハイライトの外側の値（通常は [0, 0, 0]）。`feather` と `lightWrap` も `toonRamp` と同じ意味で効く。`size` は応答の範囲を決める
 
 ## 解釈
 
 - `stylizedSpecular` は、物理の鏡面（直接光のハイライト）を、`hybridSurface.specular` で Toon のハイライトへ混ぜる。光ごとのスロットで、半ベクトル H（光の方向と視線から作る）を使う
-  - 光 k のハイライト: `color × strength × 帯(1 − N·H) × 可視性`。帯は `size`・`feather` の smoothstep を反転したもの（縁の内側が 1）
+  - 光 k のハイライト: `color × strength × 帯(1 − N·H) × 可視性`。帯は `size`・`feather` の smoothstep を反転したもの（縁の内側が 1）。`ramp` があるときは、帯の代わりに `ramp` の段の値（色の乗数）を使う
   - 光が鏡面を持たないスロット（鏡面の寄与がほぼ 0。Lambert など）は出さない
   - 全スロットのハイライトを足す。結果と物理の鏡面を `physical + (stylized − physical) × specular` で混ぜる
   - 環境の映り込みなど、直接光でない鏡面（間接鏡面）は、物理の鏡面に含まれたまま。`hybridSurface.specular` が 1 のときは、直接光のハイライトだけでなく間接鏡面も含めて置き換わる（v0.1 の制限）
@@ -117,6 +119,7 @@
 - `palette` の長さが `thresholds` の長さ + 1 になる
 - `rimLight.color` と `rimLight.strength` が 0 以上の有限値になる
 - `stylizedSpecular.color` と `stylizedSpecular.strength` が 0 以上の有限値になる。`stylizedSpecular.shape` が `"band"` である
+- `stylizedSpecular.ramp` は `toonRamp` と同じ規則で検査する
 
 範囲外の値や上の条件違反は、そのファイルの取り込みエラーにする（黙って丸めない）。未知のプロパティは警告して無視する。
 

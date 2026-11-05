@@ -97,6 +97,9 @@
         "strength": {
           "type": "number",
           "minimum": 0
+        },
+        "ramp": {
+          "$ref": "#/properties/toonRamp"
         }
       }
     },
