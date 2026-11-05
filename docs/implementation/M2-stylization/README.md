@@ -7,17 +7,17 @@
 |---|------|-----|------|
 | 1 | Stylization 用 glTF 拡張のスキーマ確定（仕様書） | REQ-IO-002 | 済（仕様書と JSON Schema は確定。ローダーは `VERION_materials_stylization` を読み、範囲外は取り込みエラー、未知のプロパティは警告にする） |
 | 2 | Material IR の 3 分離と `ShadingContext` | REQ-STY-008 | 済（`Base BSDF` / `Stylization Layers` / `Output Channels` の分離は M1 から。`ShadingContext`（光ごとの成分を保持）と `Revisions.stylization`、EXR の `verion/stylizationRevision` を追加。`ShadingContext` の Slang 側対応は項目 3 以降） |
-| 3 | HybridSurface | REQ-STY-001 | 進行中（IR の `HybridSurface` と検証は済。GPU 評価は未着手） |
+| 3 | HybridSurface | REQ-STY-001 | 済（IR・検証・glTF 拡張と、Pass での評価。成分ごとの係数で `diffuse`（ToonRamp）・`specular`（StylizedSpecular）・`gi`（間接光の平坦化）・`shadow`（ShadowPalette）・`outline`（輪郭線の不透明度）を混ぜる。GPU 側は光ごとのスロットを出すのみで、評価は Pass（CPU）） |
 | 4 | ToonRamp・ShadowPalette | REQ-STY-002 / 003 | 済（`ToonRamp`（光ごとに段階化）と `ShadowPalette`（直接影・間接影を別々に色補正）を IR・Pass・glTF 拡張に実装。GPU 側は光ごとのスロットを出すのみで、評価は Pass（CPU）） |
 | 5 | StylizedSpecular・RimLight | REQ-STY-004 / 005 | 進行中（RimLight は済: IR・glTF 拡張・Pass と、実画像（球と床）での確認まで。ライトスロットは拡散 `u`・鏡面 `s`・方向・可視性を持ち、層は材質に書いた順に適用する。StylizedSpecular は帯状と、`ramp` による多段まで済（IR・glTF 拡張・Pass）。楕円・手描き風は後続） |
 | 6 | Lighting AOV の分離出力 | REQ-STY-006 | 進行中（一次ヒットの DirectDiffuse・IndirectDiffuse・Specular・Transmission・Emission・Visibility を分離し、`render-cli --lighting-aovs` で EXR に出力（光ごとのスロットは EXR に出さず内部入力。1 ピクセル約 260 バイト。光ごとのスロットは拡散 `u`・鏡面 `s`・方向・可視性を持つ）。5 成分の和はビューティと一致。間接光は最初のバウンスのローブ側に入れる。Normal・Depth・Object ID は M1 から出力済み。Material ID も出力済み。Motion Vector は M5 に送る） |
-| 7 | Stylization Pass（一次ヒット Hybrid） | REQ-STY-007 | 進行中（`verion-stylization` クレートに、AOV から最終色を合成する Pass（デノイズ抜き）を追加。`HybridSurface.diffuse` で直接拡散を `ToonRamp` に寄せる部分のみ。他の成分は物理のまま。ramp は光ごとの cosθ × 可視性で段階化する（lighting AOV に光ごとのスロットを持つ）。`render-cli --mode stylized` で接続済み。Toon の見た目は実画像で未確認） |
+| 7 | Stylization Pass（一次ヒット Hybrid） | REQ-STY-007 | 進行中（`verion-stylization` クレートに、AOV から最終色を合成する Pass（デノイズ抜き）を追加。層は材質に書いた順に適用する（ToonRamp・ShadowPalette・RimLight・StylizedSpecular と `gi`）。ramp は光ごとの cosθ × 可視性で段階化する（lighting AOV に光ごとのスロットを持つ）。`render-cli --mode stylized` で接続済み。Toon の見た目は実画像で確認済み（点光源・太陽つき HDRI）。デノイズ（項目 8）は未着手） |
 | 8 | デノイズ（OIDN / MetalFX の選定を ADR に記録） | REQ-ACC-001 | 未着手 |
 | 9 | Viewer の GUI 技術を決める | REQ-VIEW-002 | 済（winit + egui。ADR-0012） |
 | 10 | 最小 Viewer（累積・AOV 切替・パラメータ変更→再累積） | REQ-VIEW-002 | 未着手 |
 | 11 | Stylization 評価の初期版（Art Direction 一致・デノイズによる消失） | REQ-QA-003 | 未着手 |
 | 12 | 写実材質の拡充（多重散乱補償・clearcoat・sheen・Dispersion の RGB 近似） | REQ-CORE-003 | 未着手 |
-| 13 | PostProcess の枠と最小の色調整 | REQ-STY-011 | 進行中（枠は済: `verion-stylization::postprocess` の `PostFrame` と、最初の Pass の `outline`。色調整は未着手） |
+| 13 | PostProcess の枠と最小の色調整 | REQ-STY-011 | 済（`verion-stylization::postprocess` に `PostFrame`・`outline`・`color_grade`（ゲイン・彩度・ホワイトバランス）。色調整は `render-cli --exposure / --saturation / --white-balance`（`--mode stylized` のみ）。EXR には非物理の印（`physical` = false）だけを残し、適用した値は残していない） |
 | 14 | 間接光の平坦化（`HybridSurface.gi`） | REQ-STY-001 | 済（間接拡散を「アルベド × 材質ごとの一定の環境光」へ混ぜる。一定値はフレーム内の間接拡散の和 ÷ アルベドの和。Albedo AOV を Pass に渡す。実画像は未確認） |
 | 15 | 最小の輪郭線（Normal・Depth・Object ID・Material ID から画面空間で作る。項目 13 の枠の最初の Pass。時間的安定性は M8） | REQ-STY-009 / 011 | 済（材質ごとの `outlineStyle` と `hybridSurface.outline`（不透明度）。線は近い側の物体の内側に引き、太さは画素単位。実画像（球と床）で確認） |
 
