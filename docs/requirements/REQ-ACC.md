@@ -18,7 +18,7 @@ Albedo / Normal 等の AOV を供給してデノイズする。まず OIDN。Met
 
 ### 受入条件
 
-- [ ] Toon 境界と意図したテクスチャを消さない
+- [x] Toon 境界と意図したテクスチャを消さない（`verion-denoise` が OIDN を実行時に読み込む。`render-cli --denoise`（Stylized は既定で Pass の入力側）と Viewer の「Denoise when done」。評価は REQ-QA-003）
 - [x] 選定結果を ADR に記録する（ADR-0013: まず OIDN、MetalFX は M5 以降に再評価）
 
 ### 依存要件

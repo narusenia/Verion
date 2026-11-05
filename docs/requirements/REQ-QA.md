@@ -53,9 +53,23 @@ Mitsuba 3 を第一、pbrt-v4 を補助の参照とする（ADR-0007）。小さ
 
 物理基準がないため別評価を持つ。Art Direction 一致（影色・Shadow Band・ハイライト形状・線幅）、時間的安定性、キャラと背景・Backend・DCC 間の一貫性、追加 GPU 時間と VRAM、Toon 境界のエイリアシングとデノイズによる消失。
 
+### 判定方法（初版、M2）
+
+| 項目 | 判定方法 | テストシーン | 状態 |
+|---|---|---|---|
+| Art Direction 一致（影色・Shadow Band・ハイライト形状・線幅） | `verion-stylization` の解析テスト（既知の入力で帯の色・境界、ハイライトの形、ShadowPalette、輪郭の幅を値で照合） | テスト内の合成入力、目視は `toon_compare`・`highlight_compare` | 初版済 |
+| デノイズによる Toon 境界の消失 | `style_eval`: 1024 spp の参照で、同じ物体の内側で輝度が急に変わる画素（相対勾配 0.25 超）を帯の境界とし、`min(勾配_試験 / 勾配_参照, 1)` の平均を保持率とする。0.8 以上で合格 | `toon_compare`（sunny・softbox）、`lights_compare` | 初版済（`scripts/eval_stylization.sh`） |
+| 平坦部のノイズ | `style_eval` の flat（境界以外の物体画素の平均絶対誤差 ÷ 平均） | 同上 | 初版済（報告のみ） |
+| 追加 GPU 時間と VRAM | `render-cli --metrics` の `gpu_s`・`stylize_s`・`denoise_s`。Lighting AOV は 1 画素約 260 バイト | 同上 | 初版済（報告のみ） |
+| Toon 境界のエイリアシング | 未定。一次ヒットの AOV は画素中心 1 本なので、境界のジャギーを M8 の時間的安定性と合わせて測る | — | M8 |
+| 時間的安定性 | 未定（動画の評価） | — | M8 |
+| Backend 間・DCC 間の一貫性 | Metal と Vulkan の同一シーン比較（REQ-GPU-007）、DCC 間は M6・M9 | — | M4・M6 |
+
+初回の実測（16 spp vs 1024 spp、512×384、M5）: 帯の境界の保持率はデノイズなし 0.93、入力側 0.95〜0.97、出力側 0.92〜0.94。平坦部の誤差は入力側で 1/3〜1/6。入力側は Lighting AOV の成分ごとに掛けるので約 1 秒、出力側は約 0.1 秒。既定は入力側。
+
 ### 受入条件
 
-- [ ] 各項目に判定方法とテストシーンがある
+- [ ] 各項目に判定方法とテストシーンがある（M2 の範囲は済。時間的安定性・エイリアシングは M8、Backend 間は M4、DCC 間は M6）
 
 ### 依存要件
 

@@ -79,7 +79,7 @@ Shadow Band 数、閾値、Feather、色パレット、Light Wrap。
 
 ### 受入条件
 
-- [ ] 形状の種類と大きさをパラメータで指定できる（帯状と、段（`ramp`）による多段は済。楕円・手描き風は後続）
+- [x] 形状の種類と大きさをパラメータで指定できる（丸い帯・楕円（`stretch`・`angle`）・画像による手描き風（`shape: "texture"`）と、段（`ramp`）による多段。見本は `scenes/highlight_compare.gltf`）
 
 ### 依存要件
 
@@ -143,7 +143,7 @@ Direct Diffuse・Indirect Diffuse・Specular・Transmission・Shadow/Visibility�
 
 - [ ] Reference モードと同じパストレースを共有する
 - [ ] 写実材質と Toon 材質が同一シーンに混在しても、写実材質の出力は Reference と一致する（写実と Toon の混在を M3 以降の軸にする。反射・屈折越しの Toon は REQ-STY-010）
-- [ ] デノイズが Toon 境界と意図したテクスチャを消さない（REQ-QA-003）
+- [x] デノイズが Toon 境界と意図したテクスチャを消さない（REQ-QA-003。OIDN を Pass の入力側に掛け、`scripts/eval_stylization.sh` で帯の境界の保持率 0.95〜0.97（閾値 0.8）。テクスチャは補助入力の Albedo で守る）
 
 ### 依存要件
 
@@ -233,7 +233,7 @@ Stylization 後段の画面空間 Pass。M2 は Pass の枠と最小の色調整
 
 - [x] IR に MatCap 層を持ち、glTF 拡張から読む
 - [x] 視線空間の法線で画像を引き、陰影を `strength` で置き換える（既知の画像・法線で値が一致する解析テスト）
-- [ ] Viewer で `strength` を動かせる
+- [x] Viewer で `strength` を動かせる（`material_ui` の kittest で、スライダの操作が層の値を変えることを確認）
 - [x] 手続きで作った MatCap 画像（粘土・金属・Toon）の見本シーンがある（`scenes/matcap_compare.gltf`）
 
 ### 依存要件
