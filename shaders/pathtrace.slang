@@ -301,6 +301,9 @@ struct Surface
     float ior;
     float eta;  // relative index n_transmitted / n_incident on the viewer's side
     float fSel; // chance the dielectric base lobe reflects specularly
+    float coat;      // clear coat strength, 0 = none
+    float coatAlpha; // GGX alpha of the coat
+    float coatP;     // chance the sampler takes the coat lobe: coat * Fresnel at the view angle; the base keeps 1 - coatP
 };
 
 struct Lobes
@@ -348,6 +351,15 @@ Lobes evalLobes(Surface s, float3 woL, float3 wiL)
     l.specular = s.metallic * schlick(s.albedo, woh) * multiscatterFactor(s, woL.z) * core
         + (1.0 - s.metallic) * (t * fresnelDielectric(woh, s.eta) + (1.0 - t) * fresnelDielectric(woh, s.ior)) * core;
     l.diffuse = (1.0 - s.metallic) * (1.0 - t) * (1.0 - s.fSel) * s.albedo * (wiL.z / PI);
+    if (s.coat > 0.0)
+    {
+        // Clear coat (IOR 1.5): the base loses what the coat reflects at the view angle, and the coat
+        // adds its own GGX lobe. shortcut: no refraction or absorption inside the coat, no coat
+        // multiple scattering; upgrade when a layered BSDF is needed.
+        float coreC = D(hh.z, s.coatAlpha) * G1(woL.z, s.coatAlpha) * G1(wiL.z, s.coatAlpha) / (4.0 * woL.z);
+        l.specular = (1.0 - s.coatP) * l.specular + s.coat * fresnelDielectric(woh, 1.5) * coreC;
+        l.diffuse *= 1.0 - s.coatP;
+    }
     return l;
 }
 
@@ -411,7 +423,13 @@ float reflectivePdf(Surface s, float3 woL, float3 wiL)
     float t = s.transmission;
     float pSpec = s.metallic + (1.0 - s.metallic) * (t * fresnelDielectric(woh, s.eta) + (1.0 - t) * s.fSel);
     float pDiff = (1.0 - s.metallic) * (1.0 - t) * (1.0 - s.fSel) * wiL.z / PI;
-    return pSpec * spec + pDiff;
+    float q = pSpec * spec + pDiff;
+    if (s.coat > 0.0)
+    {
+        float specC = G1(woL.z, s.coatAlpha) * D(hh.z, s.coatAlpha) / (4.0 * woL.z);
+        q = (1.0 - s.coatP) * q + s.coatP * specC;
+    }
+    return q;
 }
 
 bool occluded(float3 o, float3 d, float tmax)
@@ -544,7 +562,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         }
         float3 n = outside ? ns : -ns;
 
-        uint mi = instances[inst + 2] * 16;
+        uint mi = instances[inst + 2] * 18;
         float3 albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
         // Textures multiply the material factors. The filter footprint comes from the ray cone.
         uint texBase = uint(materials[mi + 10]);
@@ -627,6 +645,11 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         surf.ior = ior;
         surf.eta = eta;
         surf.fSel = fSel;
+        // The coat sits on the viewer's side of a surface, so it is skipped when seen from inside.
+        surf.coat = outside ? materials[mi + 15] : 0.0;
+        surf.coatAlpha = max(materials[mi + 16] * materials[mi + 16], 1.0e-3);
+        float coatF = fresnelDielectric(woL.z, 1.5);
+        surf.coatP = surf.coat * coatF;
 
         // Next-event estimation for delta lights (no MIS: sampling can never hit them). Includes the
         // reflective lobes only; rough transmission of a delta light is not evaluated.
@@ -785,7 +808,16 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         bool ok = true;
         bool refracted = false;
         uint lobeCls = 1;
-        if (lobe < metallic)
+        float uc = surf.coat > 0.0 ? rng.next() : 1.0;
+        if (uc < surf.coatP)
+        {
+            float3 h = sampleVndf(woL, surf.coatAlpha, u1, u2);
+            float woh = dot(woL, h);
+            wiL = 2.0 * woh * h - woL;
+            ok = wiL.z > 0.0;
+            w = float3(fresnelDielectric(woh, 1.5) / coatF * G1(max(wiL.z, 0.0), surf.coatAlpha));
+        }
+        else if (lobe < metallic)
         {
             float3 h = sampleVndf(woL, alpha, u1, u2);
             float woh = dot(woL, h);

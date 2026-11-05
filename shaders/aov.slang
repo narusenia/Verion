@@ -96,7 +96,7 @@ void aov(uint3 tid : SV_DispatchThreadID)
         matId = instances[inst + 2] + 1;
         depth = q.CommittedRayT() * -d.z; // d is unit length in camera space, so -d.z is the forward component
 
-        uint mi = instances[inst + 2] * 16;
+        uint mi = instances[inst + 2] * 18;
         albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
         uint texBase = uint(materials[mi + 10]);
         if (texBase > 0)

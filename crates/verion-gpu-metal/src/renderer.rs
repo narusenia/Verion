@@ -18,7 +18,7 @@ const PATHTRACE_MSL: &str = include_str!("../shaders/pathtrace.metal");
 
 /// Path length limit. Radiance beyond it is dropped, so closed furnaces read slightly dark.
 const MAX_DEPTH: u32 = 8;
-const MATERIAL_WORDS: usize = 16;
+const MATERIAL_WORDS: usize = 18;
 const LIGHT_WORDS: usize = 16;
 /// Words per emissive triangle; must match `shaders/pathtrace.slang`.
 const EMITTER_WORDS: usize = 16;
@@ -435,6 +435,8 @@ impl Renderer {
                 tex[2],
                 normal_texture,
                 b.normal_scale,
+                b.clearcoat,
+                b.clearcoat_roughness,
                 0.0,
             ]);
         }

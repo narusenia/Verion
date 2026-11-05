@@ -527,6 +527,49 @@ fn metal_furnace_conserves_energy() {
 }
 
 #[test]
+fn clearcoat_adds_a_second_fresnel_layer() {
+    let Some(ctx) = context() else { return };
+    // Black base, both layers mirror-smooth: the coat reflects F0 = 0.04 and the base reflects 0.04 of
+    // the 0.96 the coat lets through.
+    let m = bsdf(BaseBsdf {
+        base_color: [0.0; 3],
+        roughness: 0.0,
+        clearcoat: 1.0,
+        ..BaseBsdf::default()
+    });
+    let img = Renderer::new(&ctx, &sky_scene(plane(5.0, 0.0), m, 3.0))
+        .unwrap()
+        .render(32, 32, 128)
+        .unwrap();
+    let got = center_mean(&img, 32, 16);
+    assert!((got - 0.0784).abs() < 0.004, "{got}");
+}
+
+#[test]
+fn clearcoat_furnace_conserves_energy() {
+    let Some(ctx) = context() else { return };
+    for coat_roughness in [0.0, 0.3] {
+        let m = bsdf(BaseBsdf {
+            base_color: [1.0; 3],
+            roughness: 0.5,
+            clearcoat: 1.0,
+            clearcoat_roughness: coat_roughness,
+            ..BaseBsdf::default()
+        });
+        let img = Renderer::new(&ctx, &sky_scene(cube(0.5), m, 3.0))
+            .unwrap()
+            .render(32, 32, 64)
+            .unwrap();
+        let got = center_mean(&img, 32, 16);
+        // The coat takes what it reflects from the base, so the sum stays near 1 and never exceeds it.
+        assert!(
+            got > 0.95 && got < 1.01,
+            "coat roughness {coat_roughness}: {got}"
+        );
+    }
+}
+
+#[test]
 fn metal_tints_by_base_color() {
     let Some(ctx) = context() else { return };
     let m = bsdf(BaseBsdf {

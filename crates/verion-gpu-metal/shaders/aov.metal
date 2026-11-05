@@ -350,7 +350,7 @@ struct RayDesc_0
 #line 97
         float _S28 = _S27 * - d_0.z;
 
-        uint mi_0 = (&kernelContext_3)->instances_0[_S25] * 16U;
+        uint mi_0 = (&kernelContext_3)->instances_0[_S25] * 18U;
         float3 albedo_1 = float3((&kernelContext_3)->materials_0[mi_0], (&kernelContext_3)->materials_0[mi_0 + 1U], (&kernelContext_3)->materials_0[mi_0 + 2U]);
         uint texBase_0 = uint((&kernelContext_3)->materials_0[mi_0 + 10U]);
         if(texBase_0 > 0U)
