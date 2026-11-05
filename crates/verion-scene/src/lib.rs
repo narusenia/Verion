@@ -19,4 +19,4 @@ pub use scene::{
     Camera, IDENTITY, ImageId, Instance, InstanceId, Light, LightId, MaterialId, MeshId, Revisions,
     Scene, SceneError, Transform,
 };
-pub use shading::{LightComponents, ShadingContext};
+pub use shading::{LIGHT_SLOTS, LightComponents, ShadingContext};

@@ -1158,3 +1158,38 @@ fn lighting_is_off_unless_requested() {
     r.accumulate(&mut acc, 1).unwrap();
     assert!(acc.lighting().is_none());
 }
+
+#[test]
+fn light_slots_hold_potential_diffuse_and_response() {
+    let Some(ctx) = context() else { return };
+    let light = Light::Point {
+        position: [1.0, 0.0, 1.0],
+        color: [1.0; 3],
+        intensity: std::f32::consts::PI * 2.0 * 2.0f32.sqrt(),
+    };
+    let center = |scene: &Scene| {
+        let r = Renderer::new(&ctx, scene).unwrap();
+        let mut acc = r.new_accumulation_with_lighting(65, 65).unwrap();
+        r.accumulate(&mut acc, 64).unwrap();
+        let l = acc.lighting().unwrap();
+        let i = 32 * 65 + 32;
+        (l.light_u[i], l.light_response[i], l.direct_diffuse[i][0])
+    };
+    // Lit: u * r is the direct diffuse, and the response is cos = 1/sqrt 2 (light at (1, 0, 1)).
+    let (u, r, dd) = center(&floor_scene(light, false));
+    assert!((r[0] - 0.5f32.sqrt()).abs() < 1e-3, "response {}", r[0]);
+    assert!(
+        (u[0][0] * r[0] - dd).abs() < 1e-3,
+        "u*r {} vs {dd}",
+        u[0][0] * r[0]
+    );
+    assert!(
+        u[1][0] == 0.0 && u[3][0] == 0.0,
+        "unused slots must stay empty"
+    );
+    // Shadowed: the physical diffuse is gone, but the light is still known, with response 0, so a
+    // toon ramp can put the pixel in its darkest band instead of black.
+    let (u, r, dd) = center(&floor_scene(light, true));
+    assert!(dd < 1e-3 && r[0] == 0.0, "dd {dd}, response {}", r[0]);
+    assert!(u[0][0] > 0.1, "potential diffuse {}", u[0][0]);
+}

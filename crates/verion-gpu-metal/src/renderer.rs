@@ -8,7 +8,7 @@ use objc2_metal::{
     MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder,
     MTLComputePipelineState, MTLDevice, MTLLibrary, MTLResourceOptions, MTLResourceUsage, MTLSize,
 };
-use verion_scene::{Image, Light, Scene, Transform};
+use verion_scene::{Image, LIGHT_SLOTS, Light, Scene, Transform};
 
 use crate::{Blas, Error, Instance, MetalContext, Obj, Tlas};
 
@@ -203,7 +203,9 @@ pub struct Aovs {
 }
 
 /// Floats per pixel in the lighting buffer; must match `shaders/pathtrace.slang`.
-const LIGHTING_STRIDE: usize = 17;
+const LIGHTING_STRIDE: usize = 37;
+/// Floats per light slot after the first 17.
+const SLOT_WORDS: usize = 5;
 
 /// First-hit lighting split (REQ-STY-006), mean per pixel, row-major from the top-left. Radiance
 /// parts sum to the beauty image; indirect light is filed under the lobe taken at the first bounce.
@@ -216,6 +218,12 @@ pub struct LightingAovs {
     pub emission: Vec<[f32; 3]>,
     /// Share of the direct light that is not shadowed, 0 to 1 (1 where no light reaches the point).
     pub visibility: Vec<f32>,
+    /// Per light slot: the light's diffuse contribution without cos and without shadowing (`u`).
+    /// The physical direct diffuse is `u * light_response`, summed over slots (see `LIGHT_SLOTS`).
+    pub light_u: Vec<[[f32; 3]; LIGHT_SLOTS]>,
+    /// Per light slot: cos(N, L) times visibility, averaged weighted by the light's contribution.
+    /// 0 where the slot's light never reaches the pixel.
+    pub light_response: Vec<[f32; LIGHT_SLOTS]>,
 }
 
 /// A scene snapshot ready to trace. Later scene edits are not reflected.
@@ -678,6 +686,31 @@ impl Accumulation {
             specular: part(2),
             transmission: part(3),
             emission: part(4),
+            light_u: data
+                .as_chunks::<LIGHTING_STRIDE>()
+                .0
+                .iter()
+                .map(|r| {
+                    std::array::from_fn(|s| {
+                        std::array::from_fn(|i| r[17 + SLOT_WORDS * s + i] * inv)
+                    })
+                })
+                .collect(),
+            light_response: data
+                .as_chunks::<LIGHTING_STRIDE>()
+                .0
+                .iter()
+                .map(|r| {
+                    std::array::from_fn(|s| {
+                        let o = 17 + SLOT_WORDS * s;
+                        if r[o + 3] > 0.0 {
+                            r[o + 4] / r[o + 3]
+                        } else {
+                            0.0
+                        }
+                    })
+                })
+                .collect(),
             visibility: data
                 .as_chunks::<LIGHTING_STRIDE>()
                 .0
@@ -738,7 +771,7 @@ impl Renderer {
     }
 
     /// Like `new_accumulation`, plus per-pixel buffers for the lighting split
-    /// (17 floats per pixel, so about 70 bytes per pixel more than the beauty sum).
+    /// (37 floats per pixel, so about 150 bytes per pixel more than the beauty sum).
     pub fn new_accumulation_with_lighting(
         &self,
         width: u32,

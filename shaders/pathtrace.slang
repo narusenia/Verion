@@ -22,11 +22,16 @@ StructuredBuffer<float> uvs;        // uv per vertex, all meshes concatenated (z
 StructuredBuffer<float> texels;     // rgb texels, each texture's mip chain level 0 first
 StructuredBuffer<uint> texInfo;     // 4 words per texture: texel offset, width, height, mip level count
 StructuredBuffer<float> vnormals;   // xyz per vertex, all meshes concatenated (zero when a mesh has none)
-RWStructuredBuffer<float> lighting; // used only when params[28] != 0; 17 floats per pixel, running sums of the first-hit
+RWStructuredBuffer<float> lighting; // used only when params[28] != 0; 37 floats per pixel, running sums of the first-hit
                                     // lighting split: direct diffuse, indirect diffuse, specular, transmission, emission (rgb each),
-                                    // then lit and total direct-light luminance (visibility = lit / total)
+                                    // then lit and total direct-light luminance (visibility = lit / total), then 4 light slots of
+                                    // 5 floats: sum of u (rgb), sum of lum(u), sum of lum(u) * r. u is a light's diffuse
+                                    // contribution divided by cos and r is cos * visibility, so the physical diffuse is u * r.
+                                    // Slots 0..2 hold point / directional / spot lights by index (later ones share slot 2);
+                                    // slot 3 holds emissive triangles and the environment map.
 
 static const float PI = 3.14159265358979;
+static const uint LIGHTING_STRIDE = 37;
 
 uint pcg(uint v)
 {
@@ -141,6 +146,20 @@ float3 sampleVndf(float3 wo, float alpha, float u1, float u2)
 
 
 float lum(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
+
+// Adds one light's potential diffuse `u` (unshadowed, without cos) and response `r` to its slot.
+void addSlot(uint pixel, uint slot, float3 u, float r)
+{
+    if (any(isnan(u)) || any(isinf(u)))
+        return; // one bad sample must not poison the running sum
+    uint o = LIGHTING_STRIDE * pixel + 17 + 5 * slot;
+    float w = lum(u);
+    lighting[o] += u.x;
+    lighting[o + 1] += u.y;
+    lighting[o + 2] += u.z;
+    lighting[o + 3] += w;
+    lighting[o + 4] += w * r;
+}
 
 float3 envTexel(uint i, uint j)
 {
@@ -616,6 +635,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                         float vv = lum(cd + cs);
                         visTotal += vv;
                         visLit += occ ? 0.0 : vv;
+                        addSlot(pixel, min(li, 2u), cd / c, occ ? 0.0 : c);
                     }
                 }
             }
@@ -672,6 +692,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                         float vv = lum(cd + cs);
                         visTotal += vv;
                         visLit += occ ? 0.0 : vv;
+                        addSlot(pixel, 3u, cd / cosi, occ ? 0.0 : cosi);
                     }
                 }
             }
@@ -707,6 +728,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                         float vv = lum(cd + cs);
                         visTotal += vv;
                         visLit += occ ? 0.0 : vv;
+                        addSlot(pixel, 3u, cd / cosi, occ ? 0.0 : cosi);
                     }
                 }
             }
@@ -807,7 +829,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
 
     if (lightingOn)
     {
-        uint lo = 17 * pixel;
+        uint lo = LIGHTING_STRIDE * pixel;
         float3 split[5] = { parts.directDiffuse, parts.indirectDiffuse, parts.specular, parts.transmission, parts.emission };
         for (uint k = 0; k < 5; k++)
         {
