@@ -7,7 +7,7 @@
 |---|------|-----|------|
 | 1 | Stylization 用 glTF 拡張のスキーマ確定（仕様書） | REQ-IO-002 | 済（仕様書と JSON Schema は確定。ローダーは `VERION_materials_stylization` を読み、範囲外は取り込みエラー、未知のプロパティは警告にする） |
 | 2 | Material IR の 3 分離と `ShadingContext` | REQ-STY-008 | 済（`Base BSDF` / `Stylization Layers` / `Output Channels` の分離は M1 から。`ShadingContext`（光ごとの成分を保持）と `Revisions.stylization`、EXR の `verion/stylizationRevision` を追加。`ShadingContext` の Slang 側対応は項目 3 以降） |
-| 3 | HybridSurface | REQ-STY-001 | 済（IR・検証・glTF 拡張と、Pass での評価。成分ごとの係数で `diffuse`（ToonRamp）・`specular`（StylizedSpecular）・`gi`（間接光の平坦化）・`shadow`（ShadowPalette）・`outline`（輪郭線の不透明度）を混ぜる。GPU 側は光ごとのスロットを出すのみで、評価は Pass（CPU）） |
+| 3 | HybridSurface | REQ-STY-001 | 済（IR・検証・glTF 拡張と、Pass での評価。成分ごとの係数で `diffuse`（ToonRamp）・`specular`（StylizedSpecular）・`gi`（間接光の平坦化）・`shadow`（ShadowPalette）・`outline`（輪郭線の不透明度）を混ぜる。`reflection` は映り込み（間接鏡面）を消す度合いで、既定 0 で残す（直接鏡面はスロットから復元して分ける）。GPU 側は光ごとのスロットを出すのみで、評価は Pass（CPU）） |
 | 4 | ToonRamp・ShadowPalette | REQ-STY-002 / 003 | 済（`ToonRamp`（光ごとに段階化）と `ShadowPalette`（直接影・間接影を別々に色補正）を IR・Pass・glTF 拡張に実装。GPU 側は光ごとのスロットを出すのみで、評価は Pass（CPU）） |
 | 5 | StylizedSpecular・RimLight | REQ-STY-004 / 005 | 進行中（RimLight は済: IR・glTF 拡張・Pass と、実画像（球と床）での確認まで。ライトスロットは拡散 `u`・鏡面 `s`・方向・可視性を持ち、層は材質に書いた順に適用する。StylizedSpecular は帯状と、`ramp` による多段まで済（IR・glTF 拡張・Pass）。楕円・手描き風は後続） |
 | 6 | Lighting AOV の分離出力 | REQ-STY-006 | 進行中（一次ヒットの DirectDiffuse・IndirectDiffuse・Specular・Transmission・Emission・Visibility を分離し、`render-cli --lighting-aovs` で EXR に出力（光ごとのスロットは EXR に出さず内部入力。1 ピクセル約 260 バイト。光ごとのスロットは拡散 `u`・鏡面 `s`・方向・可視性を持つ）。5 成分の和はビューティと一致。間接光は最初のバウンスのローブ側に入れる。Normal・Depth・Object ID は M1 から出力済み。Material ID も出力済み。Motion Vector は M5 に送る） |

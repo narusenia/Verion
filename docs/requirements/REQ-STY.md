@@ -14,7 +14,7 @@
 
 ### 説明
 
-PBR と Toon を成分別（Diffuse・Specular・GI・Shadow・Outline）にブレンドするマテリアル。各成分の写実 / スタイライズ度を個別に設定できる。
+PBR と Toon を成分別（Diffuse・Specular・GI・Shadow・Outline）にブレンドするマテリアル。各成分の写実 / スタイライズ度を個別に設定できる。映り込み（間接鏡面）は `Reflection` として別に持ち、Toon のハイライトに置き換えず、既定で残す。
 
 ### 受入条件
 
