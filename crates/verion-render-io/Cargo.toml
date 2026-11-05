@@ -18,3 +18,7 @@ verion-scene = { version = "0.0.0", path = "../verion-scene" }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# Already in the tree through gltf -> image; used only by the exr_png preview example.
+png = "0.18"
