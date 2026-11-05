@@ -234,6 +234,11 @@ impl Scene {
         LightId(self.lights.len() as u32 - 1)
     }
 
+    /// The id of the `index`-th light, for tools that list lights by position.
+    pub fn light_id(&self, index: usize) -> Option<LightId> {
+        (index < self.lights.len()).then_some(LightId(index as u32))
+    }
+
     pub fn set_light(&mut self, id: LightId, light: Light) {
         self.revisions.lighting += 1;
         self.lights[id.index()] = light;
