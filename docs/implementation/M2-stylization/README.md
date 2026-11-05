@@ -20,7 +20,7 @@
 | 13 | PostProcess の枠と最小の色調整 | REQ-STY-011 | 済（`verion-stylization::postprocess` に `PostFrame`・`outline`・`color_grade`（ゲイン・彩度・ホワイトバランス）。色調整は `render-cli --exposure / --saturation / --white-balance`（`--mode stylized` のみ）。EXR には非物理の印（`physical` = false）と、適用した色調整の値（`verion/exposure`・`verion/saturation`・`verion/whiteBalance`）を残す） |
 | 14 | 間接光の平坦化（`HybridSurface.gi`） | REQ-STY-001 | 済（間接拡散を「アルベド × 材質ごとの一定の環境光」へ混ぜる。一定値はフレーム内の間接拡散の和 ÷ アルベドの和。Albedo AOV を Pass に渡す。実画像は未確認） |
 | 15 | 最小の輪郭線（Normal・Depth・Object ID・Material ID から画面空間で作る。項目 13 の枠の最初の Pass。時間的安定性は M8） | REQ-STY-009 / 011 | 済（材質ごとの `outlineStyle` と `hybridSurface.outline`（不透明度）。線は近い側の物体の内側に引き、太さは画素単位。実画像（球と床）で確認） |
-| 16 | MatCap（視線空間の法線で画像を引く陰影。1 枚で拡散・鏡面を置き換える。別画像への拡張は後続） | REQ-STY-012 | 進行中（仕様・要件の追加まで。IR・Pass・取り込み・Viewer・見本シーンは未着手） |
+| 16 | MatCap（視線空間の法線で画像を引く陰影。1 枚で拡散・鏡面を置き換える。別画像への拡張は後続） | REQ-STY-012 | 進行中（IR・Pass・glTF 取り込み・Viewer のスライダ・見本シーン（`scenes/matcap_compare.gltf`、画像は `scripts/gen_matcaps.py` の手続き生成）まで済。Viewer 画面での操作確認が残り。拡散と鏡面を別画像にする拡張は後続） |
 
 ## 完了条件
 

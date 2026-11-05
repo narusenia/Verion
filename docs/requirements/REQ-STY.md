@@ -231,10 +231,10 @@ Stylization 後段の画面空間 Pass。M2 は Pass の枠と最小の色調整
 
 ### 受入条件
 
-- [ ] IR に MatCap 層を持ち、glTF 拡張から読む
-- [ ] 視線空間の法線で画像を引き、陰影を `strength` で置き換える（既知の画像・法線で値が一致する解析テスト）
+- [x] IR に MatCap 層を持ち、glTF 拡張から読む
+- [x] 視線空間の法線で画像を引き、陰影を `strength` で置き換える（既知の画像・法線で値が一致する解析テスト）
 - [ ] Viewer で `strength` を動かせる
-- [ ] 手続きで作った MatCap 画像（粘土・金属・Toon）の見本シーンがある
+- [x] 手続きで作った MatCap 画像（粘土・金属・Toon）の見本シーンがある（`scenes/matcap_compare.gltf`）
 
 ### 依存要件
 
