@@ -1111,12 +1111,14 @@ fn missing_texture_image_is_rejected() {
 /// Mean radiance over the central pixels of a sphere of `base` under a uniform sky of radiance 1.
 /// Energy conservation puts it at 1; losses go below.
 fn sphere_furnace(ctx: &MetalContext, base: BaseBsdf) -> f32 {
+    sphere_furnace_with(ctx, base, true)
+}
+
+fn sphere_furnace_with(ctx: &MetalContext, base: BaseBsdf, multiscatter: bool) -> f32 {
     let scene = sky_scene(icosphere(1.0), bsdf(base), 4.0);
-    let img = Renderer::new(ctx, &scene)
-        .unwrap()
-        .render(32, 32, 2048)
-        .unwrap();
-    center_mean(&img, 32, 8)
+    let mut renderer = Renderer::new(ctx, &scene).unwrap();
+    renderer.set_multiscatter(multiscatter);
+    center_mean(&renderer.render(32, 32, 2048).unwrap(), 32, 8)
 }
 
 fn dielectric(transmission: f32, roughness: f32) -> BaseBsdf {
@@ -1141,14 +1143,25 @@ fn smooth_dielectrics_conserve_energy_in_a_furnace() {
     }
 }
 
-/// Rough transmission is single-scatter only, so it loses energy (a known limit in the M1 README);
-/// it must never create any, and the loss must not grow beyond what was measured.
+/// Rough transmission is single-scatter, so without the compensation it loses energy (0.36 at
+/// roughness 1); it must never create any, and the loss must not grow beyond what was measured.
 #[test]
-fn rough_glass_loses_but_never_gains_energy_in_a_furnace() {
+fn rough_glass_without_compensation_loses_but_never_gains_energy_in_a_furnace() {
     let Some(ctx) = context() else { return };
     for (roughness, lo) in [(0.3, 0.95), (0.6, 0.70)] {
-        let got = sphere_furnace(&ctx, dielectric(1.0, roughness));
+        let got = sphere_furnace_with(&ctx, dielectric(1.0, roughness), false);
         assert!((lo..=1.005).contains(&got), "roughness {roughness}: {got}");
+    }
+}
+
+/// The compensation (1 / E of the interface, from the generated table) gives back the energy of
+/// the second scattering, so a rough glass sphere returns the sky again at every roughness.
+#[test]
+fn multiscatter_compensation_restores_the_rough_glass_furnace() {
+    let Some(ctx) = context() else { return };
+    for roughness in [0.3, 0.5, 0.7, 1.0] {
+        let got = sphere_furnace(&ctx, dielectric(1.0, roughness));
+        assert!((0.97..=1.01).contains(&got), "roughness {roughness}: {got}");
     }
 }
 

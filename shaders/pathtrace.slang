@@ -4,6 +4,7 @@
 
 #include "include/ggx_albedo.slang"
 #include "include/sheen_albedo.slang"
+#include "include/dielectric_albedo.slang"
 
 RaytracingAccelerationStructure scene;
 StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
@@ -303,6 +304,7 @@ struct Surface
     float ior;
     float eta;  // relative index n_transmitted / n_incident on the viewer's side
     float fSel; // chance the dielectric base lobe reflects specularly
+    float tComp; // multiple-scattering compensation of rough transmission (1 = off)
     float coat;      // clear coat strength, 0 = none
     float coatAlpha; // GGX alpha of the coat
     float3 sheenColor;
@@ -343,6 +345,31 @@ float3 multiscatterFactor(Surface s, float cosO)
     return 1.0 + s.albedo * (1.0 / max(ggxAlbedo(cosO, s.alpha), 0.05) - 1.0);
 }
 
+// Single-scattering albedo of a rough dielectric interface (reflection plus transmission), trilinear in
+// the generated table over (cos wo, roughness, ior), for a path entering (`outside`) or leaving the medium.
+float dielectricAlbedo(float cosO, float rough, float ior, bool outside)
+{
+    float x = saturate(cosO) * (DIEL_ALBEDO_N - 1);
+    float y = saturate(rough) * (DIEL_ALBEDO_N - 1);
+    float z = clamp((ior - 1.0) * 4.0, 0.0, float(DIEL_ALBEDO_N_IOR - 1) - 1.0e-3);
+    uint x0 = min(uint(x), DIEL_ALBEDO_N - 2);
+    uint y0 = min(uint(y), DIEL_ALBEDO_N - 2);
+    uint z0 = uint(z);
+    float fx = x - x0;
+    float fy = y - y0;
+    float fz = z - z0;
+    uint base = (outside ? 0 : DIEL_ALBEDO_N_IOR) * DIEL_ALBEDO_N * DIEL_ALBEDO_N;
+    float c[2];
+    for (uint k = 0; k < 2; k++)
+    {
+        uint o = base + ((z0 + k) * DIEL_ALBEDO_N + y0) * DIEL_ALBEDO_N + x0;
+        float a = lerp(DIEL_ALBEDO[o], DIEL_ALBEDO[o + 1], fx);
+        float b = lerp(DIEL_ALBEDO[o + DIEL_ALBEDO_N], DIEL_ALBEDO[o + DIEL_ALBEDO_N + 1], fx);
+        c[k] = lerp(a, b, fy);
+    }
+    return lerp(c[0], c[1], fz);
+}
+
 // Directional albedo of the sheen lobe (color 1), bilinear in the generated table (r, cos wo).
 float sheenAlbedo(float cosO, float r)
 {
@@ -378,7 +405,7 @@ Lobes evalLobes(Surface s, float3 woL, float3 wiL)
     float t = s.transmission;
     Lobes l;
     l.specular = s.metallic * schlick(s.albedo, woh) * multiscatterFactor(s, woL.z) * core
-        + (1.0 - s.metallic) * (t * fresnelDielectric(woh, s.eta) + (1.0 - t) * fresnelDielectric(woh, s.ior)) * core;
+        + (1.0 - s.metallic) * (t * fresnelDielectric(woh, s.eta) * s.tComp + (1.0 - t) * fresnelDielectric(woh, s.ior)) * core;
     l.diffuse = (1.0 - s.metallic) * (1.0 - t) * (1.0 - s.fSel) * s.albedo * (wiL.z / PI);
     // Layers, outermost last: base, sheen scaled so the pair keeps energy, then the coat.
     if (s.sheenP > 0.0)
@@ -695,6 +722,11 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         surf.ior = ior;
         surf.eta = eta;
         surf.fSel = fSel;
+        // Rough transmission loses the energy that would scatter a second time on the microsurface;
+        // scaling reflection and transmission by 1 / E gives it back and keeps their ratio.
+        surf.tComp = 1.0;
+        if (params[29] != 0 && transmission > 0.0 && rough > 0.0)
+            surf.tComp = 1.0 / max(dielectricAlbedo(woL.z, rough, ior, outside), 0.1);
         // The coat sits on the viewer's side of a surface, so it is skipped when seen from inside.
         surf.coat = outside ? materials[mi + 15] : 0.0;
         surf.coatAlpha = max(materials[mi + 16] * materials[mi + 16], 1.0e-3);
@@ -896,7 +928,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
             {
                 wiL = 2.0 * woh * h - woL;
                 ok = wiL.z > 0.0;
-                w = float3(G1(max(wiL.z, 0.0), alpha));
+                w = float3(G1(max(wiL.z, 0.0), alpha) * surf.tComp);
             }
             else
             {
@@ -907,7 +939,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                 refracted = true;
                 lobeCls = 2;
                 // Radiance scales by (n_incident / n_transmitted)^2 across the interface.
-                w = albedo * G1(max(-wiL.z, 0.0), alpha) * r * r;
+                w = albedo * G1(max(-wiL.z, 0.0), alpha) * r * r * surf.tComp;
             }
         }
         else if (u3 < fSel)
