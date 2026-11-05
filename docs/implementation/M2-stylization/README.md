@@ -14,7 +14,7 @@
 | 7 | Stylization Pass（一次ヒット Hybrid） | REQ-STY-007 | 進行中（`verion-stylization` クレートに、AOV から最終色を合成する Pass（デノイズ抜き）を追加。層は材質に書いた順に適用する（ToonRamp・ShadowPalette・RimLight・StylizedSpecular と `gi`）。ramp は光ごとの cosθ × 可視性で段階化する（lighting AOV に光ごとのスロットを持つ）。`render-cli --mode stylized` で接続済み。Toon の見た目は実画像で確認済み（点光源・太陽つき HDRI）。デノイズ（項目 8）は未着手） |
 | 8 | デノイズ（OIDN / MetalFX の選定を ADR に記録） | REQ-ACC-001 | 未着手 |
 | 9 | Viewer の GUI 技術を決める | REQ-VIEW-002 | 済（winit + egui。ADR-0012） |
-| 10 | 最小 Viewer（累積・AOV 切替・パラメータ変更→再累積） | REQ-VIEW-002 | 未着手 |
+| 10 | 最小 Viewer（累積・AOV 切替・パラメータ変更→再累積） | REQ-VIEW-002 | 進行中（`verion-viewer` クレート（`viewer scene.gltf`）。累積表示（プログレスバー付き）、AOV 切替（Beauty・Albedo・Normal・Depth）、Stylized 切替と色調整スライダ、多重散乱の切替→再累積。表示は egui テクスチャ（ADR-0012）。未着手: 材質の Stylization パラメータ編集 UI、カメラ操作、解像度のウィンドウ追従。Stylization は後処理なので再累積は要らない） |
 | 11 | Stylization 評価の初期版（Art Direction 一致・デノイズによる消失） | REQ-QA-003 | 未着手 |
 | 12 | 写実材質の拡充（多重散乱補償・clearcoat・sheen・Dispersion の RGB 近似） | REQ-CORE-003 | 進行中（多重散乱補償は済: 金属の鏡面に係数を掛ける方式で、白炉が 1 に戻る。E の表は `scripts/gen_ggx_albedo.py` で生成。既定で有効、`render-cli --no-multiscatter` と `Renderer::set_multiscatter` で切替。clearcoat・sheen・Dispersion は未着手） |
 | 13 | PostProcess の枠と最小の色調整 | REQ-STY-011 | 済（`verion-stylization::postprocess` に `PostFrame`・`outline`・`color_grade`（ゲイン・彩度・ホワイトバランス）。色調整は `render-cli --exposure / --saturation / --white-balance`（`--mode stylized` のみ）。EXR には非物理の印（`physical` = false）だけを残し、適用した値は残していない） |
