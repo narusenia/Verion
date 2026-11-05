@@ -2,7 +2,9 @@
 //! docs/specifications/gltf-stylization-extension.md).
 
 use gltf::json::Value;
-use verion_scene::{ColorSpace, HybridSurface, StylizationLayer, ToonRamp};
+use verion_scene::{
+    ColorAdjust, ColorSpace, HybridSurface, ShadowPalette, StylizationLayer, ToonRamp,
+};
 
 pub const NAME: &str = "VERION_materials_stylization";
 
@@ -16,7 +18,7 @@ pub fn parse(
     let mut layers = Vec::new();
     for key in root
         .keys()
-        .filter(|k| !["hybridSurface", "toonRamp"].contains(&k.as_str()))
+        .filter(|k| !["hybridSurface", "toonRamp", "shadowPalette"].contains(&k.as_str()))
     {
         warnings.push(format!("unknown property {key}"));
     }
@@ -67,10 +69,52 @@ pub fn parse(
             light_wrap: number(o.get("lightWrap"), 0.0, "toonRamp.lightWrap")?,
         }));
     }
+    if let Some(s) = root.get("shadowPalette") {
+        let o = s.as_object().ok_or("shadowPalette must be an object")?;
+        warn_unknown(
+            "shadowPalette",
+            o.keys(),
+            &["direct", "indirect"],
+            &mut warnings,
+        );
+        layers.push(StylizationLayer::ShadowPalette(ShadowPalette {
+            direct: adjust(o.get("direct"), "shadowPalette.direct", &mut warnings)?,
+            indirect: adjust(o.get("indirect"), "shadowPalette.indirect", &mut warnings)?,
+        }));
+    }
     for layer in &layers {
         layer.validate().map_err(|e| format!("{e:?}"))?;
     }
     Ok((layers, warnings))
+}
+
+fn adjust(
+    v: Option<&Value>,
+    what: &str,
+    warnings: &mut Vec<String>,
+) -> Result<ColorAdjust, String> {
+    let Some(v) = v else {
+        return Ok(ColorAdjust::default());
+    };
+    let o = v
+        .as_object()
+        .ok_or_else(|| format!("{what} must be an object"))?;
+    warn_unknown(
+        what,
+        o.keys(),
+        &["hueShift", "saturation", "value"],
+        warnings,
+    );
+    let d = ColorAdjust::default();
+    Ok(ColorAdjust {
+        hue_shift: number(o.get("hueShift"), d.hue_shift, &format!("{what}.hueShift"))?,
+        saturation: number(
+            o.get("saturation"),
+            d.saturation,
+            &format!("{what}.saturation"),
+        )?,
+        value: number(o.get("value"), d.value, &format!("{what}.value"))?,
+    })
 }
 
 fn number(v: Option<&Value>, default: f32, what: &str) -> Result<f32, String> {
@@ -129,6 +173,26 @@ mod tests {
             (vec![0.5], 0.1, 0.0)
         );
         assert_eq!(t.palette[1], [1.0; 3]);
+    }
+
+    #[test]
+    fn reads_the_shadow_palette_with_defaults() {
+        let (layers, warnings) =
+            parse_str(r#"{"shadowPalette":{"direct":{"hueShift":-20,"value":0.7}}}"#).unwrap();
+        assert!(warnings.is_empty());
+        let StylizationLayer::ShadowPalette(s) = &layers[0] else {
+            panic!()
+        };
+        assert_eq!(
+            s.direct,
+            ColorAdjust {
+                hue_shift: -20.0,
+                saturation: 1.0,
+                value: 0.7
+            }
+        );
+        assert_eq!(s.indirect, ColorAdjust::default());
+        assert!(parse_str(r#"{"shadowPalette":{"indirect":{"hueShift":200}}}"#).is_err());
     }
 
     #[test]
