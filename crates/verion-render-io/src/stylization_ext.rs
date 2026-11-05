@@ -3,7 +3,7 @@
 
 use gltf::json::Value;
 use verion_scene::{
-    ColorAdjust, ColorSpace, HybridSurface, ShadowPalette, StylizationLayer, ToonRamp,
+    ColorAdjust, ColorSpace, HybridSurface, RimLight, ShadowPalette, StylizationLayer, ToonRamp,
 };
 
 pub const NAME: &str = "VERION_materials_stylization";
@@ -16,10 +16,9 @@ pub fn parse(
     let root = value.as_object().ok_or("must be an object")?;
     let mut warnings = Vec::new();
     let mut layers = Vec::new();
-    for key in root
-        .keys()
-        .filter(|k| !["hybridSurface", "toonRamp", "shadowPalette"].contains(&k.as_str()))
-    {
+    for key in root.keys().filter(|k| {
+        !["hybridSurface", "toonRamp", "shadowPalette", "rimLight"].contains(&k.as_str())
+    }) {
         warnings.push(format!("unknown property {key}"));
     }
     if let Some(h) = root.get("hybridSurface") {
@@ -51,16 +50,7 @@ pub fn parse(
             .and_then(Value::as_array)
             .ok_or("toonRamp.palette is required and must be an array")?
             .iter()
-            .map(|c| {
-                let c = c.as_array().filter(|c| c.len() == 3);
-                let c = c.ok_or("toonRamp.palette entries must be [r, g, b]")?;
-                let rgb: [f32; 3] =
-                    std::array::from_fn(|i| c[i].as_f64().unwrap_or(f64::NAN) as f32);
-                if rgb.iter().any(|v| v.is_nan()) {
-                    return Err("toonRamp.palette entries must be numbers".to_string());
-                }
-                Ok(ColorSpace::LinearRec709.convert(space, rgb))
-            })
+            .map(|c| rgb(c, "toonRamp.palette entries", space))
             .collect::<Result<Vec<_>, _>>()?;
         layers.push(StylizationLayer::ToonRamp(ToonRamp {
             thresholds,
@@ -80,6 +70,23 @@ pub fn parse(
         layers.push(StylizationLayer::ShadowPalette(ShadowPalette {
             direct: adjust(o.get("direct"), "shadowPalette.direct", &mut warnings)?,
             indirect: adjust(o.get("indirect"), "shadowPalette.indirect", &mut warnings)?,
+        }));
+    }
+    if let Some(r) = root.get("rimLight") {
+        let o = r.as_object().ok_or("rimLight must be an object")?;
+        let known = ["color", "width", "feather", "followLight", "strength"];
+        warn_unknown("rimLight", o.keys(), &known, &mut warnings);
+        let d = RimLight::default();
+        let get = |k: &str, default| number(o.get(k), default, &format!("rimLight.{k}"));
+        layers.push(StylizationLayer::RimLight(RimLight {
+            color: match o.get("color") {
+                Some(c) => rgb(c, "rimLight.color", space)?,
+                None => d.color,
+            },
+            width: get("width", d.width)?,
+            feather: get("feather", d.feather)?,
+            follow_light: get("followLight", d.follow_light)?,
+            strength: get("strength", d.strength)?,
         }));
     }
     for layer in &layers {
@@ -115,6 +122,17 @@ fn adjust(
         )?,
         value: number(o.get("value"), d.value, &format!("{what}.value"))?,
     })
+}
+
+/// A linear Rec.709 `[r, g, b]` converted to the working space.
+fn rgb(v: &Value, what: &str, space: ColorSpace) -> Result<[f32; 3], String> {
+    let c = v.as_array().filter(|c| c.len() == 3);
+    let c = c.ok_or_else(|| format!("{what} must be [r, g, b]"))?;
+    let rgb: [f32; 3] = std::array::from_fn(|i| c[i].as_f64().unwrap_or(f64::NAN) as f32);
+    if rgb.iter().any(|v| v.is_nan()) {
+        return Err(format!("{what} must be numbers"));
+    }
+    Ok(ColorSpace::LinearRec709.convert(space, rgb))
 }
 
 fn number(v: Option<&Value>, default: f32, what: &str) -> Result<f32, String> {
@@ -193,6 +211,28 @@ mod tests {
         );
         assert_eq!(s.indirect, ColorAdjust::default());
         assert!(parse_str(r#"{"shadowPalette":{"indirect":{"hueShift":200}}}"#).is_err());
+    }
+
+    #[test]
+    fn reads_the_rim_light_with_defaults() {
+        let (layers, warnings) = parse_str(r#"{"rimLight":{"width":0.5}}"#).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(
+            layers,
+            [StylizationLayer::RimLight(RimLight {
+                width: 0.5,
+                ..Default::default()
+            })]
+        );
+        let (layers, _) = parse_str(r#"{"rimLight":{"color":[0.5,0.25,0],"strength":2}}"#).unwrap();
+        let StylizationLayer::RimLight(r) = &layers[0] else {
+            panic!()
+        };
+        assert_eq!((r.color, r.strength), ([0.5, 0.25, 0.0], 2.0));
+        assert!(parse_str(r#"{"rimLight":{"color":[1,1]}}"#).is_err());
+        assert!(parse_str(r#"{"rimLight":{"color":[1,-1,1]}}"#).is_err());
+        assert!(parse_str(r#"{"rimLight":{"strength":-1}}"#).is_err());
+        assert!(parse_str(r#"{"rimLight":{"followLight":2}}"#).is_err());
     }
 
     #[test]
