@@ -420,6 +420,7 @@ mod imp {
                 albedo: Some(&aov.albedo),
                 depth: Some(&aov.depth),
                 object_id: Some(&aov.object_id),
+                lighting: None,
             },
             info: RenderInfo {
                 physical: true,

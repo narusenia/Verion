@@ -73,6 +73,10 @@ struct Args {
     /// Primaries of the output EXR (default: the working space)
     #[arg(long, value_enum)]
     output_space: Option<Space>,
+    /// Also write the first-hit lighting split (DirectDiffuse, IndirectDiffuse, Specular, Transmission,
+    /// Emission, Visibility); costs about 70 bytes of GPU memory per pixel
+    #[arg(long)]
+    lighting_aovs: bool,
     /// Write timing metrics as JSON
     #[arg(long)]
     metrics: Option<PathBuf>,
@@ -129,7 +133,9 @@ const CHUNK_SPP: u32 = 8;
 fn run(args: &Args) -> Result<(), String> {
     use indicatif::{ProgressBar, ProgressStyle};
     use verion_gpu_metal::{MetalContext, Renderer};
-    use verion_render_io::{ExrAovs, ExrFrame, RenderInfo, load_gltf_in, load_hdri, write_exr};
+    use verion_render_io::{
+        ExrAovs, ExrFrame, ExrLighting, RenderInfo, load_gltf_in, load_hdri, write_exr,
+    };
     use verion_scene::{Camera, Light, OutputTransform};
 
     if args.width == 0 || args.height == 0 || args.spp == 0 {
@@ -161,9 +167,12 @@ fn run(args: &Args) -> Result<(), String> {
 
     let (w, h) = (args.width, args.height);
     let t = Instant::now();
-    let mut acc = renderer
-        .new_accumulation(w, h)
-        .map_err(|e| format!("render: {e:?}"))?;
+    let mut acc = if args.lighting_aovs {
+        renderer.new_accumulation_with_lighting(w, h)
+    } else {
+        renderer.new_accumulation(w, h)
+    }
+    .map_err(|e| format!("render: {e:?}"))?;
     // Hidden automatically when stderr is not a terminal.
     let bar = ProgressBar::new(args.spp as u64)
         .with_style(ProgressStyle::with_template("{bar:40} {pos}/{len} spp ({eta})").unwrap());
@@ -177,6 +186,7 @@ fn run(args: &Args) -> Result<(), String> {
     bar.finish_and_clear();
     let gpu_s = acc.gpu_seconds();
     let beauty = acc.mean();
+    let lighting = acc.lighting();
     let render_s = t.elapsed().as_secs_f64();
 
     let t = Instant::now();
@@ -199,6 +209,14 @@ fn run(args: &Args) -> Result<(), String> {
             albedo: Some(&aov.albedo),
             depth: Some(&aov.depth),
             object_id: Some(&aov.object_id),
+            lighting: lighting.as_ref().map(|l| ExrLighting {
+                direct_diffuse: &l.direct_diffuse,
+                indirect_diffuse: &l.indirect_diffuse,
+                specular: &l.specular,
+                transmission: &l.transmission,
+                emission: &l.emission,
+                visibility: &l.visibility,
+            }),
         },
         info: RenderInfo {
             physical: args.mode.physical(),

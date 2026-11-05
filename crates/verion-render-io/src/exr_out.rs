@@ -25,6 +25,20 @@ pub struct ExrAovs<'a> {
     pub depth: Option<&'a [f32]>,
     /// Instance id plus one (0 = background), written as the 32-bit integer channel `ObjectId`.
     pub object_id: Option<&'a [u32]>,
+    pub lighting: Option<ExrLighting<'a>>,
+}
+
+/// First-hit lighting split (REQ-STY-006). The radiance parts are in the frame's working space,
+/// converted to the output primaries like Albedo, and are not tone mapped.
+#[derive(Clone, Copy, Debug)]
+pub struct ExrLighting<'a> {
+    pub direct_diffuse: &'a [[f32; 3]],
+    pub indirect_diffuse: &'a [[f32; 3]],
+    pub specular: &'a [[f32; 3]],
+    pub transmission: &'a [[f32; 3]],
+    pub emission: &'a [[f32; 3]],
+    /// Unshadowed share of the direct light, written as `Visibility.V`.
+    pub visibility: &'a [f32],
 }
 
 /// One rendered frame. Pixels are row-major from the top-left, radiance in `working_space`.
@@ -85,6 +99,18 @@ pub fn write_exr(
         || a.albedo.is_some_and(|p| p.len() != size)
         || a.depth.is_some_and(|p| p.len() != size)
         || a.object_id.is_some_and(|p| p.len() != size)
+        || a.lighting.is_some_and(|l| {
+            [
+                l.direct_diffuse,
+                l.indirect_diffuse,
+                l.specular,
+                l.transmission,
+                l.emission,
+            ]
+            .iter()
+            .any(|p| p.len() != size)
+                || l.visibility.len() != size
+        })
     {
         return bad("pixel count does not match width x height");
     }
@@ -120,6 +146,29 @@ pub fn write_exr(
                 .enumerate()
                 .map(|(i, n)| channel(n, &albedo, i)),
         );
+    }
+    if let Some(l) = a.lighting {
+        let primaries = OutputTransform::linear(transform.target);
+        let parts = [
+            ("DirectDiffuse", l.direct_diffuse),
+            ("IndirectDiffuse", l.indirect_diffuse),
+            ("Specular", l.specular),
+            ("Transmission", l.transmission),
+            ("Emission", l.emission),
+        ];
+        for (name, part) in parts {
+            let part: Vec<[f32; 3]> = part
+                .iter()
+                .map(|&p| primaries.apply(frame.working_space, p))
+                .collect();
+            for (i, c) in ["R", "G", "B"].iter().enumerate() {
+                channels.push(channel(&format!("{name}.{c}"), &part, i));
+            }
+        }
+        channels.push(AnyChannel::new(
+            "Visibility.V",
+            FlatSamples::F32(l.visibility.to_vec()),
+        ));
     }
     if let Some(depth) = a.depth {
         channels.push(AnyChannel::new("Z", FlatSamples::F32(depth.to_vec())));
@@ -251,6 +300,7 @@ mod tests {
             albedo: Some(&albedo),
             depth: Some(&[3.0, 0.0]),
             object_id: Some(&[7, 0]),
+            ..Default::default()
         };
         let path = temp("ids.exr");
         let t = OutputTransform::linear(ColorSpace::LinearRec709);
@@ -312,6 +362,40 @@ mod tests {
         let two = [[0.0; 3]; 2];
         assert!(matches!(
             write_exr(&path, &frame(&two, Some(&one)), &t),
+            Err(ExrError::BadFrame(_))
+        ));
+    }
+
+    #[test]
+    fn writes_lighting_parts() {
+        let beauty = [[0.0; 3]; 2];
+        let part = |v: f32| [[v, 2.0 * v, 3.0 * v]; 2];
+        let (dd, id, sp, tr, em) = (part(1.0), part(2.0), part(3.0), part(4.0), part(5.0));
+        let mut f = frame(&beauty, None);
+        f.aovs.lighting = Some(ExrLighting {
+            direct_diffuse: &dd,
+            indirect_diffuse: &id,
+            specular: &sp,
+            transmission: &tr,
+            emission: &em,
+            visibility: &[0.25, 1.0],
+        });
+        let path = temp("lighting.exr");
+        let t = OutputTransform::linear(ColorSpace::LinearRec709);
+        write_exr(&path, &f, &t).unwrap();
+        let img = read_back(&path);
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(values(&img, "DirectDiffuse.G"), [2.0, 2.0]);
+        assert_eq!(values(&img, "IndirectDiffuse.R"), [2.0, 2.0]);
+        assert_eq!(values(&img, "Specular.B"), [9.0, 9.0]);
+        assert_eq!(values(&img, "Transmission.R"), [4.0, 4.0]);
+        assert_eq!(values(&img, "Emission.R"), [5.0, 5.0]);
+        assert_eq!(values(&img, "Visibility.V"), [0.25, 1.0]);
+
+        f.aovs.lighting.as_mut().unwrap().visibility = &[1.0];
+        assert!(matches!(
+            write_exr(&path, &f, &t),
             Err(ExrError::BadFrame(_))
         ));
     }
