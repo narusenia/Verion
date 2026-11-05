@@ -295,10 +295,26 @@ impl RimLight {
     }
 }
 
+/// Outline of a `StylizedSpecular` highlight. Ellipse and image shapes are measured in a frame
+/// that lies in the surface and lines up with the screen (x toward the camera's right).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum HighlightShape {
+    /// A round band: `1 - N·H <= size`.
+    #[default]
+    Band,
+    /// A band stretched `stretch` times along the axis `angle` degrees counter-clockwise from the
+    /// screen's right (`stretch` in `0.1..=10`, `angle` in `-180..=180`).
+    Ellipse { stretch: f32, angle: f32 },
+    /// A hand-drawn shape: the image's color is the highlight (black outside), centred on the
+    /// highlight, its width spanning the round band of `size`, rotated by `angle` degrees.
+    Image { image: ImageId, angle: f32 },
+}
+
 /// Per-light banded highlight that replaces the physical specular, blended by
-/// `HybridSurface::specular` (REQ-STY-004). Band shape only; other shapes arrive later.
+/// `HybridSurface::specular` (REQ-STY-004).
 #[derive(Clone, Debug, PartialEq)]
 pub struct StylizedSpecular {
+    pub shape: HighlightShape,
     /// Highlight size, in `0..=1`: the region where `1 - N·H <= size`.
     pub size: f32,
     /// Soft edge width, in `0..=1`.
@@ -315,6 +331,7 @@ pub struct StylizedSpecular {
 impl Default for StylizedSpecular {
     fn default() -> Self {
         Self {
+            shape: HighlightShape::Band,
             size: 0.05,
             feather: 0.02,
             color: [1.0; 3],
@@ -334,6 +351,23 @@ impl StylizedSpecular {
         }
         unit_range("specular.size", self.size)?;
         unit_range("specular.feather", self.feather)?;
+        let angle_ok = |a: f32| (-180.0..=180.0).contains(&a);
+        match self.shape {
+            HighlightShape::Band => {}
+            HighlightShape::Ellipse { stretch, angle } => {
+                if !(0.1..=10.0).contains(&stretch) {
+                    return Err(StylizationError::OutOfRange("specular.stretch"));
+                }
+                if !angle_ok(angle) {
+                    return Err(StylizationError::OutOfRange("specular.angle"));
+                }
+            }
+            HighlightShape::Image { angle, .. } => {
+                if !angle_ok(angle) {
+                    return Err(StylizationError::OutOfRange("specular.angle"));
+                }
+            }
+        }
         self.ramp.as_ref().map_or(Ok(()), ToonRamp::validate)
     }
 }

@@ -3,8 +3,8 @@
 
 use gltf::json::Value;
 use verion_scene::{
-    ColorAdjust, ColorSpace, HybridSurface, ImageId, MatCap, OutlineStyle, RimLight, ShadowPalette,
-    StylizationLayer, StylizedSpecular, ToonRamp,
+    ColorAdjust, ColorSpace, HighlightShape, HybridSurface, ImageId, MatCap, OutlineStyle,
+    RimLight, ShadowPalette, StylizationLayer, StylizedSpecular, ToonRamp,
 };
 
 pub const NAME: &str = "VERION_materials_stylization";
@@ -91,26 +91,57 @@ pub fn parse(
     }
     if let Some(s) = root.get("stylizedSpecular") {
         let o = s.as_object().ok_or("stylizedSpecular must be an object")?;
-        let known = ["shape", "size", "feather", "color", "strength", "ramp"];
+        let known = [
+            "shape", "size", "feather", "color", "strength", "ramp", "stretch", "angle", "texture",
+        ];
         warn_unknown("stylizedSpecular", o.keys(), &known, &mut warnings);
-        if o.get("shape").is_some_and(|v| v.as_str() != Some("band")) {
-            return Err("stylizedSpecular.shape must be \"band\"".into());
-        }
         let d = StylizedSpecular::default();
         let get = |k: &str, default| number(o.get(k), default, &format!("stylizedSpecular.{k}"));
-        layers.push(StylizationLayer::StylizedSpecular(StylizedSpecular {
-            size: get("size", d.size)?,
-            feather: get("feather", d.feather)?,
-            color: match o.get("color") {
-                Some(c) => rgb(c, "stylizedSpecular.color", space)?,
-                None => d.color,
-            },
-            strength: get("strength", d.strength)?,
-            ramp: match o.get("ramp") {
-                Some(r) => Some(toon_ramp(r, "stylizedSpecular.ramp", space, &mut warnings)?),
-                None => None,
-            },
-        }));
+        let angle = get("angle", 0.0)?;
+        let shape = match o.get("shape").map(|v| v.as_str()) {
+            None | Some(Some("band")) => Some(HighlightShape::Band),
+            Some(Some("ellipse")) => Some(HighlightShape::Ellipse {
+                stretch: get("stretch", 2.0)?,
+                angle,
+            }),
+            Some(Some("texture")) => {
+                let index = o
+                    .get("texture")
+                    .and_then(Value::as_object)
+                    .and_then(|t| t.get("index"))
+                    .and_then(Value::as_u64)
+                    .ok_or("stylizedSpecular.texture.index is required for shape \"texture\"")?;
+                match resolve(index as usize)? {
+                    Some(image) => Some(HighlightShape::Image { image, angle }),
+                    None => {
+                        warnings
+                            .push("stylizedSpecular ignored: its texture could not be used".into());
+                        None
+                    }
+                }
+            }
+            _ => {
+                return Err(
+                    "stylizedSpecular.shape must be \"band\", \"ellipse\" or \"texture\"".into(),
+                );
+            }
+        };
+        if let Some(shape) = shape {
+            layers.push(StylizationLayer::StylizedSpecular(StylizedSpecular {
+                shape,
+                size: get("size", d.size)?,
+                feather: get("feather", d.feather)?,
+                color: match o.get("color") {
+                    Some(c) => rgb(c, "stylizedSpecular.color", space)?,
+                    None => d.color,
+                },
+                strength: get("strength", d.strength)?,
+                ramp: match o.get("ramp") {
+                    Some(r) => Some(toon_ramp(r, "stylizedSpecular.ramp", space, &mut warnings)?),
+                    None => None,
+                },
+            }));
+        }
     }
     if let Some(v) = root.get("outlineStyle") {
         let o = v.as_object().ok_or("outlineStyle must be an object")?;
@@ -379,7 +410,40 @@ mod tests {
         // The ramp follows the toonRamp rules: one palette color per band.
         let short = r#"{"stylizedSpecular":{"ramp":{"thresholds":[0.5],"palette":[[1,1,1]]}}}"#;
         assert!(parse_str(short).is_err());
-        assert!(parse_str(r#"{"stylizedSpecular":{"shape":"ellipse"}}"#).is_err());
+        assert!(parse_str(r#"{"stylizedSpecular":{"shape":"star"}}"#).is_err());
+    }
+
+    #[test]
+    fn reads_the_highlight_shapes() {
+        let shape = |s: &str| {
+            let (layers, _) = parse_str(s).unwrap();
+            let [StylizationLayer::StylizedSpecular(sp)] = &layers[..] else {
+                panic!()
+            };
+            sp.shape
+        };
+        assert_eq!(
+            shape(r#"{"stylizedSpecular":{"shape":"ellipse"}}"#),
+            HighlightShape::Ellipse {
+                stretch: 2.0,
+                angle: 0.0
+            }
+        );
+        assert_eq!(
+            shape(r#"{"stylizedSpecular":{"shape":"ellipse","stretch":4,"angle":-30}}"#),
+            HighlightShape::Ellipse {
+                stretch: 4.0,
+                angle: -30.0
+            }
+        );
+        let s = r#"{"stylizedSpecular":{"shape":"texture","texture":{"index":0},"angle":45}}"#;
+        assert!(matches!(
+            shape(s),
+            HighlightShape::Image { angle: 45.0, .. }
+        ));
+        assert!(parse_str(r#"{"stylizedSpecular":{"shape":"texture"}}"#).is_err());
+        assert!(parse_str(r#"{"stylizedSpecular":{"shape":"ellipse","stretch":20}}"#).is_err());
+        assert!(parse_str(r#"{"stylizedSpecular":{"shape":"ellipse","angle":200}}"#).is_err());
         assert!(parse_str(r#"{"stylizedSpecular":{"size":2}}"#).is_err());
         assert!(parse_str(r#"{"stylizedSpecular":{"color":[1,-1,1]}}"#).is_err());
     }

@@ -78,11 +78,14 @@
 
 ### `stylizedSpecular`（REQ-STY-004）
 
-鏡面ハイライトを、光ごとの帯状の形に置き換える。非物理。v0.1 の形状は帯状のみ。
+鏡面ハイライトを、光ごとの形（丸・楕円・画像）に置き換える。非物理。
 
 | プロパティ | 型 | 範囲 | 既定 | 内容 |
 |---|---|---|---|---|
-| `shape` | string | `"band"` のみ | `"band"` | 形状の種類。ほかの値は取り込みエラー（楕円・手描き風は後続） |
+| `shape` | string | `"band"`・`"ellipse"`・`"texture"` | `"band"` | 形状の種類。ほかの値は取り込みエラー |
+| `stretch` | number | 0.1〜10 | 2 | `"ellipse"` の伸ばす倍率（長軸 ÷ 短軸） |
+| `angle` | number | −180〜180（度） | 0 | `"ellipse"` の長軸と `"texture"` の画像の向き。画面の右から反時計回り |
+| `texture` | textureInfo | `index` 必須（`texCoord` は無視） | なし | `"texture"` の形の画像（手描き風）。sRGB で、作業色空間へ変換する |
 | `size` | number | 0〜1 | 0.05 | ハイライトの大きさ。`1 − N·H` が `size` 以下の範囲 |
 | `feather` | number | 0〜1 | 0.02 | 縁のぼかし幅 |
 | `color` | number[3] | 各値 0 以上の有限値 | [1, 1, 1] | ハイライトの色（線形 Rec.709） |
@@ -90,6 +93,8 @@
 | `ramp` | object | `toonRamp` と同じ形 | なし | ハイライトを複数の段にする（芯と暈など）。省略すると 1 本の帯 |
 
 - すべて省略できる。`hybridSurface.specular` が 0 より大きいときだけ効く
+- 形の測り方: `"band"` は `1 − N·H`。`"ellipse"` と `"texture"` は、H を面に投影した位置 (x, y) を、面上で画面の右と上にそろえた座標で測る（中心付近で `0.5·(x² + y²) ≈ 1 − N·H`）。`"ellipse"` は `angle` だけ回した座標で `0.5·((x/stretch)² + y²)` を `1 − N·H` の代わりに使う（`size`・`feather`・`ramp` はそのまま効く）
+- `"texture"` は、画像の幅が丸い帯（`size`）の直径に合うように中心へ置き、`angle` だけ回す。画像の色がそのままハイライトになり（画像の外は 0）、`feather` と `ramp` は効かない。画像が使えないと警告を出し、層を無視する
 - `ramp` があるとき、帯の代わりに段で決める。応答は `clamp(1 − (1 − N·H) / size, 0, 1)`（ハイライトの中心が 1、`size` の縁が 0）で、`thresholds` はこの値に対する境界。`palette` はハイライトの色の乗数で、`palette[0]` がハイライトの外側の値（通常は [0, 0, 0]）。`feather` と `lightWrap` も `toonRamp` と同じ意味で効く。`size` は応答の範囲を決める
 
 ### `outlineStyle`（REQ-STY-009 の最小版）
@@ -156,7 +161,7 @@
 - `thresholds` が厳密に増加する
 - `palette` の長さが `thresholds` の長さ + 1 になる
 - `rimLight.color` と `rimLight.strength` が 0 以上の有限値になる
-- `stylizedSpecular.color` と `stylizedSpecular.strength` が 0 以上の有限値になる。`stylizedSpecular.shape` が `"band"` である
+- `stylizedSpecular.color` と `stylizedSpecular.strength` が 0 以上の有限値になる。`stylizedSpecular.shape` が `"band"`・`"ellipse"`・`"texture"` のどれかで、`"texture"` のときは `texture.index` がある。`stretch` が 0.1〜10、`angle` が −180〜180
 - `stylizedSpecular.ramp` は `toonRamp` と同じ規則で検査する
 - `outlineStyle.color` が 0 以上の有限値になる
 

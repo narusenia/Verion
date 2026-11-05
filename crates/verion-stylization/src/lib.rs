@@ -12,8 +12,8 @@ mod postprocess;
 pub use postprocess::{ColorGrade, PostFrame, color_grade, outline};
 
 use verion_scene::{
-    Camera, ColorAdjust, HybridSurface, Image, LIGHT_SLOTS, Material, RimLight, ShadowPalette,
-    StylizationLayer, StylizedSpecular, ToonRamp,
+    Camera, ColorAdjust, HighlightShape, HybridSurface, Image, LIGHT_SLOTS, Material, RimLight,
+    ShadowPalette, StylizationLayer, StylizedSpecular, ToonRamp,
 };
 
 /// The first-hit lighting split of one pixel, in the working space (see `LightingAovs`).
@@ -25,6 +25,9 @@ pub struct PixelInput {
     pub view: [f32; 3],
     /// The normal's components along the camera's right and up axes, for the `MatCap` lookup.
     pub normal_view: [f32; 2],
+    /// World-space unit vectors of the camera's right and up axes; they orient shaped highlights.
+    pub camera_right: [f32; 3],
+    pub camera_up: [f32; 3],
     /// Base color at the hit (the Albedo AOV).
     pub albedo: [f32; 3],
     /// The material's mean indirect diffuse divided by albedo over the frame (see
@@ -214,7 +217,7 @@ pub fn stylize_with(layers: &[StylizationLayer], p: &PixelInput, images: &[Image
                 reflection_kept *= 1.0 - k;
             }
             StylizationLayer::StylizedSpecular(sp) => {
-                let st = stylized_specular(sp, p);
+                let st = stylized_specular_with(sp, p, images);
                 let k = hybrid.specular;
                 specular = std::array::from_fn(|i| specular[i] + (st[i] - specular[i]) * k);
             }
@@ -229,9 +232,19 @@ pub fn stylize_with(layers: &[StylizationLayer], p: &PixelInput, images: &[Image
 /// The `MatCap` image at the pixel's view-space normal (`u = 0.5 + 0.5 n_x`, `v = 0.5 - 0.5 n_y`),
 /// bilinear, times `lerp(1, albedo, mc_albedo)`.
 fn matcap_color(mc_albedo: f32, image: &Image, p: &PixelInput) -> [f32; 3] {
+    let c = bilinear(
+        image,
+        0.5 + 0.5 * p.normal_view[0],
+        0.5 - 0.5 * p.normal_view[1],
+    );
+    std::array::from_fn(|i| c[i] * (1.0 + (p.albedo[i] - 1.0) * mc_albedo))
+}
+
+/// Bilinear lookup at `u, v` in `0..=1` (`v = 0` is the top row), clamped to the edge.
+fn bilinear(image: &Image, u: f32, v: f32) -> [f32; 3] {
     let (w, h) = (image.width() as usize, image.height() as usize);
-    let x = ((0.5 + 0.5 * p.normal_view[0]) * w as f32 - 0.5).clamp(0.0, (w - 1) as f32);
-    let y = ((0.5 - 0.5 * p.normal_view[1]) * h as f32 - 0.5).clamp(0.0, (h - 1) as f32);
+    let x = (u * w as f32 - 0.5).clamp(0.0, (w - 1) as f32);
+    let y = (v * h as f32 - 0.5).clamp(0.0, (h - 1) as f32);
     let (x0, y0) = (x as usize, y as usize);
     let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
     let (fx, fy) = (x - x0 as f32, y - y0 as f32);
@@ -239,8 +252,7 @@ fn matcap_color(mc_albedo: f32, image: &Image, p: &PixelInput) -> [f32; 3] {
     std::array::from_fn(|c| {
         let top = px[y0 * w + x0][c] + (px[y0 * w + x1][c] - px[y0 * w + x0][c]) * fx;
         let bottom = px[y1 * w + x0][c] + (px[y1 * w + x1][c] - px[y1 * w + x0][c]) * fx;
-        let tint = 1.0 + (p.albedo[c] - 1.0) * mc_albedo;
-        (top + (bottom - top) * fy) * tint
+        top + (bottom - top) * fy
     })
 }
 
@@ -256,17 +268,52 @@ fn hybrid_of(layers: &[StylizationLayer]) -> HybridSurface {
 }
 
 /// The banded highlights of a `StylizedSpecular` (REQ-STY-004), summed over the light slots: a
-/// slot that carries specular puts a band where the half vector H of its light and the view is
-/// within `size` of the normal (`1 - N·H <= size`), and an unshadowed share of it counts.
-/// Independent of the light's strength.
+/// slot that carries specular puts a highlight where the half vector H of its light and the view is
+/// near the normal, and an unshadowed share of it counts. Independent of the light's strength.
+/// `Band` measures `1 - N·H`; `Ellipse` and `Image` measure H's offset in the surface, in a frame
+/// lined up with the screen (see `HighlightShape`).
 ///
 /// shortcut: a slot that pools several lights (or an area light) has the mean direction, so its
 /// highlight sits where that mean points.
 pub fn stylized_specular(sp: &StylizedSpecular, p: &PixelInput) -> [f32; 3] {
+    stylized_specular_with(sp, p, &[])
+}
+
+/// `stylized_specular` with the scene's images, for the `Image` shape (black when it is missing).
+pub fn stylized_specular_with(sp: &StylizedSpecular, p: &PixelInput, images: &[Image]) -> [f32; 3] {
     let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     if sp.strength == 0.0 || dot(p.normal, p.normal) < 0.5 {
         return [0.0; 3]; // off, or no surface (a zero normal)
     }
+    let n = p.normal;
+    // Surface frame: the camera's right flattened onto the surface, and the normal crossed with it.
+    let tx = {
+        let r = if dot(p.camera_right, p.camera_right) > 0.5 {
+            p.camera_right
+        } else {
+            [1.0, 0.0, 0.0]
+        };
+        let mut t: [f32; 3] = std::array::from_fn(|i| r[i] - n[i] * dot(r, n));
+        if dot(t, t) < 1.0e-8 {
+            t = if n[0].abs() < 0.9 {
+                [1.0, 0.0, 0.0]
+            } else {
+                [0.0, 1.0, 0.0]
+            };
+            t = std::array::from_fn(|i| t[i] - n[i] * dot(t, n));
+        }
+        let l = dot(t, t).sqrt();
+        t.map(|v| v / l)
+    };
+    let ty = [
+        n[1] * tx[2] - n[2] * tx[1],
+        n[2] * tx[0] - n[0] * tx[2],
+        n[0] * tx[1] - n[1] * tx[0],
+    ];
+    let rotate = |x: f32, y: f32, deg: f32| {
+        let (s, c) = deg.to_radians().sin_cos();
+        (c * x + s * y, -s * x + c * y)
+    };
     let mut sum = [0.0f32; 3];
     for k in 0..LIGHT_SLOTS {
         let h: [f32; 3] = std::array::from_fn(|i| p.light_dir[k][i] + p.view[i]);
@@ -275,7 +322,34 @@ pub fn stylized_specular(sp: &StylizedSpecular, p: &PixelInput) -> [f32; 3] {
         if lum(p.light_s[k]) < 1.0e-6 || len2 < 1.0e-8 {
             continue;
         }
-        let x = 1.0 - (dot(p.normal, h) / len2.sqrt()).max(0.0);
+        let hn: [f32; 3] = h.map(|v| v / len2.sqrt());
+        if dot(n, hn) <= 0.0 {
+            continue;
+        }
+        // H's offset in the surface frame; 0.5 * |offset|^2 ~ 1 - N·H near the center.
+        let (ox, oy) = (dot(hn, tx), dot(hn, ty));
+        let x = match sp.shape {
+            HighlightShape::Band => 1.0 - dot(n, hn),
+            HighlightShape::Ellipse { stretch, angle } => {
+                let (a, b) = rotate(ox, oy, angle);
+                0.5 * ((a / stretch).powi(2) + b * b)
+            }
+            HighlightShape::Image { image, angle } => {
+                let Some(img) = images.get(image.index()) else {
+                    continue;
+                };
+                let (a, b) = rotate(ox, oy, angle);
+                // The image's half width is the radius of the round band of `size`.
+                let r = (2.0 * sp.size).sqrt().max(1.0e-4);
+                let (u, v) = (0.5 + 0.5 * a / r, 0.5 - 0.5 * b / r);
+                if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
+                    continue;
+                }
+                let c = bilinear(img, u, v);
+                sum = std::array::from_fn(|i| sum[i] + c[i] * p.light_lit[k]);
+                continue;
+            }
+        };
         let band = match &sp.ramp {
             // Response 1 at the center of the highlight, 0 at the edge `size`.
             Some(ramp) => {
@@ -387,6 +461,8 @@ pub fn stylize_image(materials: &[Material], f: &Frame) -> Vec<[f32; 3]> {
                 normal: f.normal[i],
                 view: view[i],
                 normal_view: [dot3(f.normal[i], right), dot3(f.normal[i], up)],
+                camera_right: right,
+                camera_up: up,
                 albedo: f.albedo[i],
                 ambient: match f.material_id[i] {
                     0 => [0.0; 3],
@@ -533,6 +609,53 @@ mod tests {
         };
         f(&mut s);
         s
+    }
+
+    /// `spec_px` with the light tilted so H leans `deg` degrees toward screen x (`along_x`) or y.
+    fn tilted(deg: f32, along_x: bool) -> PixelInput {
+        let mut p = spec_px();
+        (p.camera_right, p.camera_up) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let (s, c) = (2.0 * deg).to_radians().sin_cos(); // L at twice the angle puts H at `deg`
+        p.light_dir[0] = if along_x { [s, 0.0, c] } else { [0.0, s, c] };
+        p
+    }
+
+    #[test]
+    fn ellipse_highlight_stretches_along_its_axis() {
+        // size 0.05 reaches about 18° for a round band; stretch 3 along x reaches further there only.
+        let s = spec(|s| {
+            s.shape = HighlightShape::Ellipse {
+                stretch: 3.0,
+                angle: 0.0,
+            }
+        });
+        assert_eq!(stylized_specular(&s, &tilted(30.0, true)), [1.0; 3]);
+        assert_eq!(stylized_specular(&s, &tilted(30.0, false)), [0.0; 3]);
+        // Turned 90°, the long axis is screen y.
+        let s = spec(|s| {
+            s.shape = HighlightShape::Ellipse {
+                stretch: 3.0,
+                angle: 90.0,
+            }
+        });
+        assert_eq!(stylized_specular(&s, &tilted(30.0, true)), [0.0; 3]);
+        assert_eq!(stylized_specular(&s, &tilted(30.0, false)), [1.0; 3]);
+    }
+
+    #[test]
+    fn image_highlight_reads_the_picture_around_the_half_vector() {
+        // Left half white, right half black: H leaning toward screen x lands in the black half.
+        let mut scene = verion_scene::Scene::new();
+        let image = scene.add_image(Image::new(2, 1, vec![[1.0; 3], [0.0; 3]]).unwrap());
+        let s = spec(|s| {
+            s.size = 0.1;
+            s.shape = HighlightShape::Image { image, angle: 0.0 }
+        });
+        let at = |deg, x| stylized_specular_with(&s, &tilted(deg, x), scene.images())[0];
+        assert!(at(-15.0, true) > 0.9);
+        assert!(at(15.0, true) < 0.1);
+        assert_eq!(at(60.0, true), 0.0); // outside the picture
+        assert_eq!(stylized_specular(&s, &tilted(-15.0, true)), [0.0; 3]); // no image given
     }
 
     #[test]
