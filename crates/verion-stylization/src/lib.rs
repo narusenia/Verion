@@ -137,7 +137,18 @@ pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
         let flat = p.albedo[i] * p.ambient[i];
         p.indirect_diffuse[i] + (flat - p.indirect_diffuse[i]) * hybrid.gi
     });
-    let mut specular = p.specular;
+    // The physical specular is the direct highlights plus the reflections; only the highlights are
+    // stylized. shortcut: the direct part is rebuilt from the slots (`s * cos * lit`, cos taken at
+    // the slot's mean direction), exact for a single light per slot and approximate for the pooled
+    // area and environment slot, where the BSDF-sampled share stays with the reflections.
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let mut specular: [f32; 3] = std::array::from_fn(|i| {
+        let est: f32 = (0..LIGHT_SLOTS)
+            .map(|k| p.light_s[k][i] * dot(p.normal, p.light_dir[k]).max(0.0) * p.light_lit[k])
+            .sum();
+        est.clamp(0.0, p.specular[i].max(0.0))
+    });
+    let reflections: [f32; 3] = std::array::from_fn(|i| p.specular[i] - specular[i]);
     let mut added = [0.0f32; 3];
     // Layers apply in the order the material lists them, so the same kind may appear twice.
     for layer in layers {
@@ -187,7 +198,8 @@ pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
         }
     }
     std::array::from_fn(|i| {
-        diffuse[i] + indirect[i] + specular[i] + p.transmission[i] + p.emission[i] + added[i]
+        let kept = reflections[i] * (1.0 - hybrid.reflection);
+        diffuse[i] + indirect[i] + specular[i] + kept + p.transmission[i] + p.emission[i] + added[i]
     })
 }
 
@@ -536,7 +548,8 @@ mod tests {
 
     #[test]
     fn specular_blends_with_the_physical_one_by_hybrid_specular() {
-        let mut p = spec_px();
+        let mut p = spec_px(); // the highlight alone: s * cos * lit = 0.2
+        p.light_s[0] = [0.2; 3];
         p.specular = [0.2; 3];
         let at = |k: f32| {
             let l = [
@@ -554,6 +567,37 @@ mod tests {
         // Without HybridSurface the specular stays physical.
         let bare = [StylizationLayer::StylizedSpecular(spec(|_| {}))];
         assert!((stylize(&bare, &p)[0] - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn reflections_survive_the_stylized_highlight_unless_reflection_removes_them() {
+        let mut p = spec_px();
+        p.specular = [0.5; 3]; // 0.1 highlight (s * cos * lit) plus 0.4 of reflections
+        let at = |reflection: f32| {
+            let l = [
+                StylizationLayer::HybridSurface(HybridSurface {
+                    specular: 1.0,
+                    reflection,
+                    ..Default::default()
+                }),
+                StylizationLayer::StylizedSpecular(spec(|_| {})),
+            ];
+            stylize(&l, &p)[0]
+        };
+        assert!((at(0.0) - 1.4).abs() < 1e-6); // band 1.0 + all 0.4 of the reflections
+        assert!((at(0.5) - 1.2).abs() < 1e-6);
+        assert!((at(1.0) - 1.0).abs() < 1e-6); // the old behavior: the highlight alone
+        // A shadowed light's highlight is not counted as direct: the physical value stays whole.
+        let mut dark = p;
+        dark.light_lit[0] = 0.0;
+        assert!(
+            (stylize(
+                &[StylizationLayer::HybridSurface(HybridSurface::TOON)],
+                &dark
+            )[0] - 0.5)
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]

@@ -109,6 +109,9 @@ pub struct HybridSurface {
     pub gi: f32,
     pub shadow: f32,
     pub outline: f32,
+    /// How much of the indirect specular (reflections) is removed; 0 keeps it as rendered. The
+    /// direct highlight is `specular`'s business.
+    pub reflection: f32,
 }
 
 impl HybridSurface {
@@ -119,6 +122,8 @@ impl HybridSurface {
         gi: 1.0,
         shadow: 1.0,
         outline: 1.0,
+        // Reflections stay: nothing stylizes them yet, and removing them flattens glossy surfaces.
+        reflection: 0.0,
     };
 
     fn validate(&self) -> Result<(), StylizationError> {
@@ -128,6 +133,7 @@ impl HybridSurface {
             ("hybrid.gi", self.gi),
             ("hybrid.shadow", self.shadow),
             ("hybrid.outline", self.outline),
+            ("hybrid.reflection", self.reflection),
         ] {
             unit_range(name, v)?;
         }

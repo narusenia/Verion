@@ -254,6 +254,7 @@ impl App {
                         (&mut h.gi, "gi"),
                         (&mut h.shadow, "shadow"),
                         (&mut h.outline, "outline"),
+                        (&mut h.reflection, "reflection"),
                     ] {
                         unit(ui, v, name);
                     }

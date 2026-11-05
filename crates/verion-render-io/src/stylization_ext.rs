@@ -30,7 +30,14 @@ pub fn parse(
     }
     if let Some(h) = root.get("hybridSurface") {
         let o = h.as_object().ok_or("hybridSurface must be an object")?;
-        let known = ["diffuse", "specular", "gi", "shadow", "outline"];
+        let known = [
+            "diffuse",
+            "specular",
+            "gi",
+            "shadow",
+            "outline",
+            "reflection",
+        ];
         warn_unknown("hybridSurface", o.keys(), &known, &mut warnings);
         let get = |k: &str| number(o.get(k), 0.0, &format!("hybridSurface.{k}"));
         layers.push(StylizationLayer::HybridSurface(HybridSurface {
@@ -39,6 +46,7 @@ pub fn parse(
             gi: get("gi")?,
             shadow: get("shadow")?,
             outline: get("outline")?,
+            reflection: get("reflection")?,
         }));
     }
     if let Some(t) = root.get("toonRamp") {
@@ -230,7 +238,7 @@ mod tests {
     #[test]
     fn reads_both_layers() {
         let (layers, warnings) = parse_str(
-            r#"{"hybridSurface":{"diffuse":1},
+            r#"{"hybridSurface":{"diffuse":1,"reflection":0.25},
                 "toonRamp":{"thresholds":[0.5],"palette":[[0.2,0.2,0.2],[1,1,1]],"feather":0.1}}"#,
         )
         .unwrap();
@@ -239,6 +247,7 @@ mod tests {
             layers[0],
             StylizationLayer::HybridSurface(HybridSurface {
                 diffuse: 1.0,
+                reflection: 0.25,
                 ..Default::default()
             })
         );
