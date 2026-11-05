@@ -10,7 +10,7 @@
 | 3 | Metal の Device / Queue / BLAS / TLAS | REQ-GPU-001 / 003 | 進行中（M5 で動作確認済み。別環境での確認が未了） |
 | 4 | Scene IR と revision | REQ-CORE-001 | 済 |
 | 5 | glTF 入力 | REQ-IO-001 | 済（メッシュ・インスタンス・PBR 材質・テクスチャ（BaseColor・MetallicRoughness・Emissive・Normal）・カメラ・`KHR_lights_punctual`（point / directional / spot）を読む。未対応の拡張は警告して無視する。occlusion テクスチャは未対応） |
-| 6 | BSDF・Integrator・テクスチャ・HDRI・ライト | REQ-CORE-002 / 003 / 004 | 済（Diffuse・GGX 金属・誘電体（透過）・Emissive Mesh・point / directional / spot・一様な空・HDRI（重点サンプリング）。NEE と MIS（電球など delta ライトは NEE のみ）。Megakernel 形式。Cornell Box・球 + HDRI・Spot・法線マップは Mitsuba 3 照合済み。項目 12。GGX は単一散乱のみで、損失は既知の制限） |
+| 6 | BSDF・Integrator・テクスチャ・HDRI・ライト | REQ-CORE-002 / 003 / 004 | 済（Diffuse・GGX 金属・誘電体（透過）・Emissive Mesh・point / directional / spot・一様な空・HDRI（重点サンプリング）。NEE と MIS（電球など delta ライトは NEE のみ）。Megakernel 形式。Cornell Box・球 + HDRI・Spot・法線マップは Mitsuba 3 照合済み。項目 12。GGX は M1 時点では単一散乱のみで、損失は既知の制限。金属・粗い透過の補償は M2 で追加） |
 | 7 | カラーマネジメント | REQ-CORE-005 | 済（作業色空間 Linear Rec.709 / ACEScg を `render-cli --working-space` で選び、glTF 取り込み時に入力変換。EXR 出力の色空間は `--output-space`、表示変換は目標色空間+Reinhard+sRGB OETF。OCIO は未実装で、必要になった時点で扱う） |
 | 8 | EXR 多チャンネル出力 | REQ-IO-003 | 済（Beauty + Normal AOV、物理/非物理・spp・作業色空間のメタデータ、chromaticities、`exr` crate による書き出しは実装済み。Albedo・Depth（カメラ前方軸の距離）・ObjectId（インスタンス番号 + 1、32bit 整数）も実装済み。外部ビューアでの目視確認も済み） |
 | 9 | render-cli | REQ-VIEW-001 | 進行中（`render-cli scene.gltf -o out.exr [--width --height --spp --hdri env.exr --metrics m.json]` は動作（8spp ごとの進捗バーあり。glTF にカメラが無ければ境界球に合わせて +z 側へ自動配置。既定値と完全一致するカメラは「無し」とみなす）。計測 JSON は CPU 側の経過時間と Beauty の `gpu_s`（項目 10）。Stylization・モード引数は対応機能が未実装のため未対応。CI からの呼び出しは未接続） |
