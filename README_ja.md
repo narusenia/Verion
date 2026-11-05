@@ -38,11 +38,11 @@ Verion は、Blender・Cinema 4D・Maya などの DCC から使うことを想�
 | 言語 | Rust | GPU バッファの寿命や同期を型で守れる |
 | GPU | Metal Ray Tracing（M3 以降）、のちに Vulkan Ray Tracing（RTX） | 開発機が Mac なので Metal を先に作る |
 | シェーダー | Slang（MSL と SPIR-V に変換） | BSDF やスタイルの計算を 1 回だけ書く |
-| レンダリング | パストレーシング（NEE と MIS） | 物理ベースの基準になる |
+| レンダリング | パストレーシング（NEE と MIS）。Megakernel と、パスのキューを詰める Wavefront の 2 形式 | 物理ベースの基準になる。2 形式は同じコードを使い、同じ画像になる |
 | 入力 | glTF 2.0 とスタイル用の拡張 JSON | 既存のテストシーンをそのまま使える |
 | 色 | OCIO / ACES | 出力全体に影響するので最初から入れる |
 | 出力 | OpenEXR（Beauty と AOV を 1 ファイル） | スタイルを後段で掛けるため成分を分けて残す |
-| ノイズ除去 | OIDN、MetalFX（比較して選ぶ） | AOV を渡して Toon の境目を保つ |
+| ノイズ除去 | OIDN（実行時に読み込む。動画向けの MetalFX は後続） | スタイルを掛ける前の Lighting AOV に掛けて Toon の境目を保つ |
 | 高速化（後続） | ReSTIR、Neural Radiance Cache、差分更新 | 同じ画質に届く時間を縮める |
 | 検証 | Mitsuba 3 との画像比較、白炉テスト | 物理の正しさを機械的に確かめる |
 | DCC 連携（後続） | Blender、Cinema 4D、Maya | Blender から始める |
@@ -56,7 +56,7 @@ Verion は、Blender・Cinema 4D・Maya などの DCC から使うことを想�
 
 ## 開発環境
 
-ツールとタスクは [mise](https://mise.jdx.dev) で管理する。`mise install` でツールを入れ、`mise run check` で整形・lint・ライセンス検査・テストをまとめて実行できる。
+ツールとタスクは [mise](https://mise.jdx.dev) で管理する。`mise install` でツールを入れ、`mise run check` で整形・lint・ライセンス検査・テストをまとめて実行できる。ノイズ除去には Intel Open Image Denoise 2.x が要る（`brew install open-image-denoise`、または `VERION_OIDN_LIB` でライブラリを指す）。無くてもビルドでき、`--denoise` だけが使えない。
 
 ## ライセンス
 

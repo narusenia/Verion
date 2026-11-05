@@ -38,11 +38,11 @@ To get there, we make the following controllable.
 | Language | Rust | Types protect GPU buffer lifetimes and synchronization |
 | GPU | Metal Ray Tracing (M3 and later), then Vulkan Ray Tracing (RTX) | Our development machines are Macs, so Metal comes first |
 | Shaders | Slang (compiled to MSL and SPIR-V) | BSDF and style code is written only once |
-| Rendering | Path tracing (NEE and MIS) | The physical baseline |
+| Rendering | Path tracing (NEE and MIS), as a megakernel or a wavefront with compacted path queues | The physical baseline; both forms run the same code and give the same image |
 | Input | glTF 2.0 with a JSON extension for style | Existing test scenes work as they are |
 | Color | OCIO / ACES | It affects every output, so it goes in from the start |
 | Output | OpenEXR (beauty and AOVs in one file) | Components stay separate so style can be applied afterward |
-| Denoising | OIDN and MetalFX (compared, then chosen) | AOVs keep Toon edges from being smoothed away |
+| Denoising | OIDN (loaded at run time; MetalFX later for video) | Denoising the lighting AOVs before the style pass keeps Toon edges |
 | Speed (later) | ReSTIR, Neural Radiance Cache, incremental updates | Shorten the time to reach the same quality |
 | Validation | Image comparison with Mitsuba 3, white furnace tests | Check physical correctness mechanically |
 | DCC (later) | Blender, Cinema 4D, Maya | Blender first |
@@ -56,7 +56,7 @@ Start with [`docs/requirements/overview.md`](docs/requirements/overview.md). The
 
 ## Development
 
-Tools and tasks are managed with [mise](https://mise.jdx.dev). Run `mise install` to set up the tools, then `mise run check` to run formatting, linting, the license check and the tests together.
+Tools and tasks are managed with [mise](https://mise.jdx.dev). Run `mise install` to set up the tools, then `mise run check` to run formatting, linting, the license check and the tests together. Denoising needs Intel Open Image Denoise 2.x (`brew install open-image-denoise`, or point `VERION_OIDN_LIB` at the library); without it everything builds and only `--denoise` is unavailable.
 
 ## License
 
