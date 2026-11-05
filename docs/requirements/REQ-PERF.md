@@ -126,7 +126,7 @@ M4 以降。RTX 3080 で、同一ハードウェア・解像度・実質一致�
 
 ### 受入条件
 
-- [ ] Memory Budget とピーク使用量がメトリクスに出る
+- [x] Memory Budget とピーク使用量がメトリクスに出る（`gpu_budget_bytes`・`gpu_peak_bytes`・`upload_bytes`・`wavefront_bytes`。M3）
 - [ ] 着手条件を満たす実アセットまたは規模シーンを用意し、結果を記録する
 - [ ] VRAM 内外のテクスチャシーンで、Out-of-Core 有無の画像が一致する（REQ-QA-001 の閾値内）
 - [ ] VRAM 内に収まるシーンでのオーバーヘッドを測る

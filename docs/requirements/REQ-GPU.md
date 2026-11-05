@@ -79,7 +79,7 @@ GPU タイムスタンプで trace / shade / 合計を測る。拡張項目（re
 
 ### 受入条件
 
-- [ ] 計測値を JSON で出力できる（部分: 合計 `gpu_s` のみ。trace / shade の分離は REQ-GPU-005 の Wavefront 化が前提）
+- [x] 計測値を JSON で出力できる（`render-cli --metrics`: 合計 `gpu_s`、Wavefront の `--stage-timing` で `extend_s`（trace）・`shade_s`、デノイズの `denoise_s`、VRAM の `gpu_peak_bytes` ほか。Megakernel は合計のみ（ADR-0014））
 
 ### 依存要件
 
@@ -99,8 +99,8 @@ Path State を SoA で持ち、間接 Dispatch と Queue Counter で CPU 待機�
 
 ### 受入条件
 
-- [ ] 同一シーンで Megakernel と同一画質（REQ-QA-001 の閾値内）
-- [ ] シーン規模別の速度比較を記録する
+- [x] 同一シーンで Megakernel と同一画質（REQ-QA-001 の閾値内。実際はビット一致）
+- [x] シーン規模別の速度比較を記録する（`docs/implementation/M3-wavefront/README.md`。採否は ADR-0014: Metal の既定は Megakernel）
 
 ### 依存要件
 
