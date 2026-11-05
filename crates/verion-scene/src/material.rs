@@ -249,7 +249,7 @@ impl RimLight {
 
 /// Per-light banded highlight that replaces the physical specular, blended by
 /// `HybridSurface::specular` (REQ-STY-004). Band shape only; other shapes arrive later.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StylizedSpecular {
     /// Highlight size, in `0..=1`: the region where `1 - N·H <= size`.
     pub size: f32,
@@ -259,6 +259,9 @@ pub struct StylizedSpecular {
     pub color: [f32; 3],
     /// Multiplier on the highlight, `>= 0`; independent of the light's strength.
     pub strength: f32,
+    /// Steps instead of a single band: the response is `1 - (1 - N·H) / size` clamped to `0..=1`,
+    /// and `palette` holds the multiplier of each step (`palette[0]` is outside the highlight).
+    pub ramp: Option<ToonRamp>,
 }
 
 impl Default for StylizedSpecular {
@@ -268,6 +271,7 @@ impl Default for StylizedSpecular {
             feather: 0.02,
             color: [1.0; 3],
             strength: 1.0,
+            ramp: None,
         }
     }
 }
@@ -281,7 +285,8 @@ impl StylizedSpecular {
             return Err(StylizationError::OutOfRange("specular.strength"));
         }
         unit_range("specular.size", self.size)?;
-        unit_range("specular.feather", self.feather)
+        unit_range("specular.feather", self.feather)?;
+        self.ramp.as_ref().map_or(Ok(()), ToonRamp::validate)
     }
 }
 

@@ -41,29 +41,8 @@ pub fn parse(
         }));
     }
     if let Some(t) = root.get("toonRamp") {
-        let o = t.as_object().ok_or("toonRamp must be an object")?;
-        let known = ["thresholds", "feather", "palette", "lightWrap"];
-        warn_unknown("toonRamp", o.keys(), &known, &mut warnings);
-        let thresholds = o
-            .get("thresholds")
-            .and_then(Value::as_array)
-            .ok_or("toonRamp.thresholds is required and must be an array")?
-            .iter()
-            .map(|v| number(Some(v), 0.0, "toonRamp.thresholds"))
-            .collect::<Result<Vec<_>, _>>()?;
-        let palette = o
-            .get("palette")
-            .and_then(Value::as_array)
-            .ok_or("toonRamp.palette is required and must be an array")?
-            .iter()
-            .map(|c| rgb(c, "toonRamp.palette entries", space))
-            .collect::<Result<Vec<_>, _>>()?;
-        layers.push(StylizationLayer::ToonRamp(ToonRamp {
-            thresholds,
-            feather: number(o.get("feather"), 0.0, "toonRamp.feather")?,
-            palette,
-            light_wrap: number(o.get("lightWrap"), 0.0, "toonRamp.lightWrap")?,
-        }));
+        let ramp = toon_ramp(t, "toonRamp", space, &mut warnings)?;
+        layers.push(StylizationLayer::ToonRamp(ramp));
     }
     if let Some(s) = root.get("shadowPalette") {
         let o = s.as_object().ok_or("shadowPalette must be an object")?;
@@ -97,7 +76,7 @@ pub fn parse(
     }
     if let Some(s) = root.get("stylizedSpecular") {
         let o = s.as_object().ok_or("stylizedSpecular must be an object")?;
-        let known = ["shape", "size", "feather", "color", "strength"];
+        let known = ["shape", "size", "feather", "color", "strength", "ramp"];
         warn_unknown("stylizedSpecular", o.keys(), &known, &mut warnings);
         if o.get("shape").is_some_and(|v| v.as_str() != Some("band")) {
             return Err("stylizedSpecular.shape must be \"band\"".into());
@@ -112,12 +91,50 @@ pub fn parse(
                 None => d.color,
             },
             strength: get("strength", d.strength)?,
+            ramp: match o.get("ramp") {
+                Some(r) => Some(toon_ramp(r, "stylizedSpecular.ramp", space, &mut warnings)?),
+                None => None,
+            },
         }));
     }
     for layer in &layers {
         layer.validate().map_err(|e| format!("{e:?}"))?;
     }
     Ok((layers, warnings))
+}
+
+/// A `toonRamp`-shaped object; `what` names it in messages (`toonRamp`, `stylizedSpecular.ramp`).
+fn toon_ramp(
+    v: &Value,
+    what: &str,
+    space: ColorSpace,
+    warnings: &mut Vec<String>,
+) -> Result<ToonRamp, String> {
+    let o = v
+        .as_object()
+        .ok_or_else(|| format!("{what} must be an object"))?;
+    let known = ["thresholds", "feather", "palette", "lightWrap"];
+    warn_unknown(what, o.keys(), &known, warnings);
+    let thresholds = o
+        .get("thresholds")
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("{what}.thresholds is required and must be an array"))?
+        .iter()
+        .map(|v| number(Some(v), 0.0, &format!("{what}.thresholds")))
+        .collect::<Result<Vec<_>, _>>()?;
+    let palette = o
+        .get("palette")
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("{what}.palette is required and must be an array"))?
+        .iter()
+        .map(|c| rgb(c, &format!("{what}.palette entries"), space))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ToonRamp {
+        thresholds,
+        feather: number(o.get("feather"), 0.0, &format!("{what}.feather"))?,
+        palette,
+        light_wrap: number(o.get("lightWrap"), 0.0, &format!("{what}.lightWrap"))?,
+    })
 }
 
 fn adjust(
@@ -273,6 +290,17 @@ mod tests {
                 ..Default::default()
             })]
         );
+        let (layers, _) = parse_str(
+            r#"{"stylizedSpecular":{"ramp":{"thresholds":[0.5],"palette":[[0,0,0],[1,1,1]]}}}"#,
+        )
+        .unwrap();
+        let StylizationLayer::StylizedSpecular(s) = &layers[0] else {
+            panic!()
+        };
+        assert_eq!(s.ramp.as_ref().unwrap().thresholds, [0.5]);
+        // The ramp follows the toonRamp rules: one palette color per band.
+        let short = r#"{"stylizedSpecular":{"ramp":{"thresholds":[0.5],"palette":[[1,1,1]]}}}"#;
+        assert!(parse_str(short).is_err());
         assert!(parse_str(r#"{"stylizedSpecular":{"shape":"ellipse"}}"#).is_err());
         assert!(parse_str(r#"{"stylizedSpecular":{"size":2}}"#).is_err());
         assert!(parse_str(r#"{"stylizedSpecular":{"color":[1,-1,1]}}"#).is_err());
