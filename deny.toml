@@ -13,6 +13,13 @@ allow = [
   "CC0-1.0",
 ]
 
+# egui's bundled fonts. OFL-1.1 and the Ubuntu Font Licence 1.0 both allow bundling the fonts in
+# software and redistributing it commercially (OFL: the font is not sold on its own; UFL: keep the
+# notice). Revisit before shipping the viewer: the notices must travel with the binary.
+exceptions = [
+  { crate = "epaint_default_fonts", allow = ["OFL-1.1", "Ubuntu-font-1.0"] },
+]
+
 # Our own crates have no license yet (ADR-0004) and are `publish = false`.
 [licenses.private]
 ignore = true

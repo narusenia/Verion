@@ -1,0 +1,23 @@
+[package]
+name = "verion-viewer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "viewer"
+path = "src/main.rs"
+
+[dependencies]
+verion-render-io = { version = "0.0.0", path = "../verion-render-io" }
+verion-stylization = { version = "0.0.0", path = "../verion-stylization" }
+verion-scene = { version = "0.0.0", path = "../verion-scene" }
+eframe = { version = "0.37.0", default-features = false, features = ["wgpu", "default_fonts"] }
+clap = { version = "4.6.7", features = ["derive"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+verion-gpu-metal = { version = "0.0.0", path = "../verion-gpu-metal" }
+
+[lints]
+workspace = true
