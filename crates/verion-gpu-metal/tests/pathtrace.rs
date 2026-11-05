@@ -1173,10 +1173,33 @@ fn light_slots_hold_potential_diffuse_and_response() {
         r.accumulate(&mut acc, 64).unwrap();
         let l = acc.lighting().unwrap();
         let i = 32 * 65 + 32;
-        (l.light_u[i], l.light_response[i], l.direct_diffuse[i][0])
+        (
+            l.light_u[i],
+            l.light_response[i],
+            l.direct_diffuse[i][0],
+            l.light_dir[i],
+            l.light_lit[i],
+            l.light_s[i],
+        )
     };
     // Lit: u * r is the direct diffuse, and the response is cos = 1/sqrt 2 (light at (1, 0, 1)).
-    let (u, r, dd) = center(&floor_scene(light, false));
+    let (u, r, dd, dir, lit, s) = center(&floor_scene(light, false));
+    let to_light = [0.5f32.sqrt(), 0.0, 0.5f32.sqrt()];
+    assert!(
+        (0..3).all(|i| (dir[0][i] - to_light[i]).abs() < 1e-3),
+        "direction {:?}",
+        dir[0]
+    );
+    assert!((lit[0] - 1.0).abs() < 1e-3, "lit {}", lit[0]);
+    assert!(
+        s[0].iter().all(|c| c.abs() < 1e-6),
+        "a Lambert surface has no specular {:?}",
+        s[0]
+    );
+    assert!(
+        dir[1] == [0.0; 3] && lit[1] == 0.0,
+        "unused slots must stay empty"
+    );
     assert!((r[0] - 0.5f32.sqrt()).abs() < 1e-3, "response {}", r[0]);
     assert!(
         (u[0][0] * r[0] - dd).abs() < 1e-3,
@@ -1189,7 +1212,14 @@ fn light_slots_hold_potential_diffuse_and_response() {
     );
     // Shadowed: the physical diffuse is gone, but the light is still known, with response 0, so a
     // toon ramp can put the pixel in its darkest band instead of black.
-    let (u, r, dd) = center(&floor_scene(light, true));
+    let (u, r, dd, dir, lit, _) = center(&floor_scene(light, true));
     assert!(dd < 1e-3 && r[0] == 0.0, "dd {dd}, response {}", r[0]);
     assert!(u[0][0] > 0.1, "potential diffuse {}", u[0][0]);
+    // The direction survives the shadow, and the light is marked as not reaching the point.
+    assert!(
+        (dir[0][0] - to_light[0]).abs() < 1e-3,
+        "direction {:?}",
+        dir[0]
+    );
+    assert!(lit[0] == 0.0, "lit {}", lit[0]);
 }

@@ -203,9 +203,9 @@ pub struct Aovs {
 }
 
 /// Floats per pixel in the lighting buffer; must match `shaders/pathtrace.slang`.
-const LIGHTING_STRIDE: usize = 37;
+const LIGHTING_STRIDE: usize = 65;
 /// Floats per light slot after the first 17.
-const SLOT_WORDS: usize = 5;
+const SLOT_WORDS: usize = 12;
 
 /// First-hit lighting split (REQ-STY-006), mean per pixel, row-major from the top-left. Radiance
 /// parts sum to the beauty image; indirect light is filed under the lobe taken at the first bounce.
@@ -224,6 +224,22 @@ pub struct LightingAovs {
     /// Per light slot: cos(N, L) times visibility, averaged weighted by the light's contribution.
     /// 0 where the slot's light never reaches the pixel.
     pub light_response: Vec<[f32; LIGHT_SLOTS]>,
+    /// Per light slot: the light's specular contribution without cos and without shadowing (`s`),
+    /// the specular counterpart of `light_u`.
+    pub light_s: Vec<[[f32; 3]; LIGHT_SLOTS]>,
+    /// Per light slot: unit vector from the point toward the light, averaged weighted by the light's
+    /// diffuse plus specular contribution. Zero where the slot's light never reaches the pixel; for a
+    /// slot that pools several lights it is the mean direction, so it shortens (and is only
+    /// approximate) when they disagree.
+    pub light_dir: Vec<[[f32; 3]; LIGHT_SLOTS]>,
+    /// Per light slot: share of the slot's contribution that is not shadowed, 0 to 1 (0 where the
+    /// slot's light never reaches the pixel). The visibility that goes with `light_s`.
+    pub light_lit: Vec<[f32; LIGHT_SLOTS]>,
+}
+
+/// Sum of `lum(u) + lum(s)` over the samples of the slot whose record starts at `o`.
+fn slot_weight(r: &[f32; LIGHTING_STRIDE], o: usize) -> f32 {
+    r[o + 3] + 0.2126 * r[o + 5] + 0.7152 * r[o + 6] + 0.0722 * r[o + 7]
 }
 
 /// A scene snapshot ready to trace. Later scene edits are not reflected.
@@ -708,6 +724,44 @@ impl Accumulation {
                         } else {
                             0.0
                         }
+                    })
+                })
+                .collect(),
+            light_s: data
+                .as_chunks::<LIGHTING_STRIDE>()
+                .0
+                .iter()
+                .map(|r| {
+                    std::array::from_fn(|s| {
+                        std::array::from_fn(|i| r[17 + SLOT_WORDS * s + 5 + i] * inv)
+                    })
+                })
+                .collect(),
+            light_dir: data
+                .as_chunks::<LIGHTING_STRIDE>()
+                .0
+                .iter()
+                .map(|r| {
+                    std::array::from_fn(|s| {
+                        let o = 17 + SLOT_WORDS * s;
+                        let w = slot_weight(r, o);
+                        if w > 0.0 {
+                            std::array::from_fn(|i| r[o + 8 + i] / w)
+                        } else {
+                            [0.0; 3]
+                        }
+                    })
+                })
+                .collect(),
+            light_lit: data
+                .as_chunks::<LIGHTING_STRIDE>()
+                .0
+                .iter()
+                .map(|r| {
+                    std::array::from_fn(|s| {
+                        let o = 17 + SLOT_WORDS * s;
+                        let w = slot_weight(r, o);
+                        if w > 0.0 { r[o + 11] / w } else { 0.0 }
                     })
                 })
                 .collect(),

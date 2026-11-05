@@ -79,7 +79,7 @@ struct Args {
     #[arg(long, value_enum)]
     output_space: Option<Space>,
     /// Also write the first-hit lighting split (DirectDiffuse, IndirectDiffuse, Specular, Transmission,
-    /// Emission, Visibility); costs about 70 bytes of GPU memory per pixel
+    /// Emission, Visibility); costs about 260 bytes of GPU memory per pixel
     #[arg(long)]
     lighting_aovs: bool,
     /// Write timing metrics as JSON

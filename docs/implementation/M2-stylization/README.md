@@ -10,7 +10,7 @@
 | 3 | HybridSurface | REQ-STY-001 | 進行中（IR の `HybridSurface` と検証は済。GPU 評価は未着手） |
 | 4 | ToonRamp・ShadowPalette | REQ-STY-002 / 003 | 済（`ToonRamp`（光ごとに段階化）と `ShadowPalette`（直接影・間接影を別々に色補正）を IR・Pass・glTF 拡張に実装。GPU 側は光ごとのスロットを出すのみで、評価は Pass（CPU）） |
 | 5 | StylizedSpecular・RimLight | REQ-STY-004 / 005 | 未着手（先にライトスロットの設計を決める。今は拡散専用で、光の方向と鏡面がない。同種の層を重ねられるよう、層の適用を順序つきに作り替える） |
-| 6 | Lighting AOV の分離出力 | REQ-STY-006 | 進行中（一次ヒットの DirectDiffuse・IndirectDiffuse・Specular・Transmission・Emission・Visibility を分離し、`render-cli --lighting-aovs` で EXR に出力（光ごとのスロットは EXR に出さず内部入力。1 ピクセル約 150 バイト）。5 成分の和はビューティと一致。間接光は最初のバウンスのローブ側に入れる。Normal・Depth・Object ID は M1 から出力済み。Material ID も出力済み。Motion Vector は M5 に送る） |
+| 6 | Lighting AOV の分離出力 | REQ-STY-006 | 進行中（一次ヒットの DirectDiffuse・IndirectDiffuse・Specular・Transmission・Emission・Visibility を分離し、`render-cli --lighting-aovs` で EXR に出力（光ごとのスロットは EXR に出さず内部入力。1 ピクセル約 260 バイト。光ごとのスロットは拡散 `u`・鏡面 `s`・方向・可視性を持つ）。5 成分の和はビューティと一致。間接光は最初のバウンスのローブ側に入れる。Normal・Depth・Object ID は M1 から出力済み。Material ID も出力済み。Motion Vector は M5 に送る） |
 | 7 | Stylization Pass（一次ヒット Hybrid） | REQ-STY-007 | 進行中（`verion-stylization` クレートに、AOV から最終色を合成する Pass（デノイズ抜き）を追加。`HybridSurface.diffuse` で直接拡散を `ToonRamp` に寄せる部分のみ。他の成分は物理のまま。ramp は光ごとの cosθ × 可視性で段階化する（lighting AOV に光ごとのスロットを持つ）。`render-cli --mode stylized` で接続済み。Toon の見た目は実画像で未確認） |
 | 8 | デノイズ（OIDN / MetalFX の選定を ADR に記録） | REQ-ACC-001 | 未着手 |
 | 9 | Viewer の GUI 技術を決める | REQ-VIEW-002 | 済（winit + egui。ADR-0012） |

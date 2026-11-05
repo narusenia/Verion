@@ -22,16 +22,19 @@ StructuredBuffer<float> uvs;        // uv per vertex, all meshes concatenated (z
 StructuredBuffer<float> texels;     // rgb texels, each texture's mip chain level 0 first
 StructuredBuffer<uint> texInfo;     // 4 words per texture: texel offset, width, height, mip level count
 StructuredBuffer<float> vnormals;   // xyz per vertex, all meshes concatenated (zero when a mesh has none)
-RWStructuredBuffer<float> lighting; // used only when params[28] != 0; 37 floats per pixel, running sums of the first-hit
+RWStructuredBuffer<float> lighting; // used only when params[28] != 0; 65 floats per pixel, running sums of the first-hit
                                     // lighting split: direct diffuse, indirect diffuse, specular, transmission, emission (rgb each),
                                     // then lit and total direct-light luminance (visibility = lit / total), then 4 light slots of
-                                    // 5 floats: sum of u (rgb), sum of lum(u), sum of lum(u) * r. u is a light's diffuse
-                                    // contribution divided by cos and r is cos * visibility, so the physical diffuse is u * r.
+                                    // 12 floats: sum of u (rgb), sum of lum(u), sum of lum(u) * r, sum of s (rgb), sum of
+                                    // wd * wi (xyz), sum of wd * lit. u and s are a light's diffuse and specular contribution
+                                    // divided by cos, r is cos * visibility, wi points toward the light, lit is 1 when the light
+                                    // reaches the point, and wd = lum(u) + lum(s). The physical diffuse is u * r.
                                     // Slots 0..2 hold point / directional / spot lights by index (later ones share slot 2);
                                     // slot 3 holds emissive triangles and the environment map.
 
 static const float PI = 3.14159265358979;
-static const uint LIGHTING_STRIDE = 37;
+static const uint LIGHTING_STRIDE = 65;
+static const uint SLOT_WORDS = 12;
 
 uint pcg(uint v)
 {
@@ -147,18 +150,27 @@ float3 sampleVndf(float3 wo, float alpha, float u1, float u2)
 
 float lum(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
 
-// Adds one light's potential diffuse `u` (unshadowed, without cos) and response `r` to its slot.
-void addSlot(uint pixel, uint slot, float3 u, float r)
+// Adds one light's potential diffuse `u` and specular `s` (unshadowed, without cos), its direction `wi`,
+// whether it reaches the point (`lit`) and the diffuse response `r` to its slot.
+void addSlot(uint pixel, uint slot, float3 u, float3 s, float3 wi, float lit, float r)
 {
-    if (any(isnan(u)) || any(isinf(u)))
+    if (any(isnan(u)) || any(isinf(u)) || any(isnan(s)) || any(isinf(s)))
         return; // one bad sample must not poison the running sum
-    uint o = LIGHTING_STRIDE * pixel + 17 + 5 * slot;
+    uint o = LIGHTING_STRIDE * pixel + 17 + SLOT_WORDS * slot;
     float w = lum(u);
+    float wd = w + lum(s);
     lighting[o] += u.x;
     lighting[o + 1] += u.y;
     lighting[o + 2] += u.z;
     lighting[o + 3] += w;
     lighting[o + 4] += w * r;
+    lighting[o + 5] += s.x;
+    lighting[o + 6] += s.y;
+    lighting[o + 7] += s.z;
+    lighting[o + 8] += wd * wi.x;
+    lighting[o + 9] += wd * wi.y;
+    lighting[o + 10] += wd * wi.z;
+    lighting[o + 11] += wd * lit;
 }
 
 float3 envTexel(uint i, uint j)
@@ -635,7 +647,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                         float vv = lum(cd + cs);
                         visTotal += vv;
                         visLit += occ ? 0.0 : vv;
-                        addSlot(pixel, min(li, 2u), cd / c, occ ? 0.0 : c);
+                        addSlot(pixel, min(li, 2u), cd / c, cs / c, wi, occ ? 0.0 : 1.0, occ ? 0.0 : c);
                     }
                 }
             }
@@ -692,7 +704,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                         float vv = lum(cd + cs);
                         visTotal += vv;
                         visLit += occ ? 0.0 : vv;
-                        addSlot(pixel, 3u, cd / cosi, occ ? 0.0 : cosi);
+                        addSlot(pixel, 3u, cd / cosi, cs / cosi, wi, occ ? 0.0 : 1.0, occ ? 0.0 : cosi);
                     }
                 }
             }
@@ -728,7 +740,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                         float vv = lum(cd + cs);
                         visTotal += vv;
                         visLit += occ ? 0.0 : vv;
-                        addSlot(pixel, 3u, cd / cosi, occ ? 0.0 : cosi);
+                        addSlot(pixel, 3u, cd / cosi, cs / cosi, wi, occ ? 0.0 : 1.0, occ ? 0.0 : cosi);
                     }
                 }
             }
