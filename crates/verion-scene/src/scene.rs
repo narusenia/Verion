@@ -239,6 +239,34 @@ impl Scene {
         self.camera = camera;
     }
 
+    /// Looks at the scene's bounding sphere from +z (glTF's front) so the whole model is in view.
+    /// Use it when the source had no camera. Does nothing for an empty scene.
+    pub fn frame_camera(&mut self) {
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for inst in &self.instances {
+            for p in self.meshes[inst.mesh.index()].positions() {
+                for a in 0..3 {
+                    let t = inst.transform[a];
+                    let v = t[0] * p[0] + t[1] * p[1] + t[2] * p[2] + t[3];
+                    lo[a] = lo[a].min(v);
+                    hi[a] = hi[a].max(v);
+                }
+            }
+        }
+        if lo[0] > hi[0] {
+            return;
+        }
+        let c: [f32; 3] = std::array::from_fn(|a| (lo[a] + hi[a]) / 2.0);
+        let r = (0..3).map(|a| (hi[a] - lo[a]).powi(2)).sum::<f32>().sqrt() / 2.0;
+        let mut cam = Camera::default();
+        let dist = r / (cam.vertical_fov / 2.0).sin() * 1.05;
+        cam.transform[0][3] = c[0];
+        cam.transform[1][3] = c[1];
+        cam.transform[2][3] = c[2] + dist;
+        cam.focus_distance = dist;
+        self.set_camera(cam);
+    }
+
     fn check(&self, i: &Instance) -> Result<(), SceneError> {
         if i.mesh.index() >= self.meshes.len() {
             return Err(SceneError::DanglingReference("mesh"));

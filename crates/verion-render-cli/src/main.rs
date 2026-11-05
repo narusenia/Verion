@@ -138,35 +138,6 @@ fn json_str(s: &str) -> String {
     out
 }
 
-/// The glTF had no camera: look at the scene's bounding sphere from +z (glTF's front), so the
-/// whole model is in view. shortcut: a camera exactly equal to the default counts as "none".
-#[cfg(target_os = "macos")]
-fn frame_camera(scene: &mut verion_scene::Scene) {
-    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
-    for inst in scene.instances() {
-        for p in scene.meshes()[inst.mesh.index()].positions() {
-            for a in 0..3 {
-                let t = inst.transform[a];
-                let v = t[0] * p[0] + t[1] * p[1] + t[2] * p[2] + t[3];
-                lo[a] = lo[a].min(v);
-                hi[a] = hi[a].max(v);
-            }
-        }
-    }
-    if lo[0] > hi[0] {
-        return;
-    }
-    let c: [f32; 3] = std::array::from_fn(|a| (lo[a] + hi[a]) / 2.0);
-    let r = (0..3).map(|a| (hi[a] - lo[a]).powi(2)).sum::<f32>().sqrt() / 2.0;
-    let mut cam = verion_scene::Camera::default();
-    let dist = r / (cam.vertical_fov / 2.0).sin() * 1.05;
-    cam.transform[0][3] = c[0];
-    cam.transform[1][3] = c[1];
-    cam.transform[2][3] = c[2] + dist;
-    cam.focus_distance = dist;
-    scene.set_camera(cam);
-}
-
 /// Samples per GPU dispatch; the progress bar advances once per dispatch.
 #[cfg(target_os = "macos")]
 const CHUNK_SPP: u32 = 8;
@@ -193,7 +164,7 @@ fn run(args: &Args) -> Result<(), String> {
     }
     let mut scene = import.scene;
     if *scene.camera() == Camera::default() {
-        frame_camera(&mut scene);
+        scene.frame_camera();
     }
     if let Some(path) = &args.hdri {
         let image = load_hdri(path, scene.working_space())
