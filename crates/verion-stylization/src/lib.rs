@@ -3,11 +3,13 @@
 //!
 //! Implemented so far: `HybridSurface::diffuse` blending the direct diffuse toward a `ToonRamp`
 //! applied per light, and `ShadowPalette` grading the shadowed part of the direct and indirect
-//! diffuse (strength from `HybridSurface::shadow`), and `RimLight` adding a rim to the final color.
+//! diffuse (strength from `HybridSurface::shadow`), `RimLight` adding a rim to the final color,
+//! and `StylizedSpecular` replacing the specular by per-light banded highlights.
 //! The other components pass through unchanged until their layers land.
 
 use verion_scene::{
-    Camera, ColorAdjust, LIGHT_SLOTS, Material, RimLight, ShadowPalette, StylizationLayer, ToonRamp,
+    Camera, ColorAdjust, LIGHT_SLOTS, Material, RimLight, ShadowPalette, StylizationLayer,
+    StylizedSpecular, ToonRamp,
 };
 
 /// The first-hit lighting split of one pixel, in the working space (see `LightingAovs`).
@@ -129,6 +131,7 @@ pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
         .unwrap_or_default();
     let mut diffuse = p.direct_diffuse;
     let mut indirect = p.indirect_diffuse;
+    let mut specular = p.specular;
     let mut added = [0.0f32; 3];
     // Layers apply in the order the material lists them, so the same kind may appear twice.
     for layer in layers {
@@ -169,11 +172,47 @@ pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
                 let r = rim_light(rim, p);
                 added = std::array::from_fn(|i| added[i] + r[i]);
             }
+            StylizationLayer::StylizedSpecular(sp) => {
+                let st = stylized_specular(sp, p);
+                let k = hybrid.specular;
+                specular = std::array::from_fn(|i| specular[i] + (st[i] - specular[i]) * k);
+            }
         }
     }
     std::array::from_fn(|i| {
-        diffuse[i] + indirect[i] + p.specular[i] + p.transmission[i] + p.emission[i] + added[i]
+        diffuse[i] + indirect[i] + specular[i] + p.transmission[i] + p.emission[i] + added[i]
     })
+}
+
+/// The banded highlights of a `StylizedSpecular` (REQ-STY-004), summed over the light slots: a
+/// slot that carries specular puts a band where the half vector H of its light and the view is
+/// within `size` of the normal (`1 - N·H <= size`), and an unshadowed share of it counts.
+/// Independent of the light's strength.
+///
+/// shortcut: a slot that pools several lights (or an area light) has the mean direction, so its
+/// highlight sits where that mean points.
+pub fn stylized_specular(sp: &StylizedSpecular, p: &PixelInput) -> [f32; 3] {
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    if sp.strength == 0.0 || dot(p.normal, p.normal) < 0.5 {
+        return [0.0; 3]; // off, or no surface (a zero normal)
+    }
+    let mut sum = 0.0;
+    for k in 0..LIGHT_SLOTS {
+        let h: [f32; 3] = std::array::from_fn(|i| p.light_dir[k][i] + p.view[i]);
+        let len2 = dot(h, h);
+        // A light with no specular (Lambert) or no direction (never reaches) has no highlight.
+        if lum(p.light_s[k]) < 1.0e-6 || len2 < 1.0e-8 {
+            continue;
+        }
+        let x = 1.0 - (dot(p.normal, h) / len2.sqrt()).max(0.0);
+        let band = if sp.feather > 0.0 {
+            1.0 - smoothstep(sp.size - 0.5 * sp.feather, sp.size + 0.5 * sp.feather, x)
+        } else {
+            (x <= sp.size) as u8 as f32
+        };
+        sum += band * p.light_lit[k];
+    }
+    sp.color.map(|c| c * sp.strength * sum)
 }
 
 /// The rim added by a `RimLight` (REQ-STY-005): a band where the surface turns away from the
@@ -358,6 +397,82 @@ mod tests {
         assert_eq!(rim_light(&rim(|r| r.strength = 0.0), &two), [0.0; 3]);
         // No surface (zero normal) or no light: nothing.
         assert_eq!(rim_light(&rim(|_| {}), &PixelInput::default()), [0.0; 3]);
+    }
+
+    /// Looking straight at a surface lit head-on by a light that carries specular.
+    fn spec_px() -> PixelInput {
+        let mut p = PixelInput {
+            normal: [0.0, 0.0, 1.0],
+            view: [0.0, 0.0, 1.0],
+            ..Default::default()
+        };
+        p.light_s[0] = [0.1; 3];
+        p.light_dir[0] = [0.0, 0.0, 1.0];
+        p.light_lit[0] = 1.0;
+        p
+    }
+
+    fn spec(f: impl FnOnce(&mut StylizedSpecular)) -> StylizedSpecular {
+        let mut s = StylizedSpecular {
+            feather: 0.0,
+            ..Default::default()
+        };
+        f(&mut s);
+        s
+    }
+
+    #[test]
+    fn specular_band_sits_around_the_half_vector() {
+        let s = spec(|s| s.size = 0.05);
+        assert_eq!(stylized_specular(&s, &spec_px()), [1.0; 3]); // N = H
+        // L along +x with V along +z: H is 45° off the normal, 1 - cos = 0.29 > 0.05.
+        let mut off = spec_px();
+        off.light_dir[0] = [1.0, 0.0, 0.0];
+        assert_eq!(stylized_specular(&s, &off), [0.0; 3]);
+        assert_eq!(stylized_specular(&spec(|s| s.size = 0.3), &off), [1.0; 3]);
+    }
+
+    #[test]
+    fn specular_needs_a_specular_light_that_reaches_the_point() {
+        let mut lambert = spec_px();
+        lambert.light_s[0] = [0.0; 3];
+        assert_eq!(stylized_specular(&spec(|_| {}), &lambert), [0.0; 3]);
+        let mut shadowed = spec_px();
+        shadowed.light_lit[0] = 0.0;
+        assert_eq!(stylized_specular(&spec(|_| {}), &shadowed), [0.0; 3]);
+        assert_eq!(
+            stylized_specular(&spec(|_| {}), &PixelInput::default()),
+            [0.0; 3]
+        );
+        // Two lights give a highlight each; color and strength scale them.
+        let mut two = spec_px();
+        two.light_s[1] = [0.1; 3];
+        two.light_dir[1] = [0.0, 0.0, 1.0];
+        two.light_lit[1] = 1.0;
+        let s = spec(|s| (s.color, s.strength) = ([0.5, 1.0, 2.0], 0.5));
+        assert_eq!(stylized_specular(&s, &two), [0.5, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn specular_blends_with_the_physical_one_by_hybrid_specular() {
+        let mut p = spec_px();
+        p.specular = [0.2; 3];
+        let at = |k: f32| {
+            let l = [
+                StylizationLayer::HybridSurface(HybridSurface {
+                    specular: k,
+                    ..Default::default()
+                }),
+                StylizationLayer::StylizedSpecular(spec(|_| {})),
+            ];
+            stylize(&l, &p)[0]
+        };
+        assert!((at(0.0) - 0.2).abs() < 1e-6);
+        assert!((at(0.5) - 0.6).abs() < 1e-6); // halfway between 0.2 and the highlight 1.0
+        assert!((at(1.0) - 1.0).abs() < 1e-6);
+        // Without HybridSurface the specular stays physical.
+        let bare = [StylizationLayer::StylizedSpecular(spec(|_| {}))];
+        assert!((stylize(&bare, &p)[0] - 0.2).abs() < 1e-6);
     }
 
     #[test]
