@@ -3,6 +3,12 @@
 
 #[cfg(target_os = "macos")]
 mod app;
+#[cfg(target_os = "macos")]
+mod material_ui;
+#[cfg(target_os = "macos")]
+mod theme;
+#[cfg(target_os = "macos")]
+mod widgets;
 
 #[cfg(target_os = "macos")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -10,10 +16,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = app::Args::parse();
     let state = app::App::new(&args)?;
     let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default().with_inner_size([1000.0, 640.0]),
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_inner_size([1280.0, 780.0])
+            .with_min_inner_size([720.0, 480.0]),
         ..Default::default()
     };
-    eframe::run_native("Verion Viewer", options, Box::new(|_| Ok(Box::new(state))))?;
+    eframe::run_native(
+        "Verion Viewer",
+        options,
+        Box::new(|cc| {
+            theme::install(&cc.egui_ctx);
+            egui_material_icons::initialize(&cc.egui_ctx);
+            Ok(Box::new(state))
+        }),
+    )?;
     Ok(())
 }
 
