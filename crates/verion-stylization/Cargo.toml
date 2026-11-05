@@ -1,0 +1,12 @@
+[package]
+name = "verion-stylization"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+verion-scene = { path = "../verion-scene" }
+
+[lints]
+workspace = true

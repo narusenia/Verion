@@ -810,6 +810,13 @@ name = "verion-scene"
 version = "0.0.0"
 
 [[package]]
+name = "verion-stylization"
+version = "0.0.0"
+dependencies = [
+ "verion-scene",
+]
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
