@@ -5,7 +5,7 @@ use std::{
 
 use eframe::egui::{self, Align, Align2, Color32, Key, Layout, PointerButton, RichText};
 use egui_material_icons::icons::*;
-use verion_gpu_metal::{Accumulation, LightingAovs, MetalContext, Renderer};
+use verion_gpu_metal::{Accumulation, Integrator, LightingAovs, MetalContext, Renderer};
 use verion_scene::{Camera, Light, Material, OutputTransform, Scene};
 use verion_stylization::{ColorGrade, Frame, PostFrame};
 
@@ -197,6 +197,7 @@ pub struct App {
     view: View,
     stylized: bool,
     multiscatter: bool,
+    integrator: Integrator,
     /// Denoise the finished (or paused) accumulation with OIDN (ADR-0013).
     denoise: bool,
     /// Loaded on first use; the error is shown when OIDN is missing.
@@ -312,6 +313,7 @@ impl App {
             view: View::Beauty,
             stylized: false,
             multiscatter: true,
+            integrator: Integrator::Megakernel,
             denoise: false,
             denoiser: None,
             denoised: None,
@@ -377,6 +379,7 @@ impl App {
         match Renderer::new(&self.ctx, &self.scene) {
             Ok(mut r) => {
                 r.set_multiscatter(self.multiscatter);
+                r.set_integrator(self.integrator);
                 r.set_camera(self.scene.camera());
                 self.renderer = r;
                 self.refresh_aovs();
@@ -910,6 +913,17 @@ impl App {
             "Multiple-scattering compensation",
         ) {
             self.renderer.set_multiscatter(self.multiscatter);
+            self.restart();
+        }
+        let mut integrator = self.integrator;
+        widgets::row(ui, "integrator", |ui| {
+            ui.radio_value(&mut integrator, Integrator::Megakernel, "Megakernel")
+                | ui.radio_value(&mut integrator, Integrator::Wavefront, "Wavefront")
+        })
+        .on_hover_text("Same image; wavefront splits each bounce into queued stages (M3)");
+        if integrator != self.integrator {
+            self.integrator = integrator;
+            self.renderer.set_integrator(integrator);
             self.restart();
         }
         if widgets::checkbox(ui, &mut self.denoise, "Denoise when done (OIDN)") {
