@@ -26,6 +26,7 @@ REQ-ACC-001 は、Metal 向けデノイザーを OIDN と MetalFX から選び�
 | 静止画・累積表示 | そのまま使える | 前フレームと Motion Vector が要る |
 | クロスプラットフォーム | Linux・Windows・CUDA・HIP・SYCL も対応（Vulkan 後続に使い回せる） | Apple のみ |
 
+- OptiX Denoiser は NVIDIA GPU（CUDA / OptiX）専用で、Metal では動かないため M2 の比較対象にしていない。M4 の RTX 3080・Vulkan 側で、OIDN（CUDA 対応）の速度が足りないときに追加で比較する。SDK ライセンスの再配布条件は未確認で、採用を検討する時点で原文を確認する
 - MetalFX は、入力の細目（Motion Vector・露出・ジッターなどの要件）を本文まで読んでいない。選定の根拠は「時間方向の方式で、アップスケールと一体」「macOS 26 以降」という概要レベル
 
 ## 決定
