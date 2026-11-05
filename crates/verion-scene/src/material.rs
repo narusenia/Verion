@@ -23,6 +23,11 @@ pub struct BaseBsdf {
     pub clearcoat: f32,
     /// Roughness of the coat, in `0..=1`.
     pub clearcoat_roughness: f32,
+    /// Color of the sheen layer, a Charlie-distribution lobe for fabric that sits under the coat
+    /// and over the base (`KHR_materials_sheen`). Black = none. Linear, in the scene's working space.
+    pub sheen_color: [f32; 3],
+    /// Roughness of the sheen, in `0..=1`.
+    pub sheen_roughness: f32,
     pub emission: [f32; 3],
     /// Textures multiply the factors above (glTF semantics) and hold linear values. Sampling is
     /// repeat-wrapped trilinear; UVs come from the mesh. The image ids must come from the same scene.
@@ -46,6 +51,8 @@ impl Default for BaseBsdf {
             ior: 1.5,
             clearcoat: 0.0,
             clearcoat_roughness: 0.0,
+            sheen_color: [0.0; 3],
+            sheen_roughness: 0.0,
             emission: [0.0; 3],
             base_color_texture: None,
             metallic_roughness_texture: None,

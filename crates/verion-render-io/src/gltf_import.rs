@@ -10,13 +10,14 @@ use verion_scene::{
 };
 
 /// Extensions this importer understands; any other one in `extensionsUsed` is warned about.
-const SUPPORTED: [&str; 6] = [
+const SUPPORTED: [&str; 7] = [
     stylization_ext::NAME,
     "KHR_lights_punctual",
     "KHR_materials_transmission",
     "KHR_materials_ior",
     "KHR_materials_emissive_strength",
     "KHR_materials_clearcoat",
+    "KHR_materials_sheen",
 ];
 
 pub struct Import {
@@ -278,6 +279,27 @@ impl Importer<'_> {
                 }
             }
         }
+        if let Some(sh) = m.extension_value("KHR_materials_sheen") {
+            let color = sh
+                .get("sheenColorFactor")
+                .and_then(|v| v.as_array())
+                .filter(|a| a.len() == 3)
+                .map_or([0.0; 3], |a| {
+                    std::array::from_fn(|i| a[i].as_f64().unwrap_or(0.0).clamp(0.0, 1.0) as f32)
+                });
+            base.sheen_color = to_space(color);
+            base.sheen_roughness = sh
+                .get("sheenRoughnessFactor")
+                .and_then(|v| v.as_f64())
+                .map_or(0.0, |v| v.clamp(0.0, 1.0) as f32);
+            for key in ["sheenColorTexture", "sheenRoughnessTexture"] {
+                if sh.get(key).is_some() {
+                    self.warnings.push(format!(
+                        "material {name}: {key} is not supported yet and was ignored"
+                    ));
+                }
+            }
+        }
         base.base_color_texture = pbr.base_color_texture().and_then(|t| {
             self.texture(
                 &name,
@@ -508,7 +530,7 @@ mod tests {
     /// One triangle: node 0 (mesh, +2 x), node 1 (camera at z = 5), node 2 (point light at y = 3).
     const JSON: &str = r#"{
       "asset": {"version": "2.0"},
-      "extensionsUsed": ["KHR_lights_punctual", "KHR_materials_sheen"],
+      "extensionsUsed": ["KHR_lights_punctual", "KHR_materials_volume"],
       "scene": 0,
       "scenes": [{"nodes": [0, 1, 2]}],
       "nodes": [
@@ -608,7 +630,7 @@ mod tests {
         );
         assert_eq!(
             warnings,
-            ["extension KHR_materials_sheen is not supported and was ignored"]
+            ["extension KHR_materials_volume is not supported and was ignored"]
         );
     }
 
@@ -621,7 +643,7 @@ mod tests {
             ),
         )
         .replace(
-            r#""extensionsUsed": ["KHR_lights_punctual", "KHR_materials_sheen"]"#,
+            r#""extensionsUsed": ["KHR_lights_punctual", "KHR_materials_volume"]"#,
             r#""extensionsUsed": ["KHR_lights_punctual", "VERION_materials_stylization"]"#,
         )
     }
@@ -629,7 +651,7 @@ mod tests {
     #[test]
     fn imports_clearcoat() {
         let json = JSON
-            .replace("KHR_materials_sheen", "KHR_materials_clearcoat")
+            .replace("KHR_materials_volume", "KHR_materials_clearcoat")
             .replace(
                 r#""roughnessFactor": 0.25}"#,
                 r#""roughnessFactor": 0.25},
@@ -641,6 +663,25 @@ mod tests {
         assert_eq!(
             warnings,
             ["material 0: clearcoatTexture is not supported yet and was ignored"]
+        );
+    }
+
+    #[test]
+    fn imports_sheen() {
+        let json = JSON
+            .replace("KHR_materials_volume", "KHR_materials_sheen")
+            .replace(
+                r#""roughnessFactor": 0.25}"#,
+                r#""roughnessFactor": 0.25},
+                "extensions": {"KHR_materials_sheen": {"sheenColorFactor": [1, 0.5, 2], "sheenRoughnessFactor": 0.3, "sheenRoughnessTexture": {"index": 0}}}"#,
+            );
+        let Import { scene, warnings } = load_gltf_slice(&glb(&json, &[])).unwrap();
+        let base = &scene.materials()[0].base;
+        assert_eq!(base.sheen_color, [1.0, 0.5, 1.0]); // components clamped to 1
+        assert_eq!(base.sheen_roughness, 0.3);
+        assert_eq!(
+            warnings,
+            ["material 0: sheenRoughnessTexture is not supported yet and was ignored"]
         );
     }
 
