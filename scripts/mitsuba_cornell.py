@@ -1,12 +1,13 @@
 """Renders the render_ppm example scene with Mitsuba 3 and compares it with Verion's render.exr.
 
 Usage: mise exec -- ~/.local/share/mise/installs/pipx-mitsuba/3.7.1/mitsuba/bin/python \
-           scripts/mitsuba_cornell.py [out_dir] [width] [height] [spp] [walls|hdri|spot|normalmap]
+           scripts/mitsuba_cornell.py [out_dir] [width] [height] [spp] [walls|hdri|spot|normalmap|coat]
 out_dir must hold the render.exr written by the example (cargo run --release -p verion-gpu-metal
 --example render_ppm -- out_dir w h spp). Writes out_dir/mitsuba.exr.
 `walls` leaves out the spheres, `hdri` swaps the box for a floor under out_dir/env.exr (pass the same
 mode to the example, which writes env.exr); `spot` uses the same floor with one spot light, `normalmap` adds the
-example's normal.exr on a 6x6 floor.
+example's normal.exr on a 6x6 floor; `coat` puts a clearcoat-only floor and sphere (a `roughplastic` with no diffuse part)
+under the same env.exr.
 Differences from Verion: Mitsuba's analytic spheres versus Verion's icospheres.
 """
 
@@ -83,11 +84,19 @@ desc = (
 mode = sys.argv[5] if len(sys.argv) > 5 else ""
 if mode == "walls":
     del desc["gold"], desc["glass"]
-elif mode in ("hdri", "spot", "normalmap"):
+elif mode in ("hdri", "spot", "normalmap", "coat"):
     for k in ("ceiling", "back", "left", "right", "light", "light_back", "point"):
         del desc[k]
     desc["floor"] = quad(grey, [0, -2, 0], [1, 0, 0], -90, half=20.0)
     # Mitsuba's lat-long mapping is Verion's turned 180 degrees about +y (found by rendering a sun).
+if mode == "coat":
+    # Verion's clearcoat is GGX with alpha = roughness^2 over IOR 1.5; with the base lobe off it is a
+    # rough dielectric reflection, which roughplastic gives when its diffuse part is black.
+    coat = {"type": "roughplastic", "distribution": "ggx", "alpha": 0.4 ** 2, "int_ior": 1.5,
+            "diffuse_reflectance": {"type": "rgb", "value": [0.0] * 3}}
+    del desc["gold"], desc["glass"]
+    desc["floor"]["bsdf"] = coat
+    desc["ball"] = {"type": "sphere", "center": [0, -1.3, 0], "radius": 0.7, "bsdf": coat}
 if mode in ("spot", "normalmap"):
     # Half-angles 0.5 / 0.49 rad as in the example; the thin falloff band makes the edge near hard.
     desc["spot"] = {"type": "spot", "cutoff_angle": math.degrees(0.5), "beam_width": math.degrees(0.49),
@@ -101,7 +110,7 @@ if mode == "normalmap":
                         "to_uv": T().translate([0, 1, 0]).scale([1, -1, 1])},
          "bsdf": grey},
         [0, -2, 0], [1, 0, 0], -90, half=3.0)
-elif mode == "hdri":
+elif mode in ("hdri", "coat"):
     desc["env"] = {"type": "envmap", "filename": str(out / "env.exr"),
                    "to_world": T().rotate([0, 1, 0], 180)}
 scene = mi.load_dict(desc)

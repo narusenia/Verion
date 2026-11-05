@@ -6,7 +6,7 @@ out=target/crosscheck
 py="$(mise where pipx:mitsuba)/mitsuba/bin/python"
 flip="$(mise where pipx:flip-evaluator)/flip-evaluator/bin/flip"
 status=0
-for mode in box walls hdri spot normalmap; do
+for mode in box walls hdri spot normalmap coat; do
   arg=$mode; [ "$mode" = box ] && arg=
   echo "== $mode"
   cargo run --release -q -p verion-gpu-metal --example render_ppm -- "$out/$mode" 512 384 1024 $arg >/dev/null || exit 1

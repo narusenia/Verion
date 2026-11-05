@@ -26,6 +26,22 @@ mod imp {
         }
     }
 
+    /// Only the clearcoat reflects: base color 0 and IOR 1 leave the base lobe nothing to reflect.
+    /// Mitsuba counterpart: `roughplastic` with no diffuse part, alpha = roughness squared.
+    fn coated_black() -> Material {
+        let base = BaseBsdf {
+            base_color: [0.0; 3],
+            ior: 1.0,
+            clearcoat: 1.0,
+            clearcoat_roughness: COAT_ROUGHNESS,
+            ..BaseBsdf::default()
+        };
+        Material {
+            base,
+            ..Material::default()
+        }
+    }
+
     fn emissive(e: [f32; 3]) -> Material {
         let base = BaseBsdf {
             base_color: [0.0; 3],
@@ -123,7 +139,8 @@ mod imp {
         let walls_only = mode == "walls";
         let nmap = mode == "normalmap";
         let spot = mode == "spot" || nmap;
-        let open = mode == "hdri" || spot;
+        let coat = mode == "coat";
+        let open = mode == "hdri" || coat || spot;
         let mut s = Scene::new();
         let add = |s: &mut Scene, mesh: Mesh, material: Material, transform| {
             let (mesh, material) = (s.add_mesh(mesh), s.add_material(material));
@@ -143,7 +160,13 @@ mod imp {
         } else {
             2.0
         };
-        let (floor, floor_material) = if nmap {
+        let (floor, floor_material) = if coat {
+            // Wound so the normal faces up: the coat is skipped on a back face (seen from "inside").
+            (
+                quad([-f, lo, -f], [-f, lo, f], [f, lo, f], [f, lo, -f]),
+                coated_black(),
+            )
+        } else if nmap {
             let image = Image::new(NMAP_SIZE, NMAP_SIZE, normal_map_pixels()).unwrap();
             let base = BaseBsdf {
                 base_color: grey,
@@ -210,7 +233,14 @@ mod imp {
                 IDENTITY,
             );
         }
-        if !walls_only {
+        if coat {
+            add(
+                &mut s,
+                sphere(0.7),
+                coated_black(),
+                translate(0.0, -1.3, 0.0),
+            );
+        } else if !walls_only {
             let ball = sphere(0.7);
             let gold = BaseBsdf {
                 base_color: [1.0, 0.78, 0.34],
@@ -270,6 +300,8 @@ mod imp {
     }
 
     const NMAP_SIZE: u32 = 128;
+    /// Clearcoat roughness of the `coat` mode; scripts/mitsuba_cornell.py uses the same value.
+    const COAT_ROUGHNESS: f32 = 0.4;
 
     /// Tangent-space normals (glTF: +Y up the image) of four Gaussian bumps, deliberately asymmetric
     /// so a mirrored or rotated lookup shows up.
@@ -351,7 +383,7 @@ mod imp {
         let mut scene = scene(&mode);
         let dir = Path::new(&dir);
         fs::create_dir_all(dir).unwrap();
-        if mode == "hdri" {
+        if mode == "hdri" || mode == "coat" {
             let (ew, eh) = (256, 128);
             let env = ExrFrame {
                 width: ew,
