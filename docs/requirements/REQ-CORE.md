@@ -12,7 +12,7 @@
 
 ### 説明
 
-Geometry・Instance・Material・Light・Camera を持つ、入力形式に依存しない内部表現。geometry / material / lighting / camera の revision カウンタを最初から持つ（camera は BLAS・材質・ライトに影響しない変更の判別用）。Stylization の変更は material revision に含める（ADR-0008 の Stylization revision を分けるかは REQ-STY で決める）。後の差分更新（REQ-ACC-003）と IPR の土台になる。
+Geometry・Instance・Material・Light・Camera を持つ、入力形式に依存しない内部表現。geometry / material / lighting / camera の revision カウンタを最初から持つ（camera は BLAS・材質・ライトに影響しない変更の判別用）。マテリアルの Stylization レイヤーが変わったときは、material revision に加えて stylization revision も増やす（REQ-STY-008。出力メタデータとキャッシュが物理結果と区別するため）。後の差分更新（REQ-ACC-003）と IPR の土台になる。
 
 ### 受入条件
 
