@@ -105,6 +105,21 @@
 
 - すべて省略できる。線の不透明度は `hybridSurface.outline`（0 で線なし、1 で完全）。`outlineStyle` を書いても `outline` が 0 なら線は出ない
 
+### `matcap`（REQ-STY-012）
+
+視線空間の法線で 1 枚の画像を引き、陰影（拡散と鏡面）を置き換える。光に依存しない。非物理。
+
+| プロパティ | 型 | 範囲 | 既定 | 内容 |
+|---|---|---|---|---|
+| `texture` | textureInfo | `index` 必須（`texCoord` は無視） | なし | MatCap 画像。球を正面から撮った正方形。sRGB で、作業色空間へ変換する |
+| `strength` | number | 0〜1 | 1 | 物理の陰影との混ぜ具合。0 で物理、1 で MatCap |
+| `albedo` | number | 0〜1 | 0 | MatCap の色にベースカラーを掛ける度合い |
+
+- 視線空間の法線 `n = (N·右, N·上)`（Normal AOV を使う。法線マップは反映済み）で画像を引く。`u = 0.5 + 0.5·n_x`、`v = 0.5 − 0.5·n_y`（画像の上が +y）。双線形補間
+- 置き換えるのは拡散（直接・間接）と鏡面（直接鏡面・映り込み）。発光・透過・リム・輪郭線は残す。`physical + (matcap − physical) × strength`
+- 層は書いた順に適用する。`hybridSurface` には依存しない。Reference モードでは無効
+- 将来（拡散と鏡面を別画像にする拡張）: 任意の `specularTexture` を足すと、`texture` は拡散だけを、`specularTexture` が鏡面を置き換える。省略時は上記のまま
+
 ## 解釈
 
 - 輪郭線は PostProcess で、画素ごとの Stylization の後に、Depth・Normal・Object ID・Material ID の AOV から作る。各画素について、半径 `width` 画素の隣接を見て、次のどれかなら輪郭画素にする

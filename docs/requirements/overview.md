@@ -76,6 +76,7 @@ Verion は、Blender / Cinema 4D / Maya などの DCC から使える GPU レン
 | REQ-STY-009 | Outline・顔影・髪ハイライト | Should | Draft |
 | REQ-STY-010 | Integrated Stylization（研究） | Could | Draft |
 | REQ-STY-011 | PostProcess | Should | Draft |
+| REQ-STY-012 | MatCap | Should | Draft |
 | REQ-IO-001 | glTF 2.0 入力 | Must | Draft |
 | REQ-IO-002 | Stylization 用 glTF 拡張 | Must | Draft |
 | REQ-IO-003 | EXR 多チャンネル出力 | Must | Draft |
