@@ -1,5 +1,5 @@
 //! `render-cli scene.gltf -o out.exr`: headless render (REQ-VIEW-001).
-//! Always Reference mode for now: no stylization or AI approximation exists yet (REQ-CORE-006).
+//! `--mode reference` (default) is physical only (REQ-CORE-006); `--mode stylized` adds the Stylization Pass.
 
 // shortcut: the render path is macOS-only, so off macOS its helpers look dead; gate them individually once a second backend exists.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
@@ -8,18 +8,22 @@ use std::{fs, path::PathBuf, time::Instant};
 
 use clap::Parser;
 
-/// Render mode. Stylization and AI approximation (REQ-STY, NRC, ReSTIR) do not exist yet, so
-/// Reference is the only mode; add variants here when they land and set `physical` accordingly.
+/// Render mode. AI approximation (NRC, ReSTIR) does not exist yet; add variants here when it
+/// lands and set `physical` accordingly.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
     /// Physical path tracing only (REQ-CORE-006).
     Reference,
+    /// Stylization Pass on the primary hit (REQ-STY-007). Not physical; needs the lighting AOVs,
+    /// so it costs the extra GPU memory of `--lighting-aovs`.
+    Stylized,
 }
 
 impl Mode {
     fn name(self) -> &'static str {
         match self {
             Mode::Reference => "reference",
+            Mode::Stylized => "stylized",
         }
     }
 
@@ -27,6 +31,7 @@ impl Mode {
     fn physical(self) -> bool {
         match self {
             Mode::Reference => true,
+            Mode::Stylized => false,
         }
     }
 }
@@ -167,7 +172,8 @@ fn run(args: &Args) -> Result<(), String> {
 
     let (w, h) = (args.width, args.height);
     let t = Instant::now();
-    let mut acc = if args.lighting_aovs {
+    let lighting_on = args.lighting_aovs || args.mode == Mode::Stylized;
+    let mut acc = if lighting_on {
         renderer.new_accumulation_with_lighting(w, h)
     } else {
         renderer.new_accumulation(w, h)
@@ -185,7 +191,7 @@ fn run(args: &Args) -> Result<(), String> {
     }
     bar.finish_and_clear();
     let gpu_s = acc.gpu_seconds();
-    let beauty = acc.mean();
+    let mut beauty = acc.mean();
     let lighting = acc.lighting();
     let render_s = t.elapsed().as_secs_f64();
 
@@ -196,6 +202,23 @@ fn run(args: &Args) -> Result<(), String> {
     let aov = renderer
         .render_aovs(w, h)
         .map_err(|e| format!("aovs: {e:?}"))?;
+    if let (Mode::Stylized, Some(l)) = (args.mode, &lighting) {
+        if scene.materials().iter().all(|m| m.stylization.is_empty()) {
+            eprintln!("warning: no material has stylization layers; the output equals Reference");
+        }
+        beauty = verion_stylization::stylize_image(
+            scene.materials(),
+            &verion_stylization::Frame {
+                albedo: &aov.albedo,
+                direct_diffuse: &l.direct_diffuse,
+                indirect_diffuse: &l.indirect_diffuse,
+                specular: &l.specular,
+                transmission: &l.transmission,
+                emission: &l.emission,
+                material_id: &aov.material_id,
+            },
+        );
+    }
     let aov_s = t.elapsed().as_secs_f64();
 
     let space = scene.working_space();
