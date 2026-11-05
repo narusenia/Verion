@@ -50,13 +50,13 @@ impl Default for BaseBsdf {
 }
 
 /// Stylization is non-physical: Reference mode must skip every layer (ADR-0008).
-/// The variant for REQ-STY-004 arrives with its own slice.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StylizationLayer {
     HybridSurface(HybridSurface),
     ToonRamp(ToonRamp),
     ShadowPalette(ShadowPalette),
     RimLight(RimLight),
+    StylizedSpecular(StylizedSpecular),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,6 +74,7 @@ impl StylizationLayer {
             Self::ToonRamp(t) => t.validate(),
             Self::ShadowPalette(s) => s.validate(),
             Self::RimLight(r) => r.validate(),
+            Self::StylizedSpecular(s) => s.validate(),
         }
     }
 }
@@ -243,6 +244,44 @@ impl RimLight {
         unit_range("rim.width", self.width)?;
         unit_range("rim.feather", self.feather)?;
         unit_range("rim.follow_light", self.follow_light)
+    }
+}
+
+/// Per-light banded highlight that replaces the physical specular, blended by
+/// `HybridSurface::specular` (REQ-STY-004). Band shape only; other shapes arrive later.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StylizedSpecular {
+    /// Highlight size, in `0..=1`: the region where `1 - N·H <= size`.
+    pub size: f32,
+    /// Soft edge width, in `0..=1`.
+    pub feather: f32,
+    /// Linear RGB in the working space, each `>= 0`.
+    pub color: [f32; 3],
+    /// Multiplier on the highlight, `>= 0`; independent of the light's strength.
+    pub strength: f32,
+}
+
+impl Default for StylizedSpecular {
+    fn default() -> Self {
+        Self {
+            size: 0.05,
+            feather: 0.02,
+            color: [1.0; 3],
+            strength: 1.0,
+        }
+    }
+}
+
+impl StylizedSpecular {
+    fn validate(&self) -> Result<(), StylizationError> {
+        if !self.color.iter().all(|c| c.is_finite() && *c >= 0.0) {
+            return Err(StylizationError::OutOfRange("specular.color"));
+        }
+        if !(self.strength.is_finite() && self.strength >= 0.0) {
+            return Err(StylizationError::OutOfRange("specular.strength"));
+        }
+        unit_range("specular.size", self.size)?;
+        unit_range("specular.feather", self.feather)
     }
 }
 

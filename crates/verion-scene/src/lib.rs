@@ -12,7 +12,7 @@ pub use color::{ColorSpace, Oetf, OutputTransform, ToneMap};
 pub use image::{Image, ImageError};
 pub use material::{
     Aov, BaseBsdf, ColorAdjust, HybridSurface, Material, OutputChannels, RimLight, ShadowPalette,
-    StylizationError, StylizationLayer, ToonRamp,
+    StylizationError, StylizationLayer, StylizedSpecular, ToonRamp,
 };
 pub use mesh::{Mesh, MeshError};
 pub use scene::{
