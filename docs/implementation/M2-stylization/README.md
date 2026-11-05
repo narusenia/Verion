@@ -17,9 +17,9 @@
 | 10 | 最小 Viewer（累積・AOV 切替・パラメータ変更→再累積） | REQ-VIEW-002 | 未着手 |
 | 11 | Stylization 評価の初期版（Art Direction 一致・デノイズによる消失） | REQ-QA-003 | 未着手 |
 | 12 | 写実材質の拡充（多重散乱補償・clearcoat・sheen・Dispersion の RGB 近似） | REQ-CORE-003 | 未着手 |
-| 13 | PostProcess の枠と最小の色調整 | REQ-STY-011 | 未着手 |
+| 13 | PostProcess の枠と最小の色調整 | REQ-STY-011 | 進行中（枠は済: `verion-stylization::postprocess` の `PostFrame` と、最初の Pass の `outline`。色調整は未着手） |
 | 14 | 間接光の平坦化（`HybridSurface.gi`） | REQ-STY-001 | 済（間接拡散を「アルベド × 材質ごとの一定の環境光」へ混ぜる。一定値はフレーム内の間接拡散の和 ÷ アルベドの和。Albedo AOV を Pass に渡す。実画像は未確認） |
-| 15 | 最小の輪郭線（Normal・Depth・Object ID・Material ID から画面空間で作る。項目 13 の枠の最初の Pass。時間的安定性は M8） | REQ-STY-009 / 011 | 未着手 |
+| 15 | 最小の輪郭線（Normal・Depth・Object ID・Material ID から画面空間で作る。項目 13 の枠の最初の Pass。時間的安定性は M8） | REQ-STY-009 / 011 | 済（材質ごとの `outlineStyle` と `hybridSurface.outline`（不透明度）。線は近い側の物体の内側に引き、太さは画素単位。実画像（球と床）で確認） |
 
 ## 完了条件
 
