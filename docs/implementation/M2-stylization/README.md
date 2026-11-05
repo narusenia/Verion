@@ -12,7 +12,7 @@
 | 5 | StylizedSpecular・RimLight | REQ-STY-004 / 005 | 進行中（RimLight は済: IR・glTF 拡張・Pass と、実画像（球と床）での確認まで。ライトスロットは拡散 `u`・鏡面 `s`・方向・可視性を持ち、層は材質に書いた順に適用する。StylizedSpecular は帯状と、`ramp` による多段まで済（IR・glTF 拡張・Pass）。楕円・手描き風は後続） |
 | 6 | Lighting AOV の分離出力 | REQ-STY-006 | 進行中（一次ヒットの DirectDiffuse・IndirectDiffuse・Specular・Transmission・Emission・Visibility を分離し、`render-cli --lighting-aovs` で EXR に出力（光ごとのスロットは EXR に出さず内部入力。1 ピクセル約 260 バイト。光ごとのスロットは拡散 `u`・鏡面 `s`・方向・可視性を持つ）。5 成分の和はビューティと一致。間接光は最初のバウンスのローブ側に入れる。Normal・Depth・Object ID は M1 から出力済み。Material ID も出力済み。Motion Vector は M5 に送る） |
 | 7 | Stylization Pass（一次ヒット Hybrid） | REQ-STY-007 | 進行中（`verion-stylization` クレートに、AOV から最終色を合成する Pass（デノイズ抜き）を追加。層は材質に書いた順に適用する（ToonRamp・ShadowPalette・RimLight・StylizedSpecular と `gi`）。ramp は光ごとの cosθ × 可視性で段階化する（lighting AOV に光ごとのスロットを持つ）。`render-cli --mode stylized` で接続済み。Toon の見た目は実画像で確認済み（点光源・太陽つき HDRI）。デノイズ（項目 8）は未着手） |
-| 8 | デノイズ（OIDN / MetalFX の選定を ADR に記録） | REQ-ACC-001 | 未着手 |
+| 8 | デノイズ（OIDN / MetalFX の選定を ADR に記録） | REQ-ACC-001 | 進行中（選定は済: ADR-0013 で OIDN を先に採用、MetalFX は動画の段階で再評価。依存の追加と実装は未着手） |
 | 9 | Viewer の GUI 技術を決める | REQ-VIEW-002 | 済（winit + egui。ADR-0012） |
 | 10 | 最小 Viewer（累積・AOV 切替・パラメータ変更→再累積） | REQ-VIEW-002 | 済（`verion-viewer` クレート（`viewer scene.gltf`）。累積表示（プログレスバー付き）、AOV 切替（Beauty・Albedo・Normal・Depth）、Stylized 切替と色調整スライダ、多重散乱の切替→再累積。表示は egui テクスチャ（ADR-0012）。軌道カメラ（ドラッグ・スクロール）、ウィンドウ追従の解像度、材質ごとの Stylization スライダも済。Stylization は後処理なので再累積は要らない。操作感の確認は協議） |
 | 11 | Stylization 評価の初期版（Art Direction 一致・デノイズによる消失） | REQ-QA-003 | 未着手 |
