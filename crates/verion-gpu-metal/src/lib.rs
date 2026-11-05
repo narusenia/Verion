@@ -5,7 +5,7 @@ mod accel;
 mod renderer;
 
 pub use accel::{Blas, Instance, Tlas};
-pub use renderer::{Accumulation, Aovs, LightingAovs, Renderer};
+pub use renderer::{Accumulation, Aovs, Integrator, LightingAovs, Renderer};
 
 use std::fmt;
 
@@ -14,7 +14,7 @@ use objc2_metal::{MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLDevice};
 
 pub(crate) type Obj<T> = Retained<ProtocolObject<T>>;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Error {
     NoDevice,
     /// The chip has no hardware ray tracing (Apple M3 or later is required).

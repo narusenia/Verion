@@ -1,6 +1,10 @@
 //! Uploads a Scene IR snapshot and renders AOVs with the Slang-generated kernels.
 
-use std::{collections::HashMap, ffi::c_void, ptr::NonNull};
+use std::{cell::OnceCell, collections::HashMap, ffi::c_void, ptr::NonNull};
+
+mod wavefront;
+
+pub use wavefront::Integrator;
 
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
@@ -18,6 +22,11 @@ const PATHTRACE_MSL: &str = include_str!("../shaders/pathtrace.metal");
 
 /// Path length limit. Radiance beyond it is dropped, so closed furnaces read slightly dark.
 const MAX_DEPTH: u32 = 8;
+
+type CommandBuffer = Obj<dyn objc2_metal::MTLCommandBuffer>;
+type Encoder = Obj<dyn MTLComputeCommandEncoder>;
+/// Words of the parameter block; must match `params` in `shaders/include/pt_core.slang`.
+const PARAM_WORDS: usize = 32;
 const MATERIAL_WORDS: usize = 22;
 const LIGHT_WORDS: usize = 16;
 /// Words per emissive triangle; must match `shaders/pathtrace.slang`.
@@ -314,6 +323,11 @@ pub struct Renderer {
     pathtrace: Obj<dyn MTLComputePipelineState>,
     /// Bound in place of the lighting buffer when an accumulation has none.
     no_lighting: Obj<dyn MTLBuffer>,
+    integrator: Integrator,
+    /// Wavefront only: time extend and shade separately (see `run_wavefront`).
+    stage_timing: bool,
+    /// Compiled on first use, so megakernel-only users skip the compile.
+    wavefront: OnceCell<Result<wavefront::Pipelines, Error>>,
 }
 
 impl Renderer {
@@ -567,6 +581,9 @@ impl Renderer {
             aov: pipeline(ctx, AOV_MSL, "aov")?,
             pathtrace: pipeline(ctx, PATHTRACE_MSL, "pathtrace")?,
             no_lighting: upload::<f32>(ctx, &[])?,
+            integrator: Integrator::default(),
+            stage_timing: false,
+            wavefront: OnceCell::new(),
         })
     }
 
@@ -583,6 +600,22 @@ impl Renderer {
     /// cross-check against them needs.
     pub fn set_multiscatter(&mut self, on: bool) {
         self.multiscatter = on;
+    }
+
+    /// Chooses the megakernel (the default) or the wavefront path tracer for later `accumulate`
+    /// calls. Both run the same path code and give the same image (REQ-GPU-005).
+    pub fn set_integrator(&mut self, integrator: Integrator) {
+        self.integrator = integrator;
+    }
+
+    pub fn integrator(&self) -> Integrator {
+        self.integrator
+    }
+
+    /// Wavefront only: submit each stage separately so `Accumulation::stage_seconds` splits the GPU
+    /// time into extend (closest-hit tracing) and shade (REQ-GPU-004). Slows the render down.
+    pub fn set_stage_timing(&mut self, on: bool) {
+        self.stage_timing = on;
     }
 
     /// World-space normal of the first hit per pixel, row-major from the top-left; misses are zero.
@@ -748,6 +781,10 @@ pub struct Accumulation {
     gpu_seconds: f64,
     /// Running sums of the lighting split, when requested.
     lighting: Option<Obj<dyn MTLBuffer>>,
+    /// Path queues and state, made on the first wavefront `accumulate`.
+    wavefront: Option<wavefront::Buffers>,
+    /// GPU seconds of the extend and shade stages, when stage timing is on.
+    stage_seconds: Option<[f64; 2]>,
 }
 
 impl Accumulation {
@@ -849,13 +886,24 @@ impl Accumulation {
     }
 
     /// GPU execution time of all `accumulate` calls so far, from command-buffer timestamps.
-    /// shortcut: one megakernel, so no trace / shade split; that needs the wavefront split (REQ-GPU-005).
+    /// The trace / shade split is `stage_seconds` (wavefront only).
     pub fn gpu_seconds(&self) -> f64 {
         self.gpu_seconds
     }
 
     pub fn samples(&self) -> u32 {
         self.samples
+    }
+
+    /// GPU seconds spent in the wavefront's extend (closest hit, with the dispatch sizing) and shade
+    /// (shading with its shadow rays) stages; `None` unless `Renderer::set_stage_timing` was on.
+    pub fn stage_seconds(&self) -> Option<[f64; 2]> {
+        self.stage_seconds
+    }
+
+    /// GPU memory of the wavefront queues and path state (0 until a wavefront `accumulate`).
+    pub fn wavefront_bytes(&self) -> usize {
+        self.wavefront.as_ref().map_or(0, wavefront::Buffers::bytes)
     }
 
     /// Mean radiance per pixel, row-major from the top-left. All zero before the first sample.
@@ -895,6 +943,8 @@ impl Renderer {
             samples: 0,
             gpu_seconds: 0.0,
             lighting: None,
+            wavefront: None,
+            stage_seconds: None,
         })
     }
 
@@ -919,7 +969,7 @@ impl Renderer {
 
     /// Traces `samples` more paths per pixel into `acc` and waits for the GPU.
     pub fn accumulate(&self, acc: &mut Accumulation, samples: u32) -> Result<(), Error> {
-        let mut params = [0u32; 30];
+        let mut params = [0u32; PARAM_WORDS];
         params[0] = acc.width;
         params[1] = acc.height;
         params[2] = self.camera[2].to_bits();
@@ -942,6 +992,32 @@ impl Renderer {
         params[28] = acc.lighting.is_some() as u32;
         params[29] = self.multiscatter as u32;
 
+        if self.integrator == Integrator::Wavefront && acc.wavefront.is_none() {
+            let paths = acc.width as usize * acc.height as usize;
+            acc.wavefront = Some(wavefront::Buffers::new(
+                &self.ctx,
+                paths,
+                acc.lighting.is_some(),
+            )?);
+        }
+
+        if self.integrator == Integrator::Wavefront {
+            self.run_wavefront(acc, &mut params, samples)?;
+        } else {
+            let (cb, enc) = self.open_encoder(acc)?;
+            // SAFETY: `open_encoder` set bindings 0..17.
+            unsafe { self.encode_megakernel(&enc, acc, &mut params, samples) };
+            enc.endEncoding();
+            cb.commit();
+            cb.waitUntilCompleted();
+            acc.gpu_seconds += cb.GPUEndTime() - cb.GPUStartTime();
+        }
+        acc.samples += samples;
+        Ok(())
+    }
+
+    /// A command buffer and a compute encoder with the path tracer's bindings 0..17 set.
+    fn open_encoder(&self, acc: &Accumulation) -> Result<(CommandBuffer, Encoder), Error> {
         let cb = self
             .ctx
             .queue
@@ -979,33 +1055,42 @@ impl Renderer {
                 0,
                 17,
             );
-            for k in 0..samples {
-                params[6] = acc.samples + k;
+        }
+        Ok((cb, enc))
+    }
+
+    /// # Safety
+    /// `enc` must have bindings 0..17 of `shaders/pathtrace.slang` set.
+    unsafe fn encode_megakernel(
+        &self,
+        enc: &ProtocolObject<dyn MTLComputeCommandEncoder>,
+        acc: &Accumulation,
+        params: &mut [u32; PARAM_WORDS],
+        samples: u32,
+    ) {
+        for k in 0..samples {
+            params[6] = acc.samples + k;
+            // SAFETY: the block outlives the call and Metal copies it.
+            unsafe {
                 enc.setBytes_length_atIndex(
-                    NonNull::from(&params).cast::<c_void>(),
-                    size_of_val(&params),
+                    NonNull::from(&*params).cast::<c_void>(),
+                    size_of_val(params),
                     6,
                 );
-                enc.dispatchThreads_threadsPerThreadgroup(
-                    MTLSize {
-                        width: acc.width as usize,
-                        height: acc.height as usize,
-                        depth: 1,
-                    },
-                    MTLSize {
-                        width: 8,
-                        height: 8,
-                        depth: 1,
-                    },
-                );
             }
+            enc.dispatchThreads_threadsPerThreadgroup(
+                MTLSize {
+                    width: acc.width as usize,
+                    height: acc.height as usize,
+                    depth: 1,
+                },
+                MTLSize {
+                    width: 8,
+                    height: 8,
+                    depth: 1,
+                },
+            );
         }
-        enc.endEncoding();
-        cb.commit();
-        cb.waitUntilCompleted();
-        acc.gpu_seconds += cb.GPUEndTime() - cb.GPUStartTime();
-        acc.samples += samples;
-        Ok(())
     }
 
     /// One-shot render: mean radiance over `samples` paths per pixel.
