@@ -184,7 +184,7 @@ Integrated Stylization（REQ-STY-010）へ拡張できるよう、次を v0.1 �
 
 ### 説明
 
-`OutlineStyle`、`FaceShadowController`（Face SDF）、`HairHighlight`。独立 Pass に分け、時間的安定性を評価する。M8。
+`OutlineStyle`、`FaceShadowController`（Face SDF）、`HairHighlight`。独立 Pass に分け、時間的安定性を評価する。M8。ただし `OutlineStyle` の最小版（出力済みの Normal・Depth・Object ID・Material ID から画面空間で作る静止画の輪郭）は、REQ-STY-011 の最初の Pass として M2 で入れる。
 
 ### 受入条件
 

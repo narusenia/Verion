@@ -27,7 +27,7 @@ Verion は、Blender / Cinema 4D / Maya などの DCC から使える GPU レン
 - HybridSurface・ToonRamp・ShadowPalette・StylizedSpecular・RimLight（一次ヒットの Hybrid 方式）
 - 写実材質の拡充（多重散乱補償、clearcoat・sheen、Dispersion の RGB 近似）
 - Lighting AOV の分離出力、EXR 出力、デノイズ
-- PostProcess の枠と最小の色調整
+- PostProcess の枠、最小の色調整、最小の輪郭線
 - `render-cli` と最小 Viewer（累積表示、AOV 切替、Stylization パラメータ変更→再累積）
 - Reference 検証（Mitsuba 3 照合、解析解テスト）、GPU 計測とベンチ
 
