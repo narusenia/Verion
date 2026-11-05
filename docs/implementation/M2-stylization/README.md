@@ -21,6 +21,7 @@
 | 14 | 間接光の平坦化（`HybridSurface.gi`） | REQ-STY-001 | 済（間接拡散を「アルベド × 材質ごとの一定の環境光」へ混ぜる。一定値はフレーム内の間接拡散の和 ÷ アルベドの和。Albedo AOV を Pass に渡す。実画像は未確認） |
 | 15 | 最小の輪郭線（Normal・Depth・Object ID・Material ID から画面空間で作る。項目 13 の枠の最初の Pass。時間的安定性は M8） | REQ-STY-009 / 011 | 済（材質ごとの `outlineStyle` と `hybridSurface.outline`（不透明度）。線は近い側の物体の内側に引き、太さは画素単位。実画像（球と床）で確認） |
 | 16 | MatCap（視線空間の法線で画像を引く陰影。1 枚で拡散・鏡面を置き換える。別画像への拡張は後続） | REQ-STY-012 | 進行中（IR・Pass・glTF 取り込み・Viewer のスライダ・見本シーン（`scenes/matcap_compare.gltf`、画像は `scripts/gen_matcaps.py` の手続き生成）まで済。Viewer 画面での操作確認が残り。拡散と鏡面を別画像にする拡張は後続） |
+| 17 | 見本シーンと検証用素材 | （補助） | 進行中（手続き HDRI 5 種（`assets/hdri/`、`scripts/gen_hdri.py`）と、`scenes/` の見本シーン（showcase・sheen・MatCap・Toon 5 種・多灯・粗さ違いのガラス。説明は `scenes/README.md`）。Cornell Box の glTF 化と、実写の CC0 HDRI は未着手） |
 
 ## 完了条件
 
