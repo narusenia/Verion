@@ -2,8 +2,8 @@
 
 use eframe::egui::{self, Ui};
 use verion_scene::{
-    BaseBsdf, ColorAdjust, HybridSurface, Material, OutlineStyle, RimLight, ShadowPalette,
-    StylizationLayer, StylizedSpecular, ToonRamp,
+    BaseBsdf, ColorAdjust, HighlightShape, HybridSurface, Material, OutlineStyle, RimLight,
+    ShadowPalette, StylizationLayer, StylizedSpecular, ToonRamp,
 };
 
 use egui_material_icons::icons::*;
@@ -258,6 +258,33 @@ fn layer_ui(ui: &mut Ui, layer: &mut StylizationLayer, id: usize) {
             slider(ui, &mut r.strength, 0.0..=4.0, "strength");
         }
         StylizationLayer::StylizedSpecular(s) => {
+            ui.horizontal(|ui| {
+                let round = matches!(s.shape, HighlightShape::Band);
+                if ui.selectable_label(round, "round").clicked() && !round {
+                    s.shape = HighlightShape::Band;
+                }
+                let ellipse = matches!(s.shape, HighlightShape::Ellipse { .. });
+                if ui.selectable_label(ellipse, "ellipse").clicked() && !ellipse {
+                    s.shape = HighlightShape::Ellipse {
+                        stretch: 2.0,
+                        angle: 0.0,
+                    };
+                }
+                // shortcut: an image shape comes from the glTF only; picking an image here needs the scene's image list.
+                if let HighlightShape::Image { image, .. } = s.shape {
+                    ui.label(format!("image {}", image.index()));
+                }
+            });
+            match &mut s.shape {
+                HighlightShape::Band => {}
+                HighlightShape::Ellipse { stretch, angle } => {
+                    slider(ui, stretch, 0.1..=10.0, "stretch");
+                    slider(ui, angle, -180.0..=180.0, "angle deg");
+                }
+                HighlightShape::Image { angle, .. } => {
+                    slider(ui, angle, -180.0..=180.0, "angle deg");
+                }
+            }
             color(ui, &mut s.color, "color");
             unit(ui, &mut s.size, "size");
             unit(ui, &mut s.feather, "feather");
