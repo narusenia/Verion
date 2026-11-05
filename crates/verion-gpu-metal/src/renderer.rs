@@ -265,6 +265,7 @@ pub struct Renderer {
     aperture: f32,
     focus: f32,
     camera: [f32; 16],
+    multiscatter: bool,
     normals: Obj<dyn MTLComputePipelineState>,
     aov: Obj<dyn MTLComputePipelineState>,
     pathtrace: Obj<dyn MTLComputePipelineState>,
@@ -504,11 +505,19 @@ impl Renderer {
             aperture: cam.aperture_radius,
             focus: cam.focus_distance,
             camera,
+            multiscatter: true,
             normals: pipeline(ctx, NORMALS_MSL, "normals")?,
             aov: pipeline(ctx, AOV_MSL, "aov")?,
             pathtrace: pipeline(ctx, PATHTRACE_MSL, "pathtrace")?,
             no_lighting: upload::<f32>(ctx, &[])?,
         })
+    }
+
+    /// Turns the multiple-scattering compensation of rough metals on (the default) or off. Off gives
+    /// the plain single-scattering GGX that other renderers such as Mitsuba 3 use, which the
+    /// cross-check against them needs.
+    pub fn set_multiscatter(&mut self, on: bool) {
+        self.multiscatter = on;
     }
 
     /// World-space normal of the first hit per pixel, row-major from the top-left; misses are zero.
@@ -845,7 +854,7 @@ impl Renderer {
 
     /// Traces `samples` more paths per pixel into `acc` and waits for the GPU.
     pub fn accumulate(&self, acc: &mut Accumulation, samples: u32) -> Result<(), Error> {
-        let mut params = [0u32; 29];
+        let mut params = [0u32; 30];
         params[0] = acc.width;
         params[1] = acc.height;
         params[2] = self.camera[2].to_bits();
@@ -866,6 +875,7 @@ impl Renderer {
         // Footprint of one pixel per unit of travelled distance, for texture filtering.
         params[27] = (2.0 * self.camera[2] / acc.height as f32).to_bits();
         params[28] = acc.lighting.is_some() as u32;
+        params[29] = self.multiscatter as u32;
 
         let cb = self
             .ctx

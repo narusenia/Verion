@@ -391,7 +391,10 @@ mod imp {
             write_exr(&dir.join("normal.exr"), &map, &linear).expect("write normal map");
         }
         let ctx = MetalContext::new().expect("Metal ray tracing is required");
-        let renderer = Renderer::new(&ctx, &scene).expect("renderer");
+        let mut renderer = Renderer::new(&ctx, &scene).expect("renderer");
+        // Mitsuba 3's rough conductor is single-scattering, so the cross-check turns the
+        // multiple-scattering compensation off.
+        renderer.set_multiscatter(false);
 
         let beauty = renderer.render(w, h, spp).expect("render");
         let display = OutputTransform::display();

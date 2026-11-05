@@ -591,9 +591,16 @@ fn rough_metal_highlight_matches_ggx() {
         intensity,
     });
     s.set_camera(camera_at_z(3.0));
-    let img = Renderer::new(&ctx, &s).unwrap().render(65, 65, 64).unwrap();
-    let got = img[32 * 65 + 32][0];
-    assert!((got - 1.0).abs() < 0.02, "{got}");
+    let mut r = Renderer::new(&ctx, &s).unwrap();
+    // The analytic value is plain single-scattering GGX.
+    r.set_multiscatter(false);
+    let single = r.render(65, 65, 64).unwrap()[32 * 65 + 32][0];
+    assert!((single - 1.0).abs() < 0.02, "{single}");
+    // The compensation adds the energy lost to multiple scattering: the highlight is scaled by
+    // 1 / E(1, alpha), about 1.09 here (E = 0.915 from the generated table).
+    r.set_multiscatter(true);
+    let comp = r.render(65, 65, 64).unwrap()[32 * 65 + 32][0];
+    assert!((comp / single - 1.09).abs() < 0.02, "{comp} vs {single}");
 }
 
 /// Emitter-only material: black base, constant emitted radiance.
@@ -1013,7 +1020,7 @@ fn ggx_albedo(cos_o: f64, alpha: f64) -> f64 {
 
 /// A flat metal plane tilted so the camera sees it at `cos_o`; under a uniform sky of radiance 1
 /// every reflected path escapes, so the pixel is exactly the directional albedo.
-fn metal_plane_pixel(ctx: &MetalContext, roughness: f32, cos_o: f32) -> f32 {
+fn metal_plane_pixel(ctx: &MetalContext, roughness: f32, cos_o: f32, multiscatter: bool) -> f32 {
     let mut s = Scene::new();
     let sin_o = (1.0 - cos_o * cos_o).sqrt();
     let (t1, t2, f) = ([cos_o, 0.0, -sin_o], [0.0, 1.0, 0.0], 5.0);
@@ -1048,10 +1055,9 @@ fn metal_plane_pixel(ctx: &MetalContext, roughness: f32, cos_o: f32) -> f32 {
     .unwrap();
     s.add_light(Light::Environment { color: [1.0; 3] });
     s.set_camera(camera_at_z(3.0));
-    let img = Renderer::new(ctx, &s)
-        .unwrap()
-        .render(32, 32, 4096)
-        .unwrap();
+    let mut r = Renderer::new(ctx, &s).unwrap();
+    r.set_multiscatter(multiscatter);
+    let img = r.render(32, 32, 4096).unwrap();
     let img = &img;
     let c: Vec<f32> = (14..18)
         .flat_map(|y| (14..18).map(move |x| img[y * 32 + x][0]))
@@ -1064,12 +1070,28 @@ fn rough_metal_furnace_matches_ggx_single_scatter_albedo() {
     let Some(ctx) = context() else { return };
     for roughness in [0.1f32, 0.3, 0.5, 1.0] {
         for cos_o in [1.0f32, 0.5] {
-            let got = metal_plane_pixel(&ctx, roughness, cos_o);
+            let got = metal_plane_pixel(&ctx, roughness, cos_o, false);
             let alpha = (roughness * roughness) as f64;
             let want = ggx_albedo(cos_o as f64, alpha) as f32;
             assert!(
                 (got - want).abs() < 0.01,
                 "roughness {roughness}, cos {cos_o}: {got} vs {want}"
+            );
+        }
+    }
+}
+
+#[test]
+fn multiscatter_compensation_restores_the_rough_metal_furnace() {
+    let Some(ctx) = context() else { return };
+    // A white metal (F0 = 1) under a uniform sky must give back the sky: the energy single
+    // scattering loses is returned, at any roughness and view angle.
+    for roughness in [0.3f32, 0.5, 1.0] {
+        for cos_o in [1.0f32, 0.5, 0.2] {
+            let got = metal_plane_pixel(&ctx, roughness, cos_o, true);
+            assert!(
+                (got - 1.0).abs() < 0.02,
+                "roughness {roughness}, cos {cos_o}: {got}"
             );
         }
     }

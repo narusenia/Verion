@@ -2,6 +2,8 @@
 // Flat word buffers only; layouts are documented next to each binding and mirrored in
 // crates/verion-gpu-metal/src/renderer.rs.
 
+#include "include/ggx_albedo.slang"
+
 RaytracingAccelerationStructure scene;
 StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
@@ -11,7 +13,7 @@ StructuredBuffer<float> materials;  // 16 words: base color rgb, emission rgb, m
 StructuredBuffer<uint> lights;      // 16 words: kind (0 point, 1 directional, 2 spot), color rgb, intensity, position or travel direction xyz,
                                     // spot axis xyz, spot falloff scale, spot falloff offset, 3 pad (floats as bits)
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
-                                    // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle, 28 lighting AOV enable
+                                    // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle, 28 lighting AOV enable, 29 multiple-scattering compensation enable
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
 StructuredBuffer<float> emitters;   // 16 words per emissive world-space triangle: p0, p1, p2, radiance rgb, area, selection pdf, 2 pad
 StructuredBuffer<float> emitCdf;    // cumulative selection probability per emitter triangle, last entry 1
@@ -307,6 +309,32 @@ struct Lobes
     float3 specular;
 };
 
+// Single-scattering GGX directional albedo E(cos wo, alpha) for F = 1, bilinear in the generated
+// table (indexed by sqrt(alpha) and cos wo).
+float ggxAlbedo(float cosO, float alpha)
+{
+    float x = saturate(cosO) * (GGX_ALBEDO_N - 1);
+    float y = saturate(sqrt(alpha)) * (GGX_ALBEDO_N - 1);
+    uint x0 = min(uint(x), GGX_ALBEDO_N - 2);
+    uint y0 = min(uint(y), GGX_ALBEDO_N - 2);
+    float fx = x - x0;
+    float fy = y - y0;
+    float a = lerp(GGX_ALBEDO[y0 * GGX_ALBEDO_N + x0], GGX_ALBEDO[y0 * GGX_ALBEDO_N + x0 + 1], fx);
+    float b = lerp(GGX_ALBEDO[(y0 + 1) * GGX_ALBEDO_N + x0], GGX_ALBEDO[(y0 + 1) * GGX_ALBEDO_N + x0 + 1], fx);
+    return lerp(a, b, fy);
+}
+
+// Energy a rough metal's single-scattering GGX loses to light that bounces between microfacets:
+// the specular lobe is scaled by 1 + F0 * (1 / E(cos wo) - 1), which restores a white furnace to 1
+// for F = 1 (Fdez-Aguera 2019). Depends on the view direction only, so it is not reciprocal.
+// 1 when the compensation is off.
+float3 multiscatterFactor(Surface s, float cosO)
+{
+    if (params[29] == 0)
+        return float3(1.0);
+    return 1.0 + s.albedo * (1.0 / max(ggxAlbedo(cosO, s.alpha), 0.05) - 1.0);
+}
+
 // f * cos(wi) of the reflective lobes, split into the diffuse base and the specular lobes.
 // Rough transmission is not included.
 Lobes evalLobes(Surface s, float3 woL, float3 wiL)
@@ -317,7 +345,7 @@ Lobes evalLobes(Surface s, float3 woL, float3 wiL)
     float core = D(hh.z, s.alpha) * G1(woL.z, s.alpha) * G1(wiL.z, s.alpha) / (4.0 * woL.z);
     float t = s.transmission;
     Lobes l;
-    l.specular = s.metallic * schlick(s.albedo, woh) * core
+    l.specular = s.metallic * schlick(s.albedo, woh) * multiscatterFactor(s, woL.z) * core
         + (1.0 - s.metallic) * (t * fresnelDielectric(woh, s.eta) + (1.0 - t) * fresnelDielectric(woh, s.ior)) * core;
     l.diffuse = (1.0 - s.metallic) * (1.0 - t) * (1.0 - s.fSel) * s.albedo * (wiL.z / PI);
     return l;
@@ -763,7 +791,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
             float woh = dot(woL, h);
             wiL = 2.0 * woh * h - woL;
             ok = wiL.z > 0.0;
-            w = schlick(albedo, woh) * G1(max(wiL.z, 0.0), alpha);
+            w = schlick(albedo, woh) * multiscatterFactor(surf, woL.z) * G1(max(wiL.z, 0.0), alpha);
         }
         else if (lobe < metallic + (1.0 - metallic) * transmission)
         {
