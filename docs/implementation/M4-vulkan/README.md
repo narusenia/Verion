@@ -5,7 +5,7 @@
 
 | # | 項目 | REQ | 状態 |
 |---|------|-----|------|
-| 1 | `verion-gpu` を作り、CLI と Viewer が使う面（シーンの読み込み、カメラと設定、Accumulation、AOV、メモリ）を `RayTracingBackend` として切り出す。Metal は実装を移すだけで、画像はビット一致のまま | REQ-GPU-003 | 未着手 |
+| 1 | `verion-gpu` を作り、CLI と Viewer が使う面（シーンの読み込み、カメラと設定、Accumulation、AOV、メモリ）を `RayTracingBackend` として切り出す。Metal は実装を移すだけで、画像はビット一致のまま | REQ-GPU-003 | 済（`crates/verion-gpu`。trait は `RayTracingBackend` と `Accumulation`、共有型は `Integrator`・`Adaptive`・`Aovs`・`LightingAovs`・`MemoryUsage`。Context とエラーは Backend の関連型。切り出し前後で Stylized と Adaptive の画素が一致） |
 | 2 | Slang → SPIR-V の生成と検査を `mise run shaders` / `shaders:check` に足す。MSL と同じく生成物をコミットし、ビルドに slangc を要らなくする | REQ-GPU-002 | 未着手 |
 | 3 | `verion-gpu-vulkan`: Instance・Device・Queue と機能検出（ray query、acceleration structure、SER、timestamp）。必須機能がない環境は明示エラー、SER がなければ使わずに動く | REQ-GPU-006 / REQ-INFRA-006 | 未着手 |
 | 4 | BLAS / TLAS の構築と、メッシュ・材質・ライト・テクスチャ・環境マップの転送 | REQ-GPU-006 | 未着手 |

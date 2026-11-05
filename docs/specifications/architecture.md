@@ -5,14 +5,17 @@
 ## 依存の方向
 
 ```
-verion-scene ─┐
-              ├─> verion-integrator ─> verion-gpu ─> verion-gpu-metal / verion-gpu-vulkan
-verion-material ─┘
+verion-scene ─> verion-gpu（契約と共有型）<─ verion-gpu-metal / verion-gpu-vulkan
+                     ^                              ^
+                     └── render-cli / viewer ───────┘（OS ごとに Backend を 1 つ選ぶ）
 ```
+
+矢印は Cargo の依存の向き。`verion-integrator` と `verion-material` は必要になった時点で足す。
 
 - `verion-scene`、`verion-geometry`、`verion-material` は GPU API に依存しない。入力形式（glTF など）の型も公開 API に出さない
 - `verion-stylization` は Stylization Pass（ADR-0008、REQ-STY-007）を持つ。`verion-scene` だけに依存し、GPU API には依存しない。Backend が出す AOV を入力に最終色を合成し、Reference モードは呼ばない
-- `verion-gpu` が Backend の共通の契約（`RayTracingBackend`、`NeuralBackend`、Capabilities）を持つ。抽象は最小限にし、バッファや同期の違いは隠しすぎない
+- `verion-gpu` が Backend の共通の契約（`RayTracingBackend` と `Accumulation`。`NeuralBackend` と Capabilities は必要になった時点で足す）と、契約をまたぐ型（`Integrator`、`Adaptive`、`Aovs`、`LightingAovs`、`MemoryUsage`）を持つ。GPU API に依存しない。抽象は最小限にし、バッファや同期の違いは隠しすぎない。エラーは Backend ごとの型（`RayTracingBackend::Error`）
+- CLI と Viewer は `verion-gpu` の trait だけを使い、Backend は OS ごとの型別名（`type Backend = verion_gpu_metal::Renderer` など）で 1 つ選ぶ
 - `verion-gpu-metal` と `verion-gpu-vulkan` は互いに依存しない。GPU API を直接呼ぶので、`unsafe` を使ってよいのはこの 2 つのクレートと `verion-denoise` だけ
 - `verion-denoise` は OIDN（ADR-0013）を実行時に読み込む（`libloading`）。C API を呼ぶので `unsafe` を許す。GPU API にも他の Verion クレートにも依存しない。OIDN が無い環境でもビルドでき、デノイズだけが使えない。読み込み先は `VERION_OIDN_LIB`、既定の検索パス、Homebrew の順
 - `verion-render-io` が入力（glTF）と出力（画像）を扱い、`verion-scene` に依存する。glTF の型はこのクレートの外へ出さない。`verion-scene` は逆に `verion-render-io` を知らない
