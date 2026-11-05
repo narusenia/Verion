@@ -10,18 +10,30 @@
 ## 決めたこと
 - ramp の応答は光ごとの cosθ×可視性。面光源・環境光は 1 枠にまとめる
 - Motion Vector は M5 へ。デノイズと Viewer は依存追加が絡むので、頼まれたときだけ
-- 順序: StylizedSpecular・RimLight → Viewer → デノイズ
+- 順序: 協議と精査 → StylizedSpecular・RimLight → Viewer → デノイズ
 
-## 未解決（協議待ち。あとで）
-- 面光源・環境光の近似、間接影の定義（間接拡散に補正をかける近似）、光 4 つ以上のスロット共有
+## 未解決
 - baseline は怪しい。AC 接続・温めた後にユーザーが `mise run bench record` を実行し、±2% を確認。それまで bench の 10% ゲートは当てにしない
 - ビューティ経路は lighting 追加で数 % 遅い（同一条件比 cube +6〜8%）。実機の OOM・HDRI 照合、M4 Pro 確認、項目 1・3 は M1 から継続
 - 未実施: ShadowPalette 実画像の確認（`scratchpad` の `shadow_*.exr` を tev で）
 
 ## 次の一手
-1. `Cargo.lock` の差分と本メモをコミットし、push の可否を確認
-2. REQ-STY-004・005（StylizedSpecular・RimLight）。IR 変種 → Pass → 拡張 → 仕様書の順。specular は `PixelInput.specular` 合計だけでは足りないので、光ごとの入力が要るか先に判断
-3. 変更ごとに `mise run check`（deny 含む）を push 前に回す。新依存は無断で足さない
+StylizedSpecular・RimLight の前に、次の 3 つを先にやる。実装には入らず、協議と精査を先にする。
+1. `Cargo.lock` の差分と本メモをコミット済みか確認し、push の可否を確認
+2. 協議（下の協議リスト）。結論が出るまで docs へは書かず、まとめて反映する
+3. 精査 2 本
+   - 物理側の現状と、写実の高品質に足りないものの精査: 多重散乱（GGX は単一散乱のみ）、clearcoat・sheen、SSS、ボリューム、髪の BSDF、Dispersion、スペクトル対応。現状は M1 の拡散・GGX 金属・誘電体（透過）まで
+   - Toon の表現力強化の精査: 今は拡散の ToonRamp と ShadowPalette のみで、Toon 寄りに偏っている。目標は ArkKnights: Endfield 風の見た目も含む（輪郭・顔影・髪ハイライト・網点などは REQ-STY-009 の M8 や PostProcess）。何を M2 に前倒しするかを決める
+- その後に REQ-STY-004・005（StylizedSpecular・RimLight）。specular は `PixelInput.specular` 合計だけでは足りないので、光ごとの入力が要るか先に判断
+- 変更ごとに `mise run check`（deny 含む）を push 前に回す。新依存は無断で足さない
+
+## 協議リスト（結論待ち）
+- 面光源・環境光の近似、間接影の定義、光 4 つ以上のスロット共有、Visibility の定義
+- 「写実と Toon を同じシーンで両方高品質に」を M3 以降の明示的な軸にするか
+- 写実側の材質の厚み（上の精査 1）。Dispersion は RGB 近似（IOR をチャンネルごとに変える）か、スペクトルか。`KHR_materials_dispersion` の仕様と `gltf` クレートの対応は未確認
+- 多層（材質の層重ね / Stylization 層の多層化 / 写実と Toon の出力合成のどれか未確認。協議で意味を確認）
+- PostProcess の計画（色収差、ブルーム、色調整、背景合成）
+- bench の baseline（ユーザーが温めてから再記録）
 
 ## 進め方
 - 論理単位で英語 1 行コミット、docs 更新は確認を取る。EXR は tev で見てもらう（`open -a tev`）
