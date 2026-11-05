@@ -2,10 +2,13 @@
 //! AOVs and the material's stylization layers. GPU independent. Reference mode never calls it.
 //!
 //! Implemented so far: `HybridSurface::diffuse` blending the direct diffuse toward a `ToonRamp`
-//! applied per light.
+//! applied per light, and `ShadowPalette` grading the shadowed part of the direct and indirect
+//! diffuse (strength from `HybridSurface::shadow`).
 //! The other components pass through unchanged until their layers land.
 
-use verion_scene::{HybridSurface, LIGHT_SLOTS, Material, StylizationLayer, ToonRamp};
+use verion_scene::{
+    ColorAdjust, HybridSurface, LIGHT_SLOTS, Material, ShadowPalette, StylizationLayer, ToonRamp,
+};
 
 /// The first-hit lighting split of one pixel, in the working space (see `LightingAovs`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -19,6 +22,39 @@ pub struct PixelInput {
     pub light_u: [[f32; 3]; LIGHT_SLOTS],
     /// Per light slot: cos(N, L) times visibility. The physical diffuse is `u * response`.
     pub light_response: [f32; LIGHT_SLOTS],
+}
+
+fn lum(c: [f32; 3]) -> f32 {
+    0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+}
+
+/// Hue shift, saturation and value change of a linear RGB color. Value is the largest channel, so
+/// HDR values keep their scale and black stays black.
+pub fn grade(c: [f32; 3], a: &ColorAdjust) -> [f32; 3] {
+    let v = c[0].max(c[1]).max(c[2]);
+    if v <= 0.0 {
+        return c;
+    }
+    let min = c[0].min(c[1]).min(c[2]);
+    let chroma = v - min;
+    let s = chroma / v;
+    let h = if chroma <= 0.0 {
+        0.0
+    } else if v == c[0] {
+        ((c[1] - c[2]) / chroma).rem_euclid(6.0)
+    } else if v == c[1] {
+        (c[2] - c[0]) / chroma + 2.0
+    } else {
+        (c[0] - c[1]) / chroma + 4.0
+    };
+    let h = (h + a.hue_shift / 60.0).rem_euclid(6.0);
+    let s = (s * a.saturation).min(1.0);
+    let v = v * a.value;
+    let f = |n: f32| {
+        let k = (n + h).rem_euclid(6.0);
+        v * (1.0 - s * k.min(4.0 - k).clamp(0.0, 1.0))
+    };
+    [f(5.0), f(3.0), f(1.0)]
 }
 
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
@@ -58,7 +94,12 @@ pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
         StylizationLayer::ToonRamp(t) => Some(t),
         _ => None,
     });
+    let palette = layers.iter().find_map(|l| match l {
+        StylizationLayer::ShadowPalette(s) => Some(*s),
+        _ => None,
+    });
     let mut diffuse = p.direct_diffuse;
+    let mut indirect = p.indirect_diffuse;
     if let (Some(HybridSurface { diffuse: k, .. }), Some(ramp)) = (hybrid, ramp) {
         let mut toon = [0.0f32; 3];
         for (u, &r) in p.light_u.iter().zip(&p.light_response) {
@@ -69,8 +110,31 @@ pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
         }
         diffuse = std::array::from_fn(|i| diffuse[i] + (toon[i] - diffuse[i]) * k);
     }
+    if let (
+        Some(HybridSurface { shadow: k, .. }),
+        Some(ShadowPalette {
+            direct,
+            indirect: ind,
+        }),
+    ) = (hybrid, palette)
+    {
+        // Shadowness: how much of the light the pixel could receive it does not (0 lit, 1 dark).
+        let potential: [f32; 3] = std::array::from_fn(|i| p.light_u.iter().map(|u| u[i]).sum());
+        let full = lum(potential);
+        let w = if full > 1.0e-6 {
+            (1.0 - lum(diffuse) / full).clamp(0.0, 1.0)
+        } else {
+            0.0
+        } * k;
+        let mix = |c: [f32; 3], a: &ColorAdjust| {
+            let g = grade(c, a);
+            std::array::from_fn(|i| c[i] + (g[i] - c[i]) * w)
+        };
+        diffuse = mix(diffuse, &direct);
+        indirect = mix(indirect, &ind);
+    }
     std::array::from_fn(|i| {
-        diffuse[i] + p.indirect_diffuse[i] + p.specular[i] + p.transmission[i] + p.emission[i]
+        diffuse[i] + indirect[i] + p.specular[i] + p.transmission[i] + p.emission[i]
     })
 }
 
@@ -194,6 +258,96 @@ mod tests {
         p.light_response[1] = 0.6;
         let out = stylize(&l, &p)[0];
         assert!((out - (2.0 / PI + 0.15)).abs() < 1e-6, "{out}");
+    }
+
+    fn close(a: [f32; 3], b: [f32; 3]) -> bool {
+        a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5)
+    }
+
+    #[test]
+    fn grade_is_identity_by_default_and_shifts_hue() {
+        let c = [0.8, 0.4, 0.2];
+        assert!(close(grade(c, &ColorAdjust::default()), c));
+        let boost = ColorAdjust {
+            value: 5.0,
+            ..Default::default()
+        };
+        assert_eq!(grade([0.0; 3], &boost), [0.0; 3]);
+        // Red shifted by 120 degrees is green; value halves it; zero saturation is grey.
+        let g = grade(
+            [1.0, 0.0, 0.0],
+            &ColorAdjust {
+                hue_shift: 120.0,
+                ..Default::default()
+            },
+        );
+        assert!(close(g, [0.0, 1.0, 0.0]), "{g:?}");
+        let g = grade(
+            c,
+            &ColorAdjust {
+                value: 0.5,
+                ..Default::default()
+            },
+        );
+        assert!(close(g, [0.4, 0.2, 0.1]), "{g:?}");
+        let g = grade(
+            c,
+            &ColorAdjust {
+                saturation: 0.0,
+                ..Default::default()
+            },
+        );
+        assert!(close(g, [0.8; 3]), "{g:?}");
+    }
+
+    fn shadow_layers(k: f32, direct: ColorAdjust, indirect: ColorAdjust) -> Vec<StylizationLayer> {
+        vec![
+            StylizationLayer::HybridSurface(HybridSurface {
+                shadow: k,
+                ..Default::default()
+            }),
+            StylizationLayer::ShadowPalette(ShadowPalette { direct, indirect }),
+        ]
+    }
+
+    #[test]
+    fn shadow_palette_grades_only_the_shadowed_part_and_each_component_separately() {
+        let dim = ColorAdjust {
+            value: 0.5,
+            ..Default::default()
+        };
+        let grey = ColorAdjust {
+            saturation: 0.0,
+            ..Default::default()
+        };
+        let tinted = |r: f32| {
+            let mut p = px(r);
+            p.light_u[0] = [0.8 / PI, 0.4 / PI, 0.2 / PI];
+            p.direct_diffuse = p.light_u[0].map(|u| u * r);
+            p.indirect_diffuse = [0.3, 0.2, 0.1];
+            p
+        };
+        // Fully lit: nothing is graded.
+        let lit = tinted(1.0);
+        assert!(close(
+            stylize(&shadow_layers(1.0, dim, dim), &lit),
+            stylize(&[], &lit)
+        ));
+        // Fully shadowed: each component takes its own grade.
+        let dark = tinted(0.0);
+        let base = stylize(&[], &dark);
+        let out = stylize(&shadow_layers(1.0, ColorAdjust::default(), dim), &dark);
+        assert!(
+            close(out, [base[0] - 0.15, base[1] - 0.1, base[2] - 0.05]),
+            "{out:?}"
+        );
+        let out = stylize(&shadow_layers(1.0, ColorAdjust::default(), grey), &dark);
+        assert!(
+            close(out, [base[0], base[1] + 0.1, base[2] + 0.2]),
+            "{out:?}"
+        );
+        // The strength comes from HybridSurface::shadow.
+        assert!(close(stylize(&shadow_layers(0.0, dim, dim), &dark), base));
     }
 
     #[test]
