@@ -10,7 +10,7 @@
 | 3 | HybridSurface | REQ-STY-001 | 進行中（IR の `HybridSurface` と検証は済。GPU 評価は未着手） |
 | 4 | ToonRamp・ShadowPalette | REQ-STY-002 / 003 | 進行中（`ToonRamp` の IR と検証は済。`ShadowPalette` と GPU 評価は未着手） |
 | 5 | StylizedSpecular・RimLight | REQ-STY-004 / 005 | 未着手 |
-| 6 | Lighting AOV の分離出力 | REQ-STY-006 | 進行中（一次ヒットの DirectDiffuse・IndirectDiffuse・Specular・Transmission・Emission・Visibility を分離し、`render-cli --lighting-aovs` で EXR に出力。5 成分の和はビューティと一致。間接光は最初のバウンスのローブ側に入れる。Normal・Depth・Object ID は M1 から出力済み。Material ID・Motion Vector は未実装） |
+| 6 | Lighting AOV の分離出力 | REQ-STY-006 | 進行中（一次ヒットの DirectDiffuse・IndirectDiffuse・Specular・Transmission・Emission・Visibility を分離し、`render-cli --lighting-aovs` で EXR に出力。5 成分の和はビューティと一致。間接光は最初のバウンスのローブ側に入れる。Normal・Depth・Object ID は M1 から出力済み。Material ID も出力済み。Motion Vector は未実装） |
 | 7 | Stylization Pass（一次ヒット Hybrid） | REQ-STY-007 | 未着手 |
 | 8 | デノイズ（OIDN / MetalFX の選定を ADR に記録） | REQ-ACC-001 | 未着手 |
 | 9 | Viewer の GUI 技術を決める | REQ-VIEW-002 | 未着手 |
