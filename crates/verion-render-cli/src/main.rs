@@ -220,6 +220,7 @@ fn run(args: &Args) -> Result<(), String> {
                 light_dir: &l.light_dir,
                 light_lit: &l.light_lit,
                 normal: &normals,
+                albedo: &aov.albedo,
                 material_id: &aov.material_id,
                 camera: *scene.camera(),
                 width: w as usize,

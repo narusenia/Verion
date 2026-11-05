@@ -8,8 +8,8 @@
 //! The other components pass through unchanged until their layers land.
 
 use verion_scene::{
-    Camera, ColorAdjust, LIGHT_SLOTS, Material, RimLight, ShadowPalette, StylizationLayer,
-    StylizedSpecular, ToonRamp,
+    Camera, ColorAdjust, HybridSurface, LIGHT_SLOTS, Material, RimLight, ShadowPalette,
+    StylizationLayer, StylizedSpecular, ToonRamp,
 };
 
 /// The first-hit lighting split of one pixel, in the working space (see `LightingAovs`).
@@ -19,6 +19,11 @@ pub struct PixelInput {
     pub normal: [f32; 3],
     /// World-space unit vector from the hit toward the camera (see `view_directions`).
     pub view: [f32; 3],
+    /// Base color at the hit (the Albedo AOV).
+    pub albedo: [f32; 3],
+    /// The material's mean indirect diffuse divided by albedo over the frame (see
+    /// `stylize_image`). `HybridSurface::gi` flattens the indirect diffuse toward `albedo * ambient`.
+    pub ambient: [f32; 3],
     pub direct_diffuse: [f32; 3],
     pub indirect_diffuse: [f32; 3],
     pub specular: [f32; 3],
@@ -121,16 +126,13 @@ pub fn ramp_color(ramp: &ToonRamp, response: f32) -> [f32; 3] {
 /// shortcut: emissive triangles and the environment share one slot, so their ramp input is the
 /// contribution-weighted mean response of the samples; soft edges from area lights are averaged.
 pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
-    // HybridSurface only carries the blend strengths the other layers read.
-    let hybrid = layers
-        .iter()
-        .find_map(|l| match l {
-            StylizationLayer::HybridSurface(h) => Some(*h),
-            _ => None,
-        })
-        .unwrap_or_default();
+    let hybrid = hybrid_of(layers);
     let mut diffuse = p.direct_diffuse;
-    let mut indirect = p.indirect_diffuse;
+    // `gi` flattens the indirect diffuse toward a uniform ambient fill before the layers grade it.
+    let mut indirect: [f32; 3] = std::array::from_fn(|i| {
+        let flat = p.albedo[i] * p.ambient[i];
+        p.indirect_diffuse[i] + (flat - p.indirect_diffuse[i]) * hybrid.gi
+    });
     let mut specular = p.specular;
     let mut added = [0.0f32; 3];
     // Layers apply in the order the material lists them, so the same kind may appear twice.
@@ -182,6 +184,17 @@ pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
     std::array::from_fn(|i| {
         diffuse[i] + indirect[i] + specular[i] + p.transmission[i] + p.emission[i] + added[i]
     })
+}
+
+/// HybridSurface only carries the blend strengths the other layers read; none means all 0.
+fn hybrid_of(layers: &[StylizationLayer]) -> HybridSurface {
+    layers
+        .iter()
+        .find_map(|l| match l {
+            StylizationLayer::HybridSurface(h) => Some(*h),
+            _ => None,
+        })
+        .unwrap_or_default()
 }
 
 /// The banded highlights of a `StylizedSpecular` (REQ-STY-004), summed over the light slots: a
@@ -271,6 +284,8 @@ pub struct Frame<'a> {
     pub light_lit: &'a [[f32; LIGHT_SLOTS]],
     /// World-space unit normals (the Normal AOV).
     pub normal: &'a [[f32; 3]],
+    /// Base color at the hit (the Albedo AOV).
+    pub albedo: &'a [[f32; 3]],
     /// Material index plus one; 0 (background) is left unstylized.
     pub material_id: &'a [u32],
     /// The camera and image width the frame was rendered with; the height follows from the length.
@@ -283,11 +298,35 @@ pub struct Frame<'a> {
 pub fn stylize_image(materials: &[Material], f: &Frame) -> Vec<[f32; 3]> {
     let n = f.material_id.len();
     let view = view_directions(&f.camera, f.width, n / f.width);
+    // Per material: the sums of indirect diffuse and albedo, so `ambient` is a ratio of sums.
+    // shortcut: a material's ambient is one value per frame, so objects sharing a material share
+    // it, and it moves with the view; per-object or temporally smoothed values come with M8.
+    let mut sums = vec![([0.0f32; 3], [0.0f32; 3]); materials.len()];
+    for (i, &id) in f.material_id.iter().enumerate() {
+        if id > 0 {
+            let (ind, alb) = &mut sums[id as usize - 1];
+            for c in 0..3 {
+                ind[c] += f.indirect_diffuse[i][c];
+                alb[c] += f.albedo[i][c];
+            }
+        }
+    }
+    let ambient: Vec<[f32; 3]> = sums
+        .iter()
+        .map(|(ind, alb)| {
+            std::array::from_fn(|c| if alb[c] > 1e-6 { ind[c] / alb[c] } else { 0.0 })
+        })
+        .collect();
     (0..n)
         .map(|i| {
             let p = PixelInput {
                 normal: f.normal[i],
                 view: view[i],
+                albedo: f.albedo[i],
+                ambient: match f.material_id[i] {
+                    0 => [0.0; 3],
+                    id => ambient[id as usize - 1],
+                },
                 light_s: f.light_s[i],
                 light_dir: f.light_dir[i],
                 light_lit: f.light_lit[i],
@@ -513,6 +552,69 @@ mod tests {
     }
 
     #[test]
+    fn gi_flattens_the_indirect_diffuse_toward_albedo_times_ambient() {
+        let p = PixelInput {
+            albedo: [0.5; 3],
+            ambient: [0.2; 3],
+            indirect_diffuse: [0.3; 3],
+            ..Default::default()
+        };
+        let at = |gi| {
+            let l = [StylizationLayer::HybridSurface(HybridSurface {
+                gi,
+                ..Default::default()
+            })];
+            stylize(&l, &p)[0]
+        };
+        assert!((at(0.0) - 0.3).abs() < 1e-6); // physical
+        assert!((at(1.0) - 0.1).abs() < 1e-6); // albedo 0.5 * ambient 0.2
+        assert!((at(0.5) - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ambient_is_the_ratio_of_indirect_to_albedo_over_the_material() {
+        let toon = Material {
+            stylization: vec![StylizationLayer::HybridSurface(HybridSurface {
+                gi: 1.0,
+                ..Default::default()
+            })],
+            ..Default::default()
+        };
+        // Four pixels of one material (albedo 0.5) with uneven indirect light, one background.
+        let ind = [[0.1; 3], [0.2; 3], [0.4; 3], [0.5; 3], [9.0; 3]];
+        let z = [[0.0; 3]; 5];
+        let alb = [[0.5; 3], [0.5; 3], [0.5; 3], [0.5; 3], [0.0; 3]];
+        let slots = [[[0.0; 3]; LIGHT_SLOTS]; 5];
+        let resp = [[0.0; LIGHT_SLOTS]; 5];
+        let out = stylize_image(
+            &[toon],
+            &Frame {
+                direct_diffuse: &z,
+                indirect_diffuse: &ind,
+                specular: &z,
+                transmission: &z,
+                emission: &z,
+                light_u: &slots,
+                light_response: &resp,
+                light_s: &slots,
+                light_dir: &slots,
+                light_lit: &resp,
+                normal: &z,
+                albedo: &alb,
+                material_id: &[1, 1, 1, 1, 0],
+                camera: Camera::default(),
+                width: 5,
+            },
+        );
+        // Mean indirect 0.3 over mean albedo 0.5 is 0.6, so every pixel gets 0.5 * 0.6 = 0.3.
+        assert!(
+            out[..4].iter().all(|c| (c[0] - 0.3).abs() < 1e-6),
+            "{out:?}"
+        );
+        assert_eq!(out[4], [9.0; 3]); // background untouched
+    }
+
+    #[test]
     fn layers_apply_in_order_and_a_kind_can_repeat() {
         let p = rim_px();
         let l = |s| StylizationLayer::RimLight(rim(|r| r.strength = s));
@@ -699,6 +801,7 @@ mod tests {
                 light_dir: &dir,
                 light_lit: &lit,
                 normal: &z,
+                albedo: &z,
                 material_id: &[0, 1, 2],
                 camera: Camera::default(),
                 width: 3,
