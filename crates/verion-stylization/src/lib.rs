@@ -138,7 +138,8 @@ pub fn stylize(layers: &[StylizationLayer], p: &PixelInput) -> [f32; 3] {
     // Layers apply in the order the material lists them, so the same kind may appear twice.
     for layer in layers {
         match layer {
-            StylizationLayer::HybridSurface(_) => {}
+            // The outline needs neighboring pixels, so it is a post pass, not part of `stylize`.
+            StylizationLayer::HybridSurface(_) | StylizationLayer::OutlineStyle(_) => {}
             StylizationLayer::ToonRamp(ramp) => {
                 let mut toon = [0.0f32; 3];
                 for (u, &r) in p.light_u.iter().zip(&p.light_response) {

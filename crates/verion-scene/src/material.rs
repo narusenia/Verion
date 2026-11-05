@@ -57,6 +57,7 @@ pub enum StylizationLayer {
     ShadowPalette(ShadowPalette),
     RimLight(RimLight),
     StylizedSpecular(StylizedSpecular),
+    OutlineStyle(OutlineStyle),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,6 +76,7 @@ impl StylizationLayer {
             Self::ShadowPalette(s) => s.validate(),
             Self::RimLight(r) => r.validate(),
             Self::StylizedSpecular(s) => s.validate(),
+            Self::OutlineStyle(o) => o.validate(),
         }
     }
 }
@@ -287,6 +289,46 @@ impl StylizedSpecular {
         unit_range("specular.size", self.size)?;
         unit_range("specular.feather", self.feather)?;
         self.ramp.as_ref().map_or(Ok(()), ToonRamp::validate)
+    }
+}
+
+/// Lines on silhouettes and creases, drawn in a post pass from the Depth, Normal and ID AOVs
+/// (REQ-STY-009, minimal version). Opacity comes from `HybridSurface::outline`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OutlineStyle {
+    /// Linear RGB in the working space, each `>= 0`.
+    pub color: [f32; 3],
+    /// Line width in pixels, in `1..=8`; the line grows into the nearer object.
+    pub width: f32,
+    /// Relative depth difference to a neighbor that makes an outline, in `0..=1`.
+    pub depth_threshold: f32,
+    /// Angle in degrees between neighboring normals that makes a crease, in `0..=180`.
+    pub crease_angle: f32,
+}
+
+impl Default for OutlineStyle {
+    fn default() -> Self {
+        Self {
+            color: [0.0; 3],
+            width: 2.0,
+            depth_threshold: 0.05,
+            crease_angle: 45.0,
+        }
+    }
+}
+
+impl OutlineStyle {
+    fn validate(&self) -> Result<(), StylizationError> {
+        if !self.color.iter().all(|c| c.is_finite() && *c >= 0.0) {
+            return Err(StylizationError::OutOfRange("outline.color"));
+        }
+        if !(1.0..=8.0).contains(&self.width) {
+            return Err(StylizationError::OutOfRange("outline.width"));
+        }
+        if !(0.0..=180.0).contains(&self.crease_angle) {
+            return Err(StylizationError::OutOfRange("outline.crease_angle"));
+        }
+        unit_range("outline.depth_threshold", self.depth_threshold)
     }
 }
 

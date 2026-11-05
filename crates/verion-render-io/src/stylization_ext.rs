@@ -3,8 +3,8 @@
 
 use gltf::json::Value;
 use verion_scene::{
-    ColorAdjust, ColorSpace, HybridSurface, RimLight, ShadowPalette, StylizationLayer,
-    StylizedSpecular, ToonRamp,
+    ColorAdjust, ColorSpace, HybridSurface, OutlineStyle, RimLight, ShadowPalette,
+    StylizationLayer, StylizedSpecular, ToonRamp,
 };
 
 pub const NAME: &str = "VERION_materials_stylization";
@@ -23,6 +23,7 @@ pub fn parse(
         "shadowPalette",
         "rimLight",
         "stylizedSpecular",
+        "outlineStyle",
     ];
     for key in root.keys().filter(|k| !known.contains(&k.as_str())) {
         warnings.push(format!("unknown property {key}"));
@@ -95,6 +96,22 @@ pub fn parse(
                 Some(r) => Some(toon_ramp(r, "stylizedSpecular.ramp", space, &mut warnings)?),
                 None => None,
             },
+        }));
+    }
+    if let Some(v) = root.get("outlineStyle") {
+        let o = v.as_object().ok_or("outlineStyle must be an object")?;
+        let known = ["color", "width", "depthThreshold", "creaseAngle"];
+        warn_unknown("outlineStyle", o.keys(), &known, &mut warnings);
+        let d = OutlineStyle::default();
+        let get = |k: &str, default| number(o.get(k), default, &format!("outlineStyle.{k}"));
+        layers.push(StylizationLayer::OutlineStyle(OutlineStyle {
+            color: match o.get("color") {
+                Some(c) => rgb(c, "outlineStyle.color", space)?,
+                None => d.color,
+            },
+            width: get("width", d.width)?,
+            depth_threshold: get("depthThreshold", d.depth_threshold)?,
+            crease_angle: get("creaseAngle", d.crease_angle)?,
         }));
     }
     for layer in &layers {
@@ -304,6 +321,26 @@ mod tests {
         assert!(parse_str(r#"{"stylizedSpecular":{"shape":"ellipse"}}"#).is_err());
         assert!(parse_str(r#"{"stylizedSpecular":{"size":2}}"#).is_err());
         assert!(parse_str(r#"{"stylizedSpecular":{"color":[1,-1,1]}}"#).is_err());
+    }
+
+    #[test]
+    fn reads_the_outline_style_with_defaults() {
+        let (layers, warnings) =
+            parse_str(r#"{"outlineStyle":{"width":3,"creaseAngle":30}}"#).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(
+            layers,
+            [StylizationLayer::OutlineStyle(OutlineStyle {
+                width: 3.0,
+                crease_angle: 30.0,
+                ..Default::default()
+            })]
+        );
+        assert!(parse_str(r#"{"outlineStyle":{"width":0.5}}"#).is_err());
+        assert!(parse_str(r#"{"outlineStyle":{"width":9}}"#).is_err());
+        assert!(parse_str(r#"{"outlineStyle":{"creaseAngle":200}}"#).is_err());
+        assert!(parse_str(r#"{"outlineStyle":{"depthThreshold":2}}"#).is_err());
+        assert!(parse_str(r#"{"outlineStyle":{"color":[1,-1,1]}}"#).is_err());
     }
 
     #[test]
