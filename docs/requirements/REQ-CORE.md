@@ -58,12 +58,15 @@ NEE と MIS を使うパストレーサー。Russian Roulette、薄レンズ DoF
 
 ### 説明
 
-Diffuse、GGX Conductor、Dielectric（透過）。glTF の metallic-roughness と transmission を表現できる。
+Diffuse、GGX Conductor、Dielectric（透過）。glTF の metallic-roughness と transmission を表現できる。写実側の品質のため、多重散乱の補償、clearcoat・sheen、Dispersion（RGB 近似）を追加する。これらは Reference モードにも含める。スペクトルレンダリングは対象外（Research）。
 
 ### 受入条件
 
 - [x] 白炉テストでエネルギー保存が許容誤差内（REQ-QA-002。多重散乱補正なしの損失を除く）
 - [x] 金属・ガラスの基礎シーンが参照画像と一致する（Cornell Box の金属・ガラスを Mitsuba 3 で照合）
+- [ ] GGX に多重散乱の補償（Kulla-Conty 近似）を入れ、粗い金属の白炉テストが改善する
+- [ ] clearcoat と sheen を glTF 拡張から読み、追加ローブとして評価できる（`gltf` クレート 1.4 は未対応のため自前でパースする）
+- [ ] Dispersion を IOR のチャンネル別の値で近似できる（`KHR_materials_dispersion`。仕様の確認が要る）
 
 ### 依存要件
 

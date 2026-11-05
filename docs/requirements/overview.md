@@ -25,7 +25,9 @@ Verion は、Blender / Cinema 4D / Maya などの DCC から使える GPU レン
 - PBR パストレーシング（NEE / MIS、テクスチャ、HDRI、基本ライト、薄レンズ DoF）
 - カラーマネジメント（OCIO / ACES）
 - HybridSurface・ToonRamp・ShadowPalette・StylizedSpecular・RimLight（一次ヒットの Hybrid 方式）
+- 写実材質の拡充（多重散乱補償、clearcoat・sheen、Dispersion の RGB 近似）
 - Lighting AOV の分離出力、EXR 出力、デノイズ
+- PostProcess の枠と最小の色調整
 - `render-cli` と最小 Viewer（累積表示、AOV 切替、Stylization パラメータ変更→再累積）
 - Reference 検証（Mitsuba 3 照合、解析解テスト）、GPU 計測とベンチ
 
@@ -42,6 +44,7 @@ Verion は、Blender / Cinema 4D / Maya などの DCC から使える GPU レン
 - 分散・ネットワークレンダリング
 - 反射・屈折越しのスタイル適用と BSDF / MIS 内のスタイル評価（Integrated Stylization）は Research 扱い
 - スタイル参照画像からの自動推定（Style-aware Neural Rendering）は Research 扱い
+- スペクトルレンダリング（分光 Dispersion を含む）は Research 扱い。RGB 近似を先に入れる
 
 ## 要件一覧
 
@@ -72,6 +75,7 @@ Verion は、Blender / Cinema 4D / Maya などの DCC から使える GPU レン
 | REQ-STY-008 | 将来拡張のための設計制約 | Must | Draft |
 | REQ-STY-009 | Outline・顔影・髪ハイライト | Should | Draft |
 | REQ-STY-010 | Integrated Stylization（研究） | Could | Draft |
+| REQ-STY-011 | PostProcess | Should | Draft |
 | REQ-IO-001 | glTF 2.0 入力 | Must | Draft |
 | REQ-IO-002 | Stylization 用 glTF 拡張 | Must | Draft |
 | REQ-IO-003 | EXR 多チャンネル出力 | Must | Draft |

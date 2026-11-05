@@ -142,6 +142,7 @@ Direct Diffuse・Indirect Diffuse・Specular・Transmission・Shadow/Visibility�
 ### 受入条件
 
 - [ ] Reference モードと同じパストレースを共有する
+- [ ] 写実材質と Toon 材質が同一シーンに混在しても、写実材質の出力は Reference と一致する（写実と Toon の混在を M3 以降の軸にする。反射・屈折越しの Toon は REQ-STY-010）
 - [ ] デノイズが Toon 境界と意図したテクスチャを消さない（REQ-QA-003）
 
 ### 依存要件
@@ -167,6 +168,7 @@ Integrated Stylization（REQ-STY-010）へ拡張できるよう、次を v0.1 �
 - [ ] Stylization 関数は一次ヒット専用でなく、汎用の `ShadingContext`（位置・法線・光ごとの成分・深度）を受け取る
 - [ ] Material IR が `Base BSDF` / `Stylization Layers` / `Output Channels` を分離している
 - [ ] AOV とキャッシュ類に Stylization revision を持たせる
+- [ ] `Stylization Layers` は 1 材質に複数の層を並べ、順に適用できる（ToonRamp・StylizedSpecular・RimLight などを重ねる）
 
 ### 依存要件
 
@@ -192,6 +194,28 @@ Integrated Stylization（REQ-STY-010）へ拡張できるよう、次を v0.1 �
 
 - REQ-STY-007
 - REQ-ACC-005
+
+## REQ-STY-011: PostProcess
+
+| 項目 | 内容 |
+|------|------|
+| ID | REQ-STY-011 |
+| 優先度 | Should |
+| ステータス | Draft |
+
+### 説明
+
+Stylization 後段の画面空間 Pass。M2 は Pass の枠と最小の色調整（ゲイン・彩度・ホワイトバランス）。ブルーム・色収差は M8 で扱う。背景合成は内部で行わず、アルファと Object ID を出して外部で合成する。PostProcess は非物理出力で、Reference モードでは無効にし、メタデータに記録する。
+
+### 受入条件
+
+- [ ] Stylization の後段に PostProcess の Pass を並べられる
+- [ ] 色調整を適用でき、Reference モードでは無効になる
+- [ ] 適用した PostProcess を EXR のメタデータに記録する
+
+### 依存要件
+
+- REQ-STY-007
 
 ## REQ-STY-010: Integrated Stylization（研究）
 
