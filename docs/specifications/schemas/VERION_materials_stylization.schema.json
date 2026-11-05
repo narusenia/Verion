@@ -71,6 +71,34 @@
           "$ref": "#/$defs/colorAdjust"
         }
       }
+    },
+    "rimLight": {
+      "type": "object",
+      "description": "Non-physical rim added to the final color; independent of the light's strength.",
+      "properties": {
+        "color": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "width": {
+          "$ref": "#/$defs/unit"
+        },
+        "feather": {
+          "$ref": "#/$defs/unit"
+        },
+        "followLight": {
+          "$ref": "#/$defs/unit"
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
     }
   },
   "$defs": {
