@@ -105,7 +105,8 @@
 - `shadowPalette` は `hybridSurface.shadow` が 0 より大きいときだけ効く。補正の強さは `shadow` に比例する
   - 影の度合い `w` は、直接拡散が光から受け取れる量にどれだけ届いていないか（0 は全面照明、1 は完全な影）。直接拡散と間接拡散を、それぞれ `補正前 + (補正後 − 補正前) × w × shadow` に置き換える
   - 色相・彩度・明度は、最大チャンネルを明度とする HSV で扱う。黒は補正しても黒のまま（影が真っ黒になる材質では、直接影は色が付かない。`toonRamp` の暗いバンドで色を持たせる）
-- 効くのは `hybridSurface.diffuse`・`specular`・`shadow`、`toonRamp`、`shadowPalette`、`rimLight`、`stylizedSpecular` だけ。`hybridSurface` の `gi`・`outline` は読み込んで保持するが、描画には効かない（実装後に効く）
+- `hybridSurface.gi` は間接拡散を平坦にする。間接拡散を「アルベド × その材質の一定の環境光」へ `gi` の割合で置き換える。一定の環境光は、フレーム内でその材質の画素すべてについて、間接拡散の和 ÷ アルベドの和（チャンネルごと）。層（`shadowPalette` など）が間接拡散を補正する前に適用する。材質を共有する物体は同じ値を共有し、視点が変わると値も変わる（動画での安定は M8）
+- 効くのは `hybridSurface.diffuse`・`specular`・`gi`・`shadow`、`toonRamp`、`shadowPalette`、`rimLight`、`stylizedSpecular` だけ。`hybridSurface.outline` は読み込んで保持するが、描画には効かない（実装後に効く）
 - 層は材質に書いた順に適用する。同じ種類の層を複数書いても、順に適用する（glTF 拡張では種類ごとに 1 つ）
 - パレットの色は glTF の色係数と同じく線形 Rec.709 で書く。取り込み時に作業色空間へ変換する
 - Reference モードは拡張を読み込んでも適用しない（ADR-0008）。拡張の有無で Reference の画は変わらない

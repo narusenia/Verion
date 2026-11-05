@@ -18,7 +18,7 @@
 | 11 | Stylization 評価の初期版（Art Direction 一致・デノイズによる消失） | REQ-QA-003 | 未着手 |
 | 12 | 写実材質の拡充（多重散乱補償・clearcoat・sheen・Dispersion の RGB 近似） | REQ-CORE-003 | 未着手 |
 | 13 | PostProcess の枠と最小の色調整 | REQ-STY-011 | 未着手 |
-| 14 | 間接光の平坦化（`HybridSurface.gi`）。IR にあるが Pass が未使用 | REQ-STY-001 | 未着手 |
+| 14 | 間接光の平坦化（`HybridSurface.gi`） | REQ-STY-001 | 済（間接拡散を「アルベド × 材質ごとの一定の環境光」へ混ぜる。一定値はフレーム内の間接拡散の和 ÷ アルベドの和。Albedo AOV を Pass に渡す。実画像は未確認） |
 | 15 | 最小の輪郭線（Normal・Depth・Object ID・Material ID から画面空間で作る。項目 13 の枠の最初の Pass。時間的安定性は M8） | REQ-STY-009 / 011 | 未着手 |
 
 ## 完了条件
