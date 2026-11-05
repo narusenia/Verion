@@ -398,6 +398,7 @@ mod imp {
                     stylization_revision: 0,
                     grade: None,
                     denoiser: None,
+                    adaptive_threshold: None,
                 },
             };
             let path = dir.join("env.exr");
@@ -421,6 +422,7 @@ mod imp {
                     stylization_revision: 0,
                     grade: None,
                     denoiser: None,
+                    adaptive_threshold: None,
                 },
             };
             let linear = OutputTransform::linear(scene.working_space());
@@ -461,6 +463,7 @@ mod imp {
                 object_id: Some(&aov.object_id),
                 material_id: Some(&aov.material_id),
                 lighting: None,
+                ..Default::default()
             },
             info: RenderInfo {
                 physical: true,
@@ -468,6 +471,7 @@ mod imp {
                 stylization_revision: 0,
                 grade: None,
                 denoiser: None,
+                adaptive_threshold: None,
             },
         };
         write_exr(

@@ -27,6 +27,10 @@ pub struct RenderInfo {
     pub grade: Option<GradeInfo>,
     /// Beauty went through a denoiser (written as `verion/denoiser`). A denoised frame is not physical.
     pub denoiser: Option<&'static str>,
+    /// Per-pixel adaptive sampling threshold (written as `verion/adaptiveThreshold`); `samples` is
+    /// then the most any pixel took. Stopping on a pixel's own noise estimate biases it, so an
+    /// adaptive frame is not physical.
+    pub adaptive_threshold: Option<f32>,
 }
 
 /// Optional primary-ray AOVs (all the same size as the frame).
@@ -40,6 +44,8 @@ pub struct ExrAovs<'a> {
     pub object_id: Option<&'a [u32]>,
     /// Material index plus one (0 = background), written as the 32-bit integer channel `MaterialId`.
     pub material_id: Option<&'a [u32]>,
+    /// Samples each pixel took under adaptive sampling, written as the integer channel `SampleCount`.
+    pub sample_count: Option<&'a [u32]>,
     pub lighting: Option<ExrLighting<'a>>,
 }
 
@@ -115,6 +121,7 @@ pub fn write_exr(
         || a.depth.is_some_and(|p| p.len() != size)
         || a.object_id.is_some_and(|p| p.len() != size)
         || a.material_id.is_some_and(|p| p.len() != size)
+        || a.sample_count.is_some_and(|p| p.len() != size)
         || a.lighting.is_some_and(|l| {
             [
                 l.direct_diffuse,
@@ -199,13 +206,23 @@ pub fn write_exr(
         ));
     }
 
+    if let Some(n) = a.sample_count {
+        channels.push(AnyChannel::new("SampleCount", FlatSamples::U32(n.to_vec())));
+    }
+
     let untouched = transform.tone_map == ToneMap::None && transform.oetf == Oetf::Linear;
     let text = |s: String| AttributeValue::Text(Text::from(s.as_str()));
     let mut attributes = LayerAttributes::default();
     let other = &mut attributes.other;
     other.insert(
         Text::from("verion/physical"),
-        text((frame.info.physical && untouched && frame.info.denoiser.is_none()).to_string()),
+        text(
+            (frame.info.physical
+                && untouched
+                && frame.info.denoiser.is_none()
+                && frame.info.adaptive_threshold.is_none())
+            .to_string(),
+        ),
     );
     other.insert(
         Text::from("verion/samples"),
@@ -217,6 +234,12 @@ pub fn write_exr(
     );
     if let Some(d) = frame.info.denoiser {
         other.insert(Text::from("verion/denoiser"), text(d.to_string()));
+    }
+    if let Some(t) = frame.info.adaptive_threshold {
+        other.insert(
+            Text::from("verion/adaptiveThreshold"),
+            AttributeValue::F32(t),
+        );
     }
     if let Some(g) = frame.info.grade {
         other.insert(
@@ -285,6 +308,7 @@ mod tests {
                 stylization_revision: 3,
                 grade: None,
                 denoiser: None,
+                adaptive_threshold: None,
             },
         }
     }
@@ -362,6 +386,19 @@ mod tests {
         );
 
         let mut f = frame(&beauty, None);
+        f.info.adaptive_threshold = Some(0.02);
+        let adaptive = attrs(&f, "adaptive.exr");
+        let get = |k: &str| adaptive.get(&Text::from(k)).cloned();
+        assert_eq!(
+            get("verion/adaptiveThreshold"),
+            Some(AttributeValue::F32(0.02))
+        );
+        assert_eq!(
+            get("verion/physical"),
+            Some(AttributeValue::Text(Text::from("false")))
+        );
+
+        let mut f = frame(&beauty, None);
         f.info.grade = Some(GradeInfo {
             exposure: -1.0,
             saturation: 0.8,
@@ -387,6 +424,7 @@ mod tests {
             depth: Some(&[3.0, 0.0]),
             object_id: Some(&[7, 0]),
             material_id: Some(&[3, 0]),
+            sample_count: Some(&[16, 64]),
             ..Default::default()
         };
         let path = temp("ids.exr");
@@ -399,6 +437,7 @@ mod tests {
         assert_eq!(values(&img, "Z"), [3.0, 0.0]);
         assert_eq!(values(&img, "ObjectId"), [7.0, 0.0]);
         assert_eq!(values(&img, "MaterialId"), [3.0, 0.0]);
+        assert_eq!(values(&img, "SampleCount"), [16.0, 64.0]);
         let list = &img.layer_data.channel_data.list;
         let id = list
             .iter()
