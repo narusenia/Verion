@@ -17,3 +17,6 @@ the viewer: `./target/release/viewer scenes/NAME.gltf --hdri assets/hdri/sunny.h
 `assets/hdri/` holds small procedural environment maps from `scripts/gen_hdri.py assets/hdri`: `sunny` (sun and
 sky), `sunset` (low warm sun), `overcast` (sky gradient, no sun), `softbox` (one broad soft light) and `uniform`
 (a white furnace). They are original, so they carry no third-party license.
+
+Four real-world HDRIs (Poly Haven, CC0) are fetched on demand, not committed: run `scripts/fetch_hdri.sh`, then use
+`assets/hdri/real/*.hdr`. Sources, authors and the license check are in `assets/hdri/SOURCES.md`.
