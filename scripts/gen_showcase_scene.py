@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Writes scenes/showcase.gltf: a floor and five spheres, one per M2 material feature
 (clearcoat, sheen, dispersion, toon stylization, rough metal), lit by two directional lights.
-The geometry is embedded, so the file is self-contained. glTF's metallicFactor defaults to 1, so non-metals set it to 0. Usage: gen_showcase_scene.py OUT_FILE"""
+The geometry is embedded, so the file is self-contained. With a second argument `sheen` it writes the sheen comparison instead: the same dark
+red base with no sheen, three sheen roughnesses and a blue sheen, lit mostly from behind.
+glTF's metallicFactor defaults to 1, so non-metals set it to 0. Usage: gen_showcase_scene.py OUT_FILE [sheen]"""
 import base64, json, math, struct, sys
 
 RINGS, SEGS = 48, 96
@@ -36,7 +38,7 @@ def qmul(a, b):
             aw*bz + ax*by - ay*bx + az*bw, aw*bw - ax*bx - ay*by - az*bz]
 
 
-def main(path):
+def main(path, mode="showcase"):
     sp, sn, si = sphere()
     floor_pos = [(-12, 0, -8), (12, 0, -8), (12, 0, 8), (-12, 0, 8)]
     floor_nrm = [(0, 1, 0)] * 4
@@ -84,6 +86,19 @@ def main(path):
         {"name": "rough gold", "pbrMetallicRoughness": {"baseColorFactor": [1.0, 0.77, 0.34, 1], "metallicFactor": 1, "roughnessFactor": 0.55}},
         {"name": "floor", "pbrMetallicRoughness": {"baseColorFactor": [0.55, 0.55, 0.55, 1], "metallicFactor": 0, "roughnessFactor": 0.8}},
     ]
+    if mode == "sheen":
+        def cloth(name, color, rough):
+            ext = {"KHR_materials_sheen": {"sheenColorFactor": color, "sheenRoughnessFactor": rough}} if color else {}
+            return {"name": name, "pbrMetallicRoughness": {"baseColorFactor": [0.25, 0.02, 0.1, 1], "metallicFactor": 0, "roughnessFactor": 0.9},
+                    "extensions": ext}
+        materials[:5] = [
+            cloth("no sheen", None, 0),
+            cloth("sheen roughness 0.3", [1, 0.55, 0.7], 0.3),
+            cloth("sheen roughness 0.6", [1, 0.55, 0.7], 0.6),
+            cloth("sheen roughness 1.0", [1, 0.55, 0.7], 1.0),
+            cloth("blue sheen roughness 0.5", [0.5, 0.6, 1], 0.5),
+        ]
+        materials[5]["pbrMetallicRoughness"]["baseColorFactor"] = [0.15, 0.15, 0.15, 1]
     nodes, scene_nodes = [], []
     for k in range(5):
         meshes_k = json.loads(json.dumps(meshes[0]))
@@ -97,6 +112,14 @@ def main(path):
     # Directional lights shine along local -z: aim them down and across.
     key = qmul(quat_axis((0, 1, 0), -35), quat_axis((1, 0, 0), -50))
     fill = qmul(quat_axis((0, 1, 0), 140), quat_axis((1, 0, 0), -35))
+    lights = [{"type": "directional", "color": [1, 0.96, 0.9], "intensity": 3.2},
+              {"type": "directional", "color": [0.7, 0.8, 1], "intensity": 0.9}]
+    if mode == "sheen":
+        # Key light from behind and above (travels toward the camera), a dim fill from the camera side.
+        key = qmul(quat_axis((0, 1, 0), 200), quat_axis((1, 0, 0), -35))
+        fill = qmul(quat_axis((0, 1, 0), -10), quat_axis((1, 0, 0), -30))
+        lights = [{"type": "directional", "color": [1, 1, 1], "intensity": 4.0},
+                  {"type": "directional", "color": [1, 1, 1], "intensity": 0.35}]
     nodes.append({"rotation": key, "extensions": {"KHR_lights_punctual": {"light": 0}}})
     nodes.append({"rotation": fill, "extensions": {"KHR_lights_punctual": {"light": 1}}})
     scene_nodes = list(range(len(nodes)))
@@ -108,9 +131,7 @@ def main(path):
         "scene": 0, "scenes": [{"nodes": scene_nodes}], "nodes": nodes, "meshes": meshes,
         "materials": materials,
         "cameras": [{"type": "perspective", "perspective": {"yfov": 0.5, "znear": 0.1, "aspectRatio": 2.0}}],
-        "extensions": {"KHR_lights_punctual": {"lights": [
-            {"type": "directional", "color": [1, 0.96, 0.9], "intensity": 3.2},
-            {"type": "directional", "color": [0.7, 0.8, 1], "intensity": 0.9}]}},
+        "extensions": {"KHR_lights_punctual": {"lights": lights}},
         "buffers": [{"byteLength": len(blob), "uri": "data:application/octet-stream;base64," + base64.b64encode(bytes(blob)).decode()}],
         "bufferViews": views, "accessors": accs,
     }
@@ -119,4 +140,4 @@ def main(path):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "showcase")
