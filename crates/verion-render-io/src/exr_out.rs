@@ -12,6 +12,8 @@ pub struct RenderInfo {
     /// The pixels come from a Reference-mode render, free of stylization and AI approximation.
     pub physical: bool,
     pub samples: u32,
+    /// `Revisions::stylization` of the scene; identifies the stylization the pixels were made with.
+    pub stylization_revision: u64,
 }
 
 /// Optional primary-ray AOVs (all the same size as the frame).
@@ -139,6 +141,10 @@ pub fn write_exr(
         AttributeValue::I32(frame.info.samples.min(i32::MAX as u32) as i32),
     );
     other.insert(
+        Text::from("verion/stylizationRevision"),
+        text(frame.info.stylization_revision.to_string()),
+    );
+    other.insert(
         Text::from("verion/workingSpace"),
         text(format!("{:?}", frame.working_space)),
     );
@@ -187,6 +193,7 @@ mod tests {
             info: RenderInfo {
                 physical: true,
                 samples: 64,
+                stylization_revision: 3,
             },
         }
     }
@@ -228,6 +235,10 @@ mod tests {
             Some(AttributeValue::Text(Text::from("true")))
         );
         assert_eq!(get("verion/samples"), Some(AttributeValue::I32(64)));
+        assert_eq!(
+            get("verion/stylizationRevision"),
+            Some(AttributeValue::Text(Text::from("3")))
+        );
         assert_eq!(img.attributes.chromaticities.unwrap().red, Vec2(0.64, 0.33));
     }
 

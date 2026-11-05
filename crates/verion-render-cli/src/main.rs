@@ -203,6 +203,7 @@ fn run(args: &Args) -> Result<(), String> {
         info: RenderInfo {
             physical: args.mode.physical(),
             samples: args.spp,
+            stylization_revision: scene.revisions().stylization,
         },
     };
     let t = Instant::now();

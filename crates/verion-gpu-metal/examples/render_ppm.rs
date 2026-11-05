@@ -363,6 +363,7 @@ mod imp {
                 info: RenderInfo {
                     physical: true,
                     samples: 0,
+                    stylization_revision: 0,
                 },
             };
             let path = dir.join("env.exr");
@@ -383,6 +384,7 @@ mod imp {
                 info: RenderInfo {
                     physical: true,
                     samples: 0,
+                    stylization_revision: 0,
                 },
             };
             let linear = OutputTransform::linear(scene.working_space());
@@ -422,6 +424,7 @@ mod imp {
             info: RenderInfo {
                 physical: true,
                 samples: spp,
+                stylization_revision: 0,
             },
         };
         write_exr(

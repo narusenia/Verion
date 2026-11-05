@@ -93,6 +93,9 @@ pub struct Revisions {
     /// Meshes and instances (BLAS / TLAS inputs).
     pub geometry: u64,
     pub material: u64,
+    /// Bumps only when a material's stylization layers change (ADR-0008, REQ-STY-008), so
+    /// outputs and caches can tell stylized results apart from physical ones.
+    pub stylization: u64,
     pub lighting: u64,
     pub camera: u64,
 }
@@ -185,12 +188,18 @@ impl Scene {
 
     pub fn add_material(&mut self, material: Material) -> MaterialId {
         self.revisions.material += 1;
+        if !material.stylization.is_empty() {
+            self.revisions.stylization += 1;
+        }
         self.materials.push(material);
         MaterialId(self.materials.len() as u32 - 1)
     }
 
     pub fn set_material(&mut self, id: MaterialId, material: Material) {
         self.revisions.material += 1;
+        if self.materials[id.index()].stylization != material.stylization {
+            self.revisions.stylization += 1;
+        }
         self.materials[id.index()] = material;
     }
 
@@ -244,6 +253,7 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{HybridSurface, StylizationLayer};
 
     fn tri() -> Mesh {
         Mesh::new(
@@ -285,6 +295,19 @@ mod tests {
         assert_eq!(s.revisions(), expect);
 
         s.set_material(material, Material::default());
+        expect.material += 1;
+        assert_eq!(s.revisions(), expect);
+
+        let toon = Material {
+            stylization: vec![StylizationLayer::HybridSurface(HybridSurface::TOON)],
+            ..Default::default()
+        };
+        s.set_material(material, toon.clone());
+        expect.material += 1;
+        expect.stylization += 1;
+        assert_eq!(s.revisions(), expect);
+
+        s.set_material(material, toon);
         expect.material += 1;
         assert_eq!(s.revisions(), expect);
 

@@ -255,6 +255,7 @@ mod tests {
             info: RenderInfo {
                 physical: true,
                 samples: 1,
+                stylization_revision: 0,
             },
         };
         let path = temp("sky.exr");
