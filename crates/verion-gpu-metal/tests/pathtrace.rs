@@ -1074,3 +1074,87 @@ fn rough_metal_furnace_matches_ggx_single_scatter_albedo() {
         }
     }
 }
+
+#[test]
+fn lighting_parts_sum_to_the_beauty() {
+    let Some(ctx) = context() else { return };
+    // Diffuse floor under a point light and a shadowing triangle, plus a glossy metal sphere in sky.
+    let light = Light::Point {
+        position: [1.0, 0.0, 1.0],
+        color: [1.0; 3],
+        intensity: 6.0,
+    };
+    let scenes = [
+        floor_scene(light, true),
+        sky_scene(
+            icosphere(0.5),
+            bsdf(BaseBsdf {
+                metallic: 1.0,
+                roughness: 0.3,
+                ..BaseBsdf::default()
+            }),
+            2.0,
+        ),
+    ];
+    for scene in &scenes {
+        let r = Renderer::new(&ctx, scene).unwrap();
+        let mut acc = r.new_accumulation_with_lighting(33, 33).unwrap();
+        r.accumulate(&mut acc, 16).unwrap();
+        let (beauty, l) = (acc.mean(), acc.lighting().unwrap());
+        for (i, b) in beauty.iter().enumerate() {
+            let sum: [f32; 3] = std::array::from_fn(|c| {
+                l.direct_diffuse[i][c]
+                    + l.indirect_diffuse[i][c]
+                    + l.specular[i][c]
+                    + l.transmission[i][c]
+                    + l.emission[i][c]
+            });
+            for (s, b) in sum.iter().zip(b) {
+                assert!((s - b).abs() <= 1e-3 * b.max(1.0), "{i}: {s} vs {b}");
+            }
+        }
+    }
+}
+
+#[test]
+fn lighting_split_files_light_by_source() {
+    let Some(ctx) = context() else { return };
+    let light = Light::Point {
+        position: [1.0, 0.0, 1.0],
+        color: [1.0; 3],
+        intensity: std::f32::consts::PI * 2.0 * 2.0f32.sqrt(),
+    };
+    let center = |scene: &Scene| {
+        let r = Renderer::new(&ctx, scene).unwrap();
+        let mut acc = r.new_accumulation_with_lighting(65, 65).unwrap();
+        r.accumulate(&mut acc, 64).unwrap();
+        let l = acc.lighting().unwrap();
+        let i = 32 * 65 + 32;
+        (
+            l.direct_diffuse[i][0],
+            l.specular[i][0],
+            l.emission[i][0],
+            l.visibility[i],
+        )
+    };
+    // Lambert floor lit by the point light: all of it is direct diffuse (see the Lambert test).
+    let (dd, sp, em, vis) = center(&floor_scene(light, false));
+    assert!((dd - 1.0).abs() < 0.01, "direct diffuse {dd}");
+    assert!(sp < 0.05 && em == 0.0, "specular {sp}, emission {em}");
+    assert!((vis - 1.0).abs() < 1e-6, "visibility {vis}");
+    // An occluder takes the direct light and the visibility with it.
+    let (dd, _, _, vis) = center(&floor_scene(light, true));
+    assert!(
+        dd < 1e-3 && vis < 1e-3,
+        "direct diffuse {dd}, visibility {vis}"
+    );
+}
+
+#[test]
+fn lighting_is_off_unless_requested() {
+    let Some(ctx) = context() else { return };
+    let r = Renderer::new(&ctx, &furnace_room(0.5, 1.0)).unwrap();
+    let mut acc = r.new_accumulation(8, 8).unwrap();
+    r.accumulate(&mut acc, 1).unwrap();
+    assert!(acc.lighting().is_none());
+}

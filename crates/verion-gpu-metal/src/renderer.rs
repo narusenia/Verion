@@ -200,6 +200,22 @@ pub struct Aovs {
     pub object_id: Vec<u32>,
 }
 
+/// Floats per pixel in the lighting buffer; must match `shaders/pathtrace.slang`.
+const LIGHTING_STRIDE: usize = 17;
+
+/// First-hit lighting split (REQ-STY-006), mean per pixel, row-major from the top-left. Radiance
+/// parts sum to the beauty image; indirect light is filed under the lobe taken at the first bounce.
+/// Rays that miss the scene file the sky as `emission`.
+pub struct LightingAovs {
+    pub direct_diffuse: Vec<[f32; 3]>,
+    pub indirect_diffuse: Vec<[f32; 3]>,
+    pub specular: Vec<[f32; 3]>,
+    pub transmission: Vec<[f32; 3]>,
+    pub emission: Vec<[f32; 3]>,
+    /// Share of the direct light that is not shadowed, 0 to 1 (1 where no light reaches the point).
+    pub visibility: Vec<f32>,
+}
+
 /// A scene snapshot ready to trace. Later scene edits are not reflected.
 pub struct Renderer {
     ctx: MetalContext,
@@ -226,6 +242,8 @@ pub struct Renderer {
     normals: Obj<dyn MTLComputePipelineState>,
     aov: Obj<dyn MTLComputePipelineState>,
     pathtrace: Obj<dyn MTLComputePipelineState>,
+    /// Bound in place of the lighting buffer when an accumulation has none.
+    no_lighting: Obj<dyn MTLBuffer>,
 }
 
 impl Renderer {
@@ -463,6 +481,7 @@ impl Renderer {
             normals: pipeline(ctx, NORMALS_MSL, "normals")?,
             aov: pipeline(ctx, AOV_MSL, "aov")?,
             pathtrace: pipeline(ctx, PATHTRACE_MSL, "pathtrace")?,
+            no_lighting: upload::<f32>(ctx, &[])?,
         })
     }
 
@@ -623,9 +642,45 @@ pub struct Accumulation {
     height: u32,
     samples: u32,
     gpu_seconds: f64,
+    /// Running sums of the lighting split, when requested.
+    lighting: Option<Obj<dyn MTLBuffer>>,
 }
 
 impl Accumulation {
+    /// Mean lighting split, or `None` unless made with `new_accumulation_with_lighting`.
+    pub fn lighting(&self) -> Option<LightingAovs> {
+        let buffer = self.lighting.as_ref()?;
+        let n = self.width as usize * self.height as usize;
+        // SAFETY: the buffer holds `n` records of `LIGHTING_STRIDE` floats and `accumulate` waits for the GPU.
+        let data = unsafe {
+            std::slice::from_raw_parts(
+                buffer.contents().as_ptr().cast::<f32>(),
+                n * LIGHTING_STRIDE,
+            )
+        };
+        let inv = 1.0 / self.samples.max(1) as f32;
+        let part = |k: usize| -> Vec<[f32; 3]> {
+            data.as_chunks::<LIGHTING_STRIDE>()
+                .0
+                .iter()
+                .map(|r| std::array::from_fn(|i| r[3 * k + i] * inv))
+                .collect()
+        };
+        Some(LightingAovs {
+            direct_diffuse: part(0),
+            indirect_diffuse: part(1),
+            specular: part(2),
+            transmission: part(3),
+            emission: part(4),
+            visibility: data
+                .as_chunks::<LIGHTING_STRIDE>()
+                .0
+                .iter()
+                .map(|r| if r[16] > 0.0 { r[15] / r[16] } else { 1.0 })
+                .collect(),
+        })
+    }
+
     /// GPU execution time of all `accumulate` calls so far, from command-buffer timestamps.
     /// shortcut: one megakernel, so no trace / shade split; that needs the wavefront split (REQ-GPU-005).
     pub fn gpu_seconds(&self) -> f64 {
@@ -672,12 +727,32 @@ impl Renderer {
             height,
             samples: 0,
             gpu_seconds: 0.0,
+            lighting: None,
         })
+    }
+
+    /// Like `new_accumulation`, plus per-pixel buffers for the lighting split
+    /// (17 floats per pixel, so about 70 bytes per pixel more than the beauty sum).
+    pub fn new_accumulation_with_lighting(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> Result<Accumulation, Error> {
+        let mut acc = self.new_accumulation(width, height)?;
+        let len = width as usize * height as usize * LIGHTING_STRIDE * size_of::<f32>();
+        self.ctx.check_fits(len)?;
+        acc.lighting = Some(
+            self.ctx
+                .device
+                .newBufferWithLength_options(len, MTLResourceOptions::StorageModeShared)
+                .ok_or(Error::Resource("lighting buffer"))?,
+        );
+        Ok(acc)
     }
 
     /// Traces `samples` more paths per pixel into `acc` and waits for the GPU.
     pub fn accumulate(&self, acc: &mut Accumulation, samples: u32) -> Result<(), Error> {
-        let mut params = [0u32; 28];
+        let mut params = [0u32; 29];
         params[0] = acc.width;
         params[1] = acc.height;
         params[2] = self.camera[2].to_bits();
@@ -697,6 +772,7 @@ impl Renderer {
         params[26] = self.env.pdf_scale.to_bits();
         // Footprint of one pixel per unit of travelled distance, for texture filtering.
         params[27] = (2.0 * self.camera[2] / acc.height as f32).to_bits();
+        params[28] = acc.lighting.is_some() as u32;
 
         let cb = self
             .ctx
@@ -711,7 +787,7 @@ impl Renderer {
             enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
         }
         // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional, uvs, texels, texInfo, vnormals). Dispatches in one encoder run in
+        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional, uvs, texels, texInfo, vnormals, lighting). Dispatches in one encoder run in
         // order, so the `+=` on `accum` never races.
         unsafe {
             enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
@@ -730,6 +806,11 @@ impl Renderer {
             enc.setBuffer_offset_atIndex(Some(&self.texels), 0, 14);
             enc.setBuffer_offset_atIndex(Some(&self.tex_info), 0, 15);
             enc.setBuffer_offset_atIndex(Some(&self.vnormals), 0, 16);
+            enc.setBuffer_offset_atIndex(
+                Some(acc.lighting.as_ref().unwrap_or(&self.no_lighting)),
+                0,
+                17,
+            );
             for k in 0..samples {
                 params[6] = acc.samples + k;
                 enc.setBytes_length_atIndex(

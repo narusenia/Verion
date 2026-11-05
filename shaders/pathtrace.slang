@@ -11,7 +11,7 @@ StructuredBuffer<float> materials;  // 16 words: base color rgb, emission rgb, m
 StructuredBuffer<uint> lights;      // 16 words: kind (0 point, 1 directional, 2 spot), color rgb, intensity, position or travel direction xyz,
                                     // spot axis xyz, spot falloff scale, spot falloff offset, 3 pad (floats as bits)
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
-                                    // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle
+                                    // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle, 28 lighting AOV enable
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
 StructuredBuffer<float> emitters;   // 16 words per emissive world-space triangle: p0, p1, p2, radiance rgb, area, selection pdf, 2 pad
 StructuredBuffer<float> emitCdf;    // cumulative selection probability per emitter triangle, last entry 1
@@ -22,6 +22,9 @@ StructuredBuffer<float> uvs;        // uv per vertex, all meshes concatenated (z
 StructuredBuffer<float> texels;     // rgb texels, each texture's mip chain level 0 first
 StructuredBuffer<uint> texInfo;     // 4 words per texture: texel offset, width, height, mip level count
 StructuredBuffer<float> vnormals;   // xyz per vertex, all meshes concatenated (zero when a mesh has none)
+RWStructuredBuffer<float> lighting; // used only when params[28] != 0; 17 floats per pixel, running sums of the first-hit
+                                    // lighting split: direct diffuse, indirect diffuse, specular, transmission, emission (rgb each),
+                                    // then lit and total direct-light luminance (visibility = lit / total)
 
 static const float PI = 3.14159265358979;
 
@@ -267,18 +270,77 @@ struct Surface
     float fSel; // chance the dielectric base lobe reflects specularly
 };
 
-// f * cos(wi) of the reflective lobes. Rough transmission is not included.
-float3 evalReflective(Surface s, float3 woL, float3 wiL)
+struct Lobes
+{
+    float3 diffuse;
+    float3 specular;
+};
+
+// f * cos(wi) of the reflective lobes, split into the diffuse base and the specular lobes.
+// Rough transmission is not included.
+Lobes evalLobes(Surface s, float3 woL, float3 wiL)
 {
     float3 hh = normalize(woL + wiL);
     float woh = max(dot(woL, hh), 0.0);
     // The cosine cancels against the 1 / (4 cos wi cos wo) of the microfacet BRDF.
     float core = D(hh.z, s.alpha) * G1(woL.z, s.alpha) * G1(wiL.z, s.alpha) / (4.0 * woL.z);
     float t = s.transmission;
-    return s.metallic * schlick(s.albedo, woh) * core
-        + (1.0 - s.metallic) * (t * fresnelDielectric(woh, s.eta) + (1.0 - t) * fresnelDielectric(woh, s.ior)) * core
-        + (1.0 - s.metallic) * (1.0 - t) * (1.0 - s.fSel) * s.albedo * (wiL.z / PI);
+    Lobes l;
+    l.specular = s.metallic * schlick(s.albedo, woh) * core
+        + (1.0 - s.metallic) * (t * fresnelDielectric(woh, s.eta) + (1.0 - t) * fresnelDielectric(woh, s.ior)) * core;
+    l.diffuse = (1.0 - s.metallic) * (1.0 - t) * (1.0 - s.fSel) * s.albedo * (wiL.z / PI);
+    return l;
 }
+
+float3 evalReflective(Surface s, float3 woL, float3 wiL)
+{
+    Lobes l = evalLobes(s, woL, wiL);
+    return l.specular + l.diffuse;
+}
+
+// Radiance split by what produced it (REQ-STY-006). Indirect light is filed under the lobe the
+// path took at its first bounce; `total` is the beauty and is the sum of the parts.
+struct Parts
+{
+    float3 total;
+    float3 directDiffuse;
+    float3 indirectDiffuse;
+    float3 specular;
+    float3 transmission;
+    float3 emission;
+
+    // Light reached by emission or the sky: seen directly, or through the first bounce's lobe.
+    [mutating] void add(uint depth, uint cls, float3 c)
+    {
+        total += c;
+        file(depth, cls, c);
+    }
+
+    // Next-event estimate with its diffuse and specular halves (c is their sum).
+    [mutating] void addLight(uint depth, uint cls, float3 c, float3 cd, float3 cs)
+    {
+        total += c;
+        if (depth == 0)
+        {
+            directDiffuse += cd;
+            specular += cs;
+        }
+        else
+            file(depth, cls, cd + cs);
+    }
+
+    [mutating] void file(uint depth, uint cls, float3 c)
+    {
+        if (depth == 0)
+            emission += c;
+        else if (cls == 0)
+            indirectDiffuse += c;
+        else if (cls == 1)
+            specular += c;
+        else
+            transmission += c;
+    }
+};
 
 // Density of choosing wiL through the reflective lobes of the sampler below. Used for MIS only:
 // NEE and BSDF sampling share this function, so an approximate value still gives an unbiased image.
@@ -337,7 +399,11 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
     dir = normalize(dir);
 
     float3 sky = float3(pf(20), pf(21), pf(22));
-    float3 radiance = float3(0.0);
+    Parts parts = (Parts)0;
+    bool lightingOn = params[28] != 0;
+    uint cls = 0; // lobe class of the first bounce: 0 diffuse, 1 specular, 2 transmission
+    float visLit = 0.0;
+    float visTotal = 0.0;
     float3 thr = float3(1.0);
     uint lightCount = params[5];
     uint maxDepth = params[7];
@@ -364,7 +430,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
         {
             // Uniform sky is reached by cosine sampling, so it needs no light sampling.
-            radiance += thr * sky;
+            parts.add(depth, cls, thr * sky);
             if (hasEnv)
             {
                 float wB = 1.0;
@@ -374,7 +440,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                     float den = qPrev * qPrev + pl * pl;
                     wB = den > 0.0 ? qPrev * qPrev / den : 1.0;
                 }
-                radiance += thr * envRadiance(dir) * wB;
+                parts.add(depth, cls, thr * envRadiance(dir) * wB);
             }
             break;
         }
@@ -481,7 +547,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                 float pl = (1.0 - pEnv) * emitters[e + 13] * pHitT * pHitT / (emitters[e + 12] * cosl);
                 wB = qPrev * qPrev / (qPrev * qPrev + pl * pl);
             }
-            radiance += thr * le * wB;
+            parts.add(depth, cls, thr * le * wB);
         }
         float metallic = materials[mi + 6] * texRM.y;
         float rough = materials[mi + 7] * texRM.x;
@@ -534,10 +600,24 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                 }
             }
             float c = dot(n, wi);
-            if (c > 0.0 && !occluded(p, wi, dist - 1.0e-3))
+            if (c > 0.0)
             {
-                float3 f = evalReflective(surf, woL, float3(dot(wi, T), dot(wi, B), c));
-                radiance += thr * f * li_;
+                bool occ = occluded(p, wi, dist - 1.0e-3);
+                bool track = lightingOn && depth == 0;
+                if (!occ || track)
+                {
+                    Lobes l = evalLobes(surf, woL, float3(dot(wi, T), dot(wi, B), c));
+                    float3 cd = thr * l.diffuse * li_;
+                    float3 cs = thr * l.specular * li_;
+                    if (!occ)
+                        parts.addLight(depth, cls, thr * (l.diffuse + l.specular) * li_, cd, cs);
+                    if (track)
+                    {
+                        float vv = lum(cd + cs);
+                        visTotal += vv;
+                        visLit += occ ? 0.0 : vv;
+                    }
+                }
             }
         }
 
@@ -571,13 +651,29 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
             float3 wi = toL / dist;
             float cosl = abs(dot(normalize(cross(b - a, c - a)), wi));
             float cosi = dot(n, wi);
-            if (cosi > 0.0 && cosl > 1.0e-5 && !occluded(p, wi, dist * (1.0 - 1.0e-3)))
+            if (cosi > 0.0 && cosl > 1.0e-5)
             {
-                float pl = (1.0 - pEnv) * emitters[e + 13] * d2 / (emitters[e + 12] * cosl);
-                float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
-                float qb = reflectivePdf(surf, woL, wiL);
-                float wl = pl * pl / (pl * pl + qb * qb);
-                radiance += thr * evalReflective(surf, woL, wiL) * float3(emitters[e + 9], emitters[e + 10], emitters[e + 11]) / pl * wl;
+                bool occ = occluded(p, wi, dist * (1.0 - 1.0e-3));
+                bool track = lightingOn && depth == 0;
+                if (!occ || track)
+                {
+                    float pl = (1.0 - pEnv) * emitters[e + 13] * d2 / (emitters[e + 12] * cosl);
+                    float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
+                    float qb = reflectivePdf(surf, woL, wiL);
+                    float wl = pl * pl / (pl * pl + qb * qb);
+                    float3 le = float3(emitters[e + 9], emitters[e + 10], emitters[e + 11]);
+                    Lobes l = evalLobes(surf, woL, wiL);
+                    float3 cd = thr * l.diffuse * le / pl * wl;
+                    float3 cs = thr * l.specular * le / pl * wl;
+                    if (!occ)
+                        parts.addLight(depth, cls, thr * evalReflective(surf, woL, wiL) * le / pl * wl, cd, cs);
+                    if (track)
+                    {
+                        float vv = lum(cd + cs);
+                        visTotal += vv;
+                        visLit += occ ? 0.0 : vv;
+                    }
+                }
             }
         }
 
@@ -591,13 +687,28 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
             float3 leE;
             float3 wi = envSample(e1, e2, e3, e4, pdfE, leE);
             float cosi = dot(n, wi);
-            if (pdfE > 0.0 && cosi > 0.0 && !occluded(p, wi, 1.0e30))
+            if (pdfE > 0.0 && cosi > 0.0)
             {
-                float pl = pEnv * pdfE;
-                float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
-                float qb = reflectivePdf(surf, woL, wiL);
-                float wl = pl * pl / (pl * pl + qb * qb);
-                radiance += thr * evalReflective(surf, woL, wiL) * leE / pl * wl;
+                bool occ = occluded(p, wi, 1.0e30);
+                bool track = lightingOn && depth == 0;
+                if (!occ || track)
+                {
+                    float pl = pEnv * pdfE;
+                    float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
+                    float qb = reflectivePdf(surf, woL, wiL);
+                    float wl = pl * pl / (pl * pl + qb * qb);
+                    Lobes l = evalLobes(surf, woL, wiL);
+                    float3 cd = thr * l.diffuse * leE / pl * wl;
+                    float3 cs = thr * l.specular * leE / pl * wl;
+                    if (!occ)
+                        parts.addLight(depth, cls, thr * evalReflective(surf, woL, wiL) * leE / pl * wl, cd, cs);
+                    if (track)
+                    {
+                        float vv = lum(cd + cs);
+                        visTotal += vv;
+                        visLit += occ ? 0.0 : vv;
+                    }
+                }
             }
         }
 
@@ -611,6 +722,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         float3 w = float3(1.0);
         bool ok = true;
         bool refracted = false;
+        uint lobeCls = 1;
         if (lobe < metallic)
         {
             float3 h = sampleVndf(woL, alpha, u1, u2);
@@ -636,6 +748,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
                 wiL = -woL * r + (r * woh - sqrt(max(k, 0.0))) * h;
                 ok = wiL.z < 0.0 && k > 0.0;
                 refracted = true;
+                lobeCls = 2;
                 // Radiance scales by (n_incident / n_transmitted)^2 across the interface.
                 w = albedo * G1(max(-wiL.z, 0.0), alpha) * r * r;
             }
@@ -652,9 +765,12 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         {
             wiL = cosineLocal(u1, u2);
             w = albedo;
+            lobeCls = 0;
         }
         if (!ok)
             break;
+        if (depth == 0)
+            cls = lobeCls;
         misPrev = !refracted;
         qPrev = refracted ? 0.0 : reflectivePdf(surf, woL, wiL);
 
@@ -675,11 +791,31 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         }
     }
 
+    float3 radiance = parts.total;
     if (any(isnan(radiance)) || any(isinf(radiance)))
+    {
         radiance = float3(0.0); // one bad sample must not poison the running sum
+        parts = (Parts)0;
+        visLit = 0.0;
+        visTotal = 0.0;
+    }
 
     uint o = 3 * pixel;
     accum[o] += radiance.x;
     accum[o + 1] += radiance.y;
     accum[o + 2] += radiance.z;
+
+    if (lightingOn)
+    {
+        uint lo = 17 * pixel;
+        float3 split[5] = { parts.directDiffuse, parts.indirectDiffuse, parts.specular, parts.transmission, parts.emission };
+        for (uint k = 0; k < 5; k++)
+        {
+            lighting[lo + 3 * k] += split[k].x;
+            lighting[lo + 3 * k + 1] += split[k].y;
+            lighting[lo + 3 * k + 2] += split[k].z;
+        }
+        lighting[lo + 15] += visLit;
+        lighting[lo + 16] += visTotal;
+    }
 }
