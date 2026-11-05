@@ -39,6 +39,7 @@ Verion は、Blender・Cinema 4D・Maya などの DCC から使うことを想�
 | GPU | Metal Ray Tracing（M3 以降）、のちに Vulkan Ray Tracing（RTX） | 開発機が Mac なので Metal を先に作る |
 | シェーダー | Slang（MSL と SPIR-V に変換） | BSDF やスタイルの計算を 1 回だけ書く |
 | レンダリング | パストレーシング（NEE と MIS）。Megakernel と、パスのキューを詰める Wavefront の 2 形式 | 物理ベースの基準になる。2 形式は同じコードを使い、同じ画像になる |
+| Adaptive Sampling | 画素単位。収束した画素を止め、残りの画素にサンプルを回す（`--adaptive`） | 既定は無効。僅かに偏るので、出力は非物理として記録する |
 | 入力 | glTF 2.0 とスタイル用の拡張 JSON | 既存のテストシーンをそのまま使える |
 | 色 | OCIO / ACES | 出力全体に影響するので最初から入れる |
 | 出力 | OpenEXR（Beauty と AOV を 1 ファイル） | スタイルを後段で掛けるため成分を分けて残す |

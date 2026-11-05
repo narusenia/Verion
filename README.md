@@ -39,6 +39,7 @@ To get there, we make the following controllable.
 | GPU | Metal Ray Tracing (M3 and later), then Vulkan Ray Tracing (RTX) | Our development machines are Macs, so Metal comes first |
 | Shaders | Slang (compiled to MSL and SPIR-V) | BSDF and style code is written only once |
 | Rendering | Path tracing (NEE and MIS), as a megakernel or a wavefront with compacted path queues | The physical baseline; both forms run the same code and give the same image |
+| Adaptive sampling | Per-pixel: converged pixels stop and the rest get the samples (`--adaptive`) | Off by default; it biases slightly, so the output is marked non-physical |
 | Input | glTF 2.0 with a JSON extension for style | Existing test scenes work as they are |
 | Color | OCIO / ACES | It affects every output, so it goes in from the start |
 | Output | OpenEXR (beauty and AOVs in one file) | Components stay separate so style can be applied afterward |
