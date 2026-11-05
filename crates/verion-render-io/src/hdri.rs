@@ -256,6 +256,7 @@ mod tests {
                 physical: true,
                 samples: 1,
                 stylization_revision: 0,
+                grade: None,
             },
         };
         let path = temp("sky.exr");

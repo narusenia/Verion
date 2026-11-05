@@ -6,14 +6,25 @@ use std::{fmt, path::Path, result::Result};
 use exr::{meta::attribute::Chromaticities, prelude::*};
 use verion_scene::{ColorSpace, Oetf, OutputTransform, ToneMap};
 
+/// The whole-image color grade applied to Beauty (REQ-STY-011), as recorded in the file.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GradeInfo {
+    /// Gain in stops.
+    pub exposure: f32,
+    pub saturation: f32,
+    pub white_balance: [f32; 3],
+}
+
 /// Render settings recorded in the file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderInfo {
     /// The pixels come from a Reference-mode render, free of stylization and AI approximation.
     pub physical: bool,
     pub samples: u32,
     /// `Revisions::stylization` of the scene; identifies the stylization the pixels were made with.
     pub stylization_revision: u64,
+    /// The color grade applied to Beauty; `None` when none was.
+    pub grade: Option<GradeInfo>,
 }
 
 /// Optional primary-ray AOVs (all the same size as the frame).
@@ -202,6 +213,21 @@ pub fn write_exr(
         Text::from("verion/stylizationRevision"),
         text(frame.info.stylization_revision.to_string()),
     );
+    if let Some(g) = frame.info.grade {
+        other.insert(
+            Text::from("verion/exposure"),
+            AttributeValue::F32(g.exposure),
+        );
+        other.insert(
+            Text::from("verion/saturation"),
+            AttributeValue::F32(g.saturation),
+        );
+        let [r, gr, b] = g.white_balance;
+        other.insert(
+            Text::from("verion/whiteBalance"),
+            AttributeValue::FloatVec3((r, gr, b)),
+        );
+    }
     other.insert(
         Text::from("verion/workingSpace"),
         text(format!("{:?}", frame.working_space)),
@@ -252,6 +278,7 @@ mod tests {
                 physical: true,
                 samples: 64,
                 stylization_revision: 3,
+                grade: None,
             },
         }
     }
@@ -298,6 +325,36 @@ mod tests {
             Some(AttributeValue::Text(Text::from("3")))
         );
         assert_eq!(img.attributes.chromaticities.unwrap().red, Vec2(0.64, 0.33));
+    }
+
+    #[test]
+    fn records_the_color_grade_only_when_one_was_applied() {
+        let beauty = [[0.0; 3]; 2];
+        let t = OutputTransform::linear(ColorSpace::LinearRec709);
+        let attrs = |f: &ExrFrame, name: &str| {
+            let path = temp(name);
+            write_exr(&path, f, &t).unwrap();
+            let img = read_back(&path);
+            std::fs::remove_file(&path).ok();
+            img.layer_data.attributes.other
+        };
+        let plain = attrs(&frame(&beauty, None), "grade-none.exr");
+        assert!(!plain.contains_key(&Text::from("verion/exposure")));
+
+        let mut f = frame(&beauty, None);
+        f.info.grade = Some(GradeInfo {
+            exposure: -1.0,
+            saturation: 0.8,
+            white_balance: [1.1, 1.0, 0.9],
+        });
+        let graded = attrs(&f, "grade-some.exr");
+        let get = |k: &str| graded.get(&Text::from(k)).cloned();
+        assert_eq!(get("verion/exposure"), Some(AttributeValue::F32(-1.0)));
+        assert_eq!(get("verion/saturation"), Some(AttributeValue::F32(0.8)));
+        assert_eq!(
+            get("verion/whiteBalance"),
+            Some(AttributeValue::FloatVec3((1.1, 1.0, 0.9)))
+        );
     }
 
     #[test]

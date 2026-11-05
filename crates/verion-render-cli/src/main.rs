@@ -147,7 +147,7 @@ fn run(args: &Args) -> Result<(), String> {
     use indicatif::{ProgressBar, ProgressStyle};
     use verion_gpu_metal::{MetalContext, Renderer};
     use verion_render_io::{
-        ExrAovs, ExrFrame, ExrLighting, RenderInfo, load_gltf_in, load_hdri, write_exr,
+        ExrAovs, ExrFrame, ExrLighting, GradeInfo, RenderInfo, load_gltf_in, load_hdri, write_exr,
     };
     use verion_scene::{Camera, Light, OutputTransform};
 
@@ -276,6 +276,11 @@ fn run(args: &Args) -> Result<(), String> {
             physical: args.mode.physical(),
             samples: args.spp,
             stylization_revision: scene.revisions().stylization,
+            grade: (!grade.is_identity()).then_some(GradeInfo {
+                exposure: grade.exposure,
+                saturation: grade.saturation,
+                white_balance: grade.white_balance,
+            }),
         },
     };
     let t = Instant::now();

@@ -5,7 +5,7 @@ mod gltf_import;
 mod hdri;
 mod stylization_ext;
 
-pub use exr_out::{ExrAovs, ExrError, ExrFrame, ExrLighting, RenderInfo, write_exr};
+pub use exr_out::{ExrAovs, ExrError, ExrFrame, ExrLighting, GradeInfo, RenderInfo, write_exr};
 pub use gltf_import::{
     Error, Import, load_gltf, load_gltf_in, load_gltf_slice, load_gltf_slice_in,
 };
