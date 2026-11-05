@@ -1,0 +1,275 @@
+//! Intel Open Image Denoise (OIDN) loaded at run time (ADR-0013, REQ-ACC-001).
+//!
+//! The library is found through `VERION_OIDN_LIB`, the platform's default search path, or the
+//! Homebrew prefix. Without it, `Denoiser::load` fails and callers keep the noisy image.
+
+use std::{
+    ffi::{CStr, CString, c_char, c_void},
+    fmt,
+};
+
+use libloading::{Library, Symbol};
+
+/// OIDN device / filter handles are opaque pointers.
+type Handle = *mut c_void;
+
+const DEVICE_TYPE_CPU: i32 = 1;
+const FORMAT_FLOAT3: i32 = 3;
+
+#[derive(Debug)]
+pub enum Error {
+    /// The OIDN library was not found or lacks a symbol.
+    Load(String),
+    /// OIDN reported an error.
+    Oidn(String),
+    /// Image buffers do not match the size.
+    Size,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Load(m) => write!(f, "OIDN not available: {m}"),
+            Error::Oidn(m) => write!(f, "OIDN: {m}"),
+            Error::Size => write!(f, "image buffers do not match the size"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+fn candidates() -> Vec<String> {
+    let mut v: Vec<String> = std::env::var("VERION_OIDN_LIB").into_iter().collect();
+    if cfg!(target_os = "macos") {
+        v.push("libOpenImageDenoise.2.dylib".into());
+        v.push("/opt/homebrew/lib/libOpenImageDenoise.2.dylib".into());
+        v.push("/usr/local/lib/libOpenImageDenoise.2.dylib".into());
+    } else if cfg!(windows) {
+        v.push("OpenImageDenoise.dll".into());
+    } else {
+        v.push("libOpenImageDenoise.so.2".into());
+    }
+    v
+}
+
+/// Auxiliary feature images that guide the filter. Both should be noise-free.
+#[derive(Clone, Copy, Default)]
+pub struct Aux<'a> {
+    /// Surface albedo, 0 to 1.
+    pub albedo: Option<&'a [[f32; 3]]>,
+    /// Shading normal, -1 to 1 (any space).
+    pub normal: Option<&'a [[f32; 3]]>,
+}
+
+/// A CPU OIDN device. Reuse it across images: creating one loads the network weights.
+pub struct Denoiser {
+    lib: Library,
+    device: Handle,
+}
+
+// SAFETY: OIDN devices are thread-safe for use from one thread at a time; `&mut self` on
+// `denoise` serialises calls.
+unsafe impl Send for Denoiser {}
+
+impl Denoiser {
+    pub fn load() -> Result<Self, Error> {
+        let mut last = String::new();
+        for name in candidates() {
+            // SAFETY: loading OIDN runs only its own initialisers.
+            match unsafe { Library::new(&name) } {
+                Ok(lib) => return Self::with_library(lib),
+                Err(e) => last = format!("{name}: {e}"),
+            }
+        }
+        Err(Error::Load(last))
+    }
+
+    fn with_library(lib: Library) -> Result<Self, Error> {
+        // SAFETY: signatures match `OpenImageDenoise/oidn.h` (2.x).
+        let device = unsafe {
+            let new: Symbol<unsafe extern "C" fn(i32) -> Handle> = sym(&lib, b"oidnNewDevice\0")?;
+            let commit: Symbol<unsafe extern "C" fn(Handle)> = sym(&lib, b"oidnCommitDevice\0")?;
+            let d = new(DEVICE_TYPE_CPU);
+            if d.is_null() {
+                return Err(Error::Oidn("could not create a CPU device".into()));
+            }
+            commit(d);
+            d
+        };
+        let me = Self { lib, device };
+        me.check()?;
+        Ok(me)
+    }
+
+    fn check(&self) -> Result<(), Error> {
+        // SAFETY: `device` is live; OIDN owns the message string until the next call.
+        unsafe {
+            let get: Symbol<unsafe extern "C" fn(Handle, *mut *const c_char) -> i32> =
+                sym(&self.lib, b"oidnGetDeviceError\0")?;
+            let mut msg: *const c_char = std::ptr::null();
+            let code = get(self.device, &mut msg);
+            if code == 0 {
+                return Ok(());
+            }
+            let text = if msg.is_null() {
+                format!("error code {code}")
+            } else {
+                CStr::from_ptr(msg).to_string_lossy().into_owned()
+            };
+            Err(Error::Oidn(text))
+        }
+    }
+
+    /// Denoises HDR radiance in place with the `RT` filter. Buffers are row-major, `width * height` long.
+    pub fn denoise(
+        &mut self,
+        color: &mut [[f32; 3]],
+        aux: Aux,
+        width: usize,
+        height: usize,
+    ) -> Result<(), Error> {
+        let n = width * height;
+        if color.len() != n
+            || aux.albedo.is_some_and(|a| a.len() != n)
+            || aux.normal.is_some_and(|a| a.len() != n)
+            || n == 0
+        {
+            return Err(Error::Size);
+        }
+        // OIDN needs a normal only alongside an albedo.
+        let normal = aux.albedo.and(aux.normal);
+        // SAFETY: every image pointer covers `n` packed float3 values and outlives the filter;
+        // OIDN writes only to "output", which aliases `color` (in-place filtering is supported).
+        unsafe {
+            let new: Symbol<unsafe extern "C" fn(Handle, *const c_char) -> Handle> =
+                sym(&self.lib, b"oidnNewFilter\0")?;
+            let set_image: Symbol<
+                unsafe extern "C" fn(
+                    Handle,
+                    *const c_char,
+                    *mut c_void,
+                    i32,
+                    usize,
+                    usize,
+                    usize,
+                    usize,
+                    usize,
+                ),
+            > = sym(&self.lib, b"oidnSetSharedFilterImage\0")?;
+            let set_bool: Symbol<unsafe extern "C" fn(Handle, *const c_char, bool)> =
+                sym(&self.lib, b"oidnSetFilterBool\0")?;
+            let commit: Symbol<unsafe extern "C" fn(Handle)> =
+                sym(&self.lib, b"oidnCommitFilter\0")?;
+            let exec: Symbol<unsafe extern "C" fn(Handle)> =
+                sym(&self.lib, b"oidnExecuteFilter\0")?;
+            let release: Symbol<unsafe extern "C" fn(Handle)> =
+                sym(&self.lib, b"oidnReleaseFilter\0")?;
+
+            let filter = new(self.device, c"RT".as_ptr());
+            if filter.is_null() {
+                self.check()?;
+                return Err(Error::Oidn("could not create the RT filter".into()));
+            }
+            let image = |name: &str, ptr: *const [f32; 3]| {
+                let name = CString::new(name).unwrap();
+                set_image(
+                    filter,
+                    name.as_ptr(),
+                    ptr.cast_mut().cast(),
+                    FORMAT_FLOAT3,
+                    width,
+                    height,
+                    0,
+                    0,
+                    0,
+                );
+            };
+            image("color", color.as_ptr());
+            image("output", color.as_ptr());
+            if let Some(a) = aux.albedo {
+                image("albedo", a.as_ptr());
+            }
+            if let Some(a) = normal {
+                image("normal", a.as_ptr());
+            }
+            set_bool(filter, c"hdr".as_ptr(), true);
+            // Our albedo and normal come from one noise-free primary ray per pixel.
+            set_bool(filter, c"cleanAux".as_ptr(), aux.albedo.is_some());
+            commit(filter);
+            let result = self.check();
+            if result.is_ok() {
+                exec(filter);
+            }
+            release(filter);
+            result.and_then(|_| self.check())
+        }
+    }
+}
+
+impl Drop for Denoiser {
+    fn drop(&mut self) {
+        // SAFETY: the device is released once, before the library is unloaded.
+        unsafe {
+            if let Ok(release) =
+                sym::<unsafe extern "C" fn(Handle)>(&self.lib, b"oidnReleaseDevice\0")
+            {
+                release(self.device);
+            }
+        }
+    }
+}
+
+/// # Safety
+/// `T` must match the C signature of `name`.
+unsafe fn sym<'l, T>(lib: &'l Library, name: &[u8]) -> Result<Symbol<'l, T>, Error> {
+    // SAFETY: forwarded to the caller.
+    unsafe { lib.get(name) }.map_err(|e| Error::Load(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_mismatched_sizes_before_calling_oidn() {
+        // Runs only where OIDN is installed; CI has none.
+        let Ok(mut d) = Denoiser::load() else { return };
+        let mut c = vec![[0.0; 3]; 4];
+        assert!(matches!(
+            d.denoise(&mut c, Aux::default(), 3, 1),
+            Err(Error::Size)
+        ));
+    }
+
+    #[test]
+    fn flattens_noise_on_a_flat_image() {
+        let Ok(mut d) = Denoiser::load() else { return };
+        let (w, h) = (64, 64);
+        let mut state = 1u32;
+        let mut c: Vec<[f32; 3]> = (0..w * h)
+            .map(|_| {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                let v = (state >> 8) as f32 / 16777216.0;
+                [v; 3]
+            })
+            .collect();
+        let albedo = vec![[0.5f32; 3]; w * h];
+        let normal = vec![[0.0f32, 0.0, 1.0]; w * h];
+        let var = |c: &[[f32; 3]]| {
+            let m = c.iter().map(|p| p[0]).sum::<f32>() / c.len() as f32;
+            c.iter().map(|p| (p[0] - m).powi(2)).sum::<f32>() / c.len() as f32
+        };
+        let before = var(&c);
+        d.denoise(
+            &mut c,
+            Aux {
+                albedo: Some(&albedo),
+                normal: Some(&normal),
+            },
+            w,
+            h,
+        )
+        .unwrap();
+        assert!(var(&c) < before * 0.1, "{} -> {}", before, var(&c));
+    }
+}

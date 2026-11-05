@@ -1,0 +1,14 @@
+[package]
+name = "verion-denoise"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Loads OIDN at run time, so the build and CI never need the C++ library (ADR-0013).
+libloading = "0.8"
+
+[lints.rust]
+# Calls into the OIDN C API need unsafe; the rest of the workspace denies it.
+unsafe_code = "allow"
