@@ -6,6 +6,7 @@ mod image;
 mod material;
 mod mesh;
 mod scene;
+mod shading;
 
 pub use color::{ColorSpace, Oetf, OutputTransform, ToneMap};
 pub use image::{Image, ImageError};
@@ -18,3 +19,4 @@ pub use scene::{
     Camera, IDENTITY, ImageId, Instance, InstanceId, Light, LightId, MaterialId, MeshId, Revisions,
     Scene, SceneError, Transform,
 };
+pub use shading::{LightComponents, ShadingContext};
