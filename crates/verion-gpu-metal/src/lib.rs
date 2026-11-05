@@ -7,7 +7,13 @@ mod renderer;
 pub use accel::{Blas, Instance, Tlas};
 pub use renderer::{Accumulation, Aovs, Integrator, LightingAovs, Renderer};
 
-use std::fmt;
+use std::{
+    fmt,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_metal::{MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLDevice};
@@ -64,6 +70,19 @@ const GIB: f64 = (1u64 << 30) as f64;
 pub struct MetalContext {
     pub(crate) device: Obj<dyn MTLDevice>,
     pub(crate) queue: Obj<dyn MTLCommandQueue>,
+    /// Bytes copied from the host into GPU buffers through this context (shared by its clones).
+    uploaded: Arc<AtomicU64>,
+}
+
+/// GPU memory against the budget (REQ-PERF-006, step 2: measured, behavior unchanged).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MemoryUsage {
+    /// The device's recommended working set; allocations past it fail with `Error::OutOfMemory`.
+    pub budget: u64,
+    /// Bytes the device has allocated now, all clients of the process included.
+    pub allocated: u64,
+    /// Bytes uploaded from the host through this context so far.
+    pub uploaded: u64,
 }
 
 impl MetalContext {
@@ -77,7 +96,23 @@ impl MetalContext {
         let queue = device
             .newCommandQueue()
             .ok_or(Error::Resource("command queue"))?;
-        Ok(Self { device, queue })
+        Ok(Self {
+            device,
+            queue,
+            uploaded: Arc::default(),
+        })
+    }
+
+    pub(crate) fn note_upload(&self, bytes: usize) {
+        self.uploaded.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+
+    pub fn memory(&self) -> MemoryUsage {
+        MemoryUsage {
+            budget: self.device.recommendedMaxWorkingSetSize(),
+            allocated: self.device.currentAllocatedSize() as u64,
+            uploaded: self.uploaded.load(Ordering::Relaxed),
+        }
     }
 
     /// Fails with [`Error::OutOfMemory`] when `bytes` more would exceed the device's recommended working set.

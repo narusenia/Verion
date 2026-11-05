@@ -214,6 +214,8 @@ fn run(args: &Args) -> Result<(), String> {
         IntegratorArg::Wavefront => verion_gpu_metal::Integrator::Wavefront,
     });
     renderer.set_stage_timing(args.stage_timing);
+    // shortcut: the peak is the largest of the samples taken at stage boundaries, not a true high-water mark.
+    let mut peak = ctx.memory().allocated;
     let build_s = t.elapsed().as_secs_f64();
 
     let (w, h) = (args.width, args.height);
@@ -238,6 +240,7 @@ fn run(args: &Args) -> Result<(), String> {
     bar.finish_and_clear();
     let gpu_s = acc.gpu_seconds();
     let wavefront_bytes = acc.wavefront_bytes();
+    peak = peak.max(ctx.memory().allocated);
     let stages = acc.stage_seconds().map_or(String::new(), |[e, s]| {
         format!("\"extend_s\":{e},\"shade_s\":{s},")
     });
@@ -253,6 +256,8 @@ fn run(args: &Args) -> Result<(), String> {
         .render_aovs(w, h)
         .map_err(|e| format!("aovs: {e:?}"))?;
     let aov_s = t.elapsed().as_secs_f64();
+    let memory = ctx.memory();
+    peak = peak.max(memory.allocated);
 
     let t = Instant::now();
     let mut denoiser = if args.denoise {
@@ -370,7 +375,7 @@ fn run(args: &Args) -> Result<(), String> {
 
     if let Some(path) = &args.metrics {
         let json = format!(
-            "{{\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\"integrator\":\"{:?}\",\"wavefront_bytes\":{wavefront_bytes},\
+            "{{\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\"integrator\":\"{:?}\",\"wavefront_bytes\":{wavefront_bytes},\"gpu_budget_bytes\":{},\"gpu_peak_bytes\":{peak},\"upload_bytes\":{},\
 \"load_s\":{load_s},\"build_s\":{build_s},\"render_s\":{render_s},\"gpu_s\":{gpu_s},{stages}\"aov_s\":{aov_s},\"denoise_s\":{denoise_s},\"stylize_s\":{stylize_s},\
 \"write_s\":{write_s},\"total_s\":{}}}\n",
             json_str(&args.scene.display().to_string()),
@@ -378,6 +383,8 @@ fn run(args: &Args) -> Result<(), String> {
             args.spp,
             json_str(args.mode.name()),
             args.integrator,
+            memory.budget,
+            memory.uploaded,
             total.elapsed().as_secs_f64(),
         );
         fs::write(path, json).map_err(|e| format!("write {}: {e}", path.display()))?;

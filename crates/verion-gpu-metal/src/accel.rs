@@ -19,6 +19,7 @@ fn shared_buffer<T: Copy>(ctx: &MetalContext, data: &[T]) -> Result<Obj<dyn MTLB
     let ptr = NonNull::new(data.as_ptr().cast_mut().cast::<c_void>())
         .ok_or(Error::Resource("empty buffer"))?;
     ctx.check_fits(size_of_val(data))?;
+    ctx.note_upload(size_of_val(data));
     // SAFETY: `ptr` points to `size_of_val(data)` readable bytes; Metal copies them.
     unsafe {
         ctx.device.newBufferWithBytes_length_options(

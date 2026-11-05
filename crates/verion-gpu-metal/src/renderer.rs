@@ -48,6 +48,7 @@ fn upload<T: Copy>(ctx: &MetalContext, data: &[T]) -> Result<Obj<dyn MTLBuffer>,
         (data.as_ptr().cast::<c_void>(), size_of_val(data))
     };
     ctx.check_fits(len)?;
+    ctx.note_upload(len);
     // SAFETY: `ptr` is valid for `len` bytes; Metal copies them.
     unsafe {
         ctx.device.newBufferWithBytes_length_options(
