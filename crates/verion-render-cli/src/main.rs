@@ -36,6 +36,15 @@ impl Mode {
     }
 }
 
+/// Form of the path tracer (REQ-GPU-005). Both give the same image.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum IntegratorArg {
+    /// One GPU thread per path
+    Megakernel,
+    /// One kernel per stage and bounce, with compacted path queues
+    Wavefront,
+}
+
 /// Where `--denoise` filters a stylized render (ADR-0013). Reference renders denoise the beauty.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum DenoiseStage {
@@ -110,6 +119,13 @@ struct Args {
     /// What `--denoise` filters in `--mode stylized`
     #[arg(long, value_enum, default_value_t = DenoiseStage::Input)]
     denoise_stage: DenoiseStage,
+    /// Path tracer form
+    #[arg(long, value_enum, default_value_t = IntegratorArg::Megakernel)]
+    integrator: IntegratorArg,
+    /// Split the GPU time into extend (closest hit) and shade in the metrics (wavefront only;
+    /// submits each stage separately, so the total gets slower)
+    #[arg(long)]
+    stage_timing: bool,
     /// Write timing metrics as JSON
     #[arg(long)]
     metrics: Option<PathBuf>,
@@ -193,6 +209,11 @@ fn run(args: &Args) -> Result<(), String> {
     let ctx = MetalContext::new().map_err(|e| format!("Metal ray tracing is required: {e:?}"))?;
     let mut renderer = Renderer::new(&ctx, &scene).map_err(|e| format!("renderer: {e:?}"))?;
     renderer.set_multiscatter(!args.no_multiscatter);
+    renderer.set_integrator(match args.integrator {
+        IntegratorArg::Megakernel => verion_gpu_metal::Integrator::Megakernel,
+        IntegratorArg::Wavefront => verion_gpu_metal::Integrator::Wavefront,
+    });
+    renderer.set_stage_timing(args.stage_timing);
     let build_s = t.elapsed().as_secs_f64();
 
     let (w, h) = (args.width, args.height);
@@ -216,6 +237,10 @@ fn run(args: &Args) -> Result<(), String> {
     }
     bar.finish_and_clear();
     let gpu_s = acc.gpu_seconds();
+    let wavefront_bytes = acc.wavefront_bytes();
+    let stages = acc.stage_seconds().map_or(String::new(), |[e, s]| {
+        format!("\"extend_s\":{e},\"shade_s\":{s},")
+    });
     let mut beauty = acc.mean();
     let mut lighting = acc.lighting();
     let render_s = t.elapsed().as_secs_f64();
@@ -345,13 +370,14 @@ fn run(args: &Args) -> Result<(), String> {
 
     if let Some(path) = &args.metrics {
         let json = format!(
-            "{{\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\
-\"load_s\":{load_s},\"build_s\":{build_s},\"render_s\":{render_s},\"gpu_s\":{gpu_s},\"aov_s\":{aov_s},\"denoise_s\":{denoise_s},\"stylize_s\":{stylize_s},\
+            "{{\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\"integrator\":\"{:?}\",\"wavefront_bytes\":{wavefront_bytes},\
+\"load_s\":{load_s},\"build_s\":{build_s},\"render_s\":{render_s},\"gpu_s\":{gpu_s},{stages}\"aov_s\":{aov_s},\"denoise_s\":{denoise_s},\"stylize_s\":{stylize_s},\
 \"write_s\":{write_s},\"total_s\":{}}}\n",
             json_str(&args.scene.display().to_string()),
             json_str(&args.output.display().to_string()),
             args.spp,
             json_str(args.mode.name()),
+            args.integrator,
             total.elapsed().as_secs_f64(),
         );
         fs::write(path, json).map_err(|e| format!("write {}: {e}", path.display()))?;
