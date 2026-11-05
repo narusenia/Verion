@@ -5,7 +5,7 @@ use std::{
 
 use eframe::egui::{self, Align, Align2, Color32, Key, Layout, PointerButton, RichText};
 use egui_material_icons::icons::*;
-use verion_gpu_metal::{Accumulation, Integrator, LightingAovs, MetalContext, Renderer};
+use verion_gpu_metal::{Accumulation, Adaptive, Integrator, LightingAovs, MetalContext, Renderer};
 use verion_scene::{Camera, Light, Material, OutputTransform, Scene};
 use verion_stylization::{ColorGrade, Frame, PostFrame};
 
@@ -167,13 +167,16 @@ enum View {
     Albedo,
     Normal,
     Depth,
+    /// Samples per pixel, white at the max spp (adaptive sampling).
+    Samples,
 }
 
-const VIEWS: [(View, &str, &str); 4] = [
+const VIEWS: [(View, &str, &str); 5] = [
     (View::Beauty, "Beauty", "1"),
     (View::Albedo, "Albedo", "2"),
     (View::Normal, "Normal", "3"),
     (View::Depth, "Depth", "4"),
+    (View::Samples, "Samples", "5"),
 ];
 
 struct Stats {
@@ -198,6 +201,11 @@ pub struct App {
     stylized: bool,
     multiscatter: bool,
     integrator: Integrator,
+    /// Per-pixel adaptive sampling (REQ-ACC-007), with its threshold kept while off.
+    adaptive: bool,
+    adaptive_threshold: f32,
+    /// Pixels that still take samples, counted after each accumulate.
+    active: usize,
     /// Denoise the finished (or paused) accumulation with OIDN (ADR-0013).
     denoise: bool,
     /// Loaded on first use; the error is shown when OIDN is missing.
@@ -314,6 +322,9 @@ impl App {
             stylized: false,
             multiscatter: true,
             integrator: Integrator::Megakernel,
+            adaptive: false,
+            adaptive_threshold: Adaptive::default().threshold,
+            active: (w * h) as usize,
             denoise: false,
             denoiser: None,
             denoised: None,
@@ -380,6 +391,7 @@ impl App {
             Ok(mut r) => {
                 r.set_multiscatter(self.multiscatter);
                 r.set_integrator(self.integrator);
+                r.set_adaptive(self.adaptive_setting());
                 r.set_camera(self.scene.camera());
                 self.renderer = r;
                 self.refresh_aovs();
@@ -463,17 +475,31 @@ impl App {
             self.renderer.new_accumulation(w, h)
         };
         match acc {
-            Ok(acc) => self.acc = acc,
+            Ok(acc) => {
+                self.active = acc.active_pixels();
+                self.acc = acc;
+            }
             Err(e) => eprintln!("render: {e:?}"),
         }
         self.denoised = None;
         self.dirty = true;
     }
 
+    fn adaptive_setting(&self) -> Option<Adaptive> {
+        self.adaptive.then(|| Adaptive {
+            threshold: self.adaptive_threshold,
+            ..Adaptive::default()
+        })
+    }
+
+    /// The accumulation reached the max spp, or adaptive sampling stopped every pixel.
+    fn done(&self) -> bool {
+        self.acc.samples() >= self.max_spp || self.active == 0
+    }
+
     /// Denoising takes about a second, so it runs once the accumulation is done or paused.
     fn denoise_ready(&self) -> bool {
-        let spp = self.acc.samples();
-        self.denoise && spp > 0 && (spp >= self.max_spp || self.paused)
+        self.denoise && self.acc.samples() > 0 && (self.done() || self.paused)
     }
 
     /// Beauty and (stylized only) lighting split, denoised when `denoise_ready`. A stylized frame
@@ -526,6 +552,13 @@ impl App {
                 .iter()
                 .map(|n| n.map(|v| v * 0.5 + 0.5))
                 .collect(),
+            View::Samples => {
+                let max = self.max_spp.max(1) as f32;
+                match self.acc.sample_counts() {
+                    Some(n) => n.iter().map(|&n| [n as f32 / max; 3]).collect(),
+                    None => vec![[self.acc.samples() as f32 / max; 3]; self.shown_len()],
+                }
+            }
             View::Depth => {
                 let far = self.aov.depth.iter().copied().fold(0.0, f32::max).max(1e-6);
                 self.aov.depth.iter().map(|d| [d / far; 3]).collect()
@@ -572,13 +605,17 @@ impl App {
         }
     }
 
+    fn shown_len(&self) -> usize {
+        self.width as usize * self.height as usize
+    }
+
     /// Rebuilding the picture reads the whole accumulation back and converts every pixel, so it is
     /// done often while the image is rough (few samples) and rarely once it has converged.
     fn upload_due(&self) -> bool {
         let spp = self.acc.samples();
         let wait = Duration::from_millis((u64::from(spp) / 2).clamp(30, 500));
         let moving = self.last_move.elapsed() < MOTION_SETTLE;
-        moving || spp >= self.max_spp || self.paused || self.last_upload.elapsed() >= wait
+        moving || self.done() || self.paused || self.last_upload.elapsed() >= wait
     }
 
     /// Stylization needs the lighting buffers, so switching it starts a new accumulation.
@@ -658,7 +695,8 @@ impl App {
                 "1" => Key::Num1,
                 "2" => Key::Num2,
                 "3" => Key::Num3,
-                _ => Key::Num4,
+                "4" => Key::Num4,
+                _ => Key::Num5,
             };
             if pressed(k) {
                 self.view = v;
@@ -713,6 +751,7 @@ impl App {
                         View::Albedo => ICON_PALETTE,
                         View::Normal => ICON_TEXTURE,
                         View::Depth => ICON_LAYERS,
+                        View::Samples => ICON_GRAIN,
                     };
                     let r = ui.selectable_label(self.view == v, (icon.rich_text(), name));
                     if r.on_hover_text(format!("Show {name} ({key})")).clicked() {
@@ -762,7 +801,7 @@ impl App {
                         self.show_panels = !self.show_panels;
                     }
                     let spp = self.acc.samples();
-                    let rate = if self.paused || spp >= self.max_spp {
+                    let rate = if self.paused || self.done() {
                         String::new()
                     } else {
                         format!("  {:.0} spp/s", self.spp_rate)
@@ -924,6 +963,30 @@ impl App {
         if integrator != self.integrator {
             self.integrator = integrator;
             self.renderer.set_integrator(integrator);
+            self.restart();
+        }
+        let mut adaptive_changed = widgets::checkbox(ui, &mut self.adaptive, "Adaptive sampling");
+        ui.add_enabled_ui(self.adaptive, |ui| {
+            adaptive_changed |= widgets::log_slider(
+                ui,
+                &mut self.adaptive_threshold,
+                0.005..=0.2,
+                "noise threshold",
+            );
+            let pixels = self.shown_len().max(1);
+            kv(
+                ui,
+                "active pixels",
+                format!("{:.1} %", 100.0 * self.active as f32 / pixels as f32),
+            );
+        })
+        .response
+        .on_hover_text(
+            "Each pixel stops once its noise is under the threshold (relative standard error); \
+             view 5 shows the samples per pixel. Slightly biased, so not physical",
+        );
+        if adaptive_changed {
+            self.renderer.set_adaptive(self.adaptive_setting());
             self.restart();
         }
         if widgets::checkbox(ui, &mut self.denoise, "Denoise when done (OIDN)") {
@@ -1195,7 +1258,7 @@ impl App {
         );
         let (text, color) = if self.paused {
             ("PAUSED", WARNING)
-        } else if self.acc.samples() >= self.max_spp {
+        } else if self.done() {
             ("DONE", SUCCESS)
         } else {
             ("", ACCENT)
@@ -1256,7 +1319,7 @@ impl App {
             ("Wheel / pinch", "dolly"),
             ("Click", "pick the material under the cursor"),
             ("F / R", "frame the scene / reset the camera"),
-            ("1 2 3 4", "Beauty / Albedo / Normal / Depth"),
+            ("1 2 3 4 5", "Beauty / Albedo / Normal / Depth / Samples"),
             ("T", "toggle stylization"),
             ("Space / Backspace", "pause / restart accumulation"),
             ("Tab", "hide or show the inspector"),
@@ -1296,12 +1359,15 @@ impl eframe::App for App {
                 self.fetch_aovs();
             }
         }
-        if !self.paused && self.acc.samples() < self.max_spp {
+        if !self.paused && !self.done() {
             let chunk = if moving { 1 } else { self.chunk.round() as u32 };
             let n = chunk.min(self.max_spp - self.acc.samples());
             let started = Instant::now();
             match self.renderer.accumulate(&mut self.acc, n) {
-                Ok(()) => self.samples_dirty = true,
+                Ok(()) => {
+                    self.active = self.acc.active_pixels();
+                    self.samples_dirty = true;
+                }
                 Err(e) => eprintln!("render: {e:?}"),
             }
             let took = started.elapsed().as_secs_f32().max(1e-4);

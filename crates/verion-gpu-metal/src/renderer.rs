@@ -33,6 +33,15 @@ pub struct Adaptive {
     pub min_spp: u32,
 }
 
+impl Default for Adaptive {
+    fn default() -> Self {
+        Self {
+            threshold: 0.02,
+            min_spp: 16,
+        }
+    }
+}
+
 impl Adaptive {
     /// Whether a pixel with `n` samples, luminance sum `s` and square sum `s2` takes more samples.
     /// Mirrors `pixelActive` in `shaders/include/pt_core.slang`.
