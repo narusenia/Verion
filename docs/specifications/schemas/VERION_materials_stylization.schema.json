@@ -103,6 +103,34 @@
         }
       }
     },
+    "outlineStyle": {
+      "type": "object",
+      "description": "Lines on silhouettes and creases, drawn in a post pass. Opacity comes from hybridSurface.outline. Non-physical.",
+      "properties": {
+        "color": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "width": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "depthThreshold": {
+          "$ref": "#/$defs/unit"
+        },
+        "creaseAngle": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 180
+        }
+      }
+    },
     "rimLight": {
       "type": "object",
       "description": "Non-physical rim added to the final color; independent of the light's strength.",
