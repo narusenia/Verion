@@ -123,6 +123,7 @@ Verion は、Blender / Cinema 4D / Maya などの DCC から使える GPU レン
 | ~~Metal 向けデノイザーの選定（OIDN / MetalFX）~~ | 決定済み（ADR-0013） |
 | M1/M2 チップ（RT 非搭載）の扱い | M7 まで保留。M3 以降のみ対象 |
 | Linux 対応 | M4 以降 |
+| 環境光だけで照明したときの Toon の段（HDRI から求めた支配的な光の方向を仮想の主光源にする案。遮蔽・ユーザーによる上書き・Sky ライトの扱いを含む） | M6 前（Blender 連携の計画時） |
 
 ## 用語集
 
