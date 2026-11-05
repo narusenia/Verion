@@ -482,13 +482,15 @@ mod tests {
 
     #[test]
     fn orbit_rebuilds_the_camera_it_came_from() {
-        let mut cam = Camera::default();
-        cam.transform = [
-            [1.0, 0.0, 0.0, 1.0],
-            [0.0, 1.0, 0.0, 2.0],
-            [0.0, 0.0, 1.0, 5.0],
-        ];
-        cam.focus_distance = 5.0;
+        let cam = Camera {
+            transform: [
+                [1.0, 0.0, 0.0, 1.0],
+                [0.0, 1.0, 0.0, 2.0],
+                [0.0, 0.0, 1.0, 5.0],
+            ],
+            focus_distance: 5.0,
+            ..Camera::default()
+        };
         let back = Orbit::from_camera(&cam).camera(&cam);
         for (a, b) in back
             .transform
