@@ -405,6 +405,29 @@ mod tests {
     }
 
     #[test]
+    fn matcap_strength_slider_edits_the_layer() {
+        let mut scene = verion_scene::Scene::new();
+        let image = scene.add_image(verion_scene::Image::new(1, 1, vec![[1.0; 3]]).unwrap());
+        let m = Material {
+            stylization: vec![StylizationLayer::MatCap(verion_scene::MatCap {
+                image,
+                strength: 1.0,
+                albedo: 0.0,
+            })],
+            ..Material::default()
+        };
+        let mut h = harness(m);
+        // The MatCap layer is the last section: its sliders are strength, then albedo.
+        let sliders: Vec<_> = h.get_all_by_role(egui::accesskit::Role::Slider).collect();
+        sliders[sliders.len() - 2].set_value_accesskit(0.25);
+        h.run();
+        let StylizationLayer::MatCap(mc) = &h.state().0.stylization[0] else {
+            panic!()
+        };
+        assert_eq!((mc.strength, mc.albedo), (0.25, 0.0));
+    }
+
+    #[test]
     fn copy_then_paste_moves_stylization_between_materials() {
         let styled = Material {
             stylization: toon_default(),
