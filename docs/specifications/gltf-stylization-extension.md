@@ -73,8 +73,27 @@
 - すべて省略できる。`rimLight` を書くと、既定値でリムが有効になる
 - `hybridSurface` には依存しない（`strength` が強さを決める）
 
+### `stylizedSpecular`（REQ-STY-004）
+
+鏡面ハイライトを、光ごとの帯状の形に置き換える。非物理。v0.1 の形状は帯状のみ。
+
+| プロパティ | 型 | 範囲 | 既定 | 内容 |
+|---|---|---|---|---|
+| `shape` | string | `"band"` のみ | `"band"` | 形状の種類。ほかの値は取り込みエラー（楕円・手描き風は後続） |
+| `size` | number | 0〜1 | 0.05 | ハイライトの大きさ。`1 − N·H` が `size` 以下の範囲 |
+| `feather` | number | 0〜1 | 0.02 | 縁のぼかし幅 |
+| `color` | number[3] | 各値 0 以上の有限値 | [1, 1, 1] | ハイライトの色（線形 Rec.709） |
+| `strength` | number | 0 以上の有限値 | 1 | ハイライトの強さ。光の強さには依存しない |
+
+- すべて省略できる。`hybridSurface.specular` が 0 より大きいときだけ効く
+
 ## 解釈
 
+- `stylizedSpecular` は、物理の鏡面（直接光のハイライト）を、`hybridSurface.specular` で Toon のハイライトへ混ぜる。光ごとのスロットで、半ベクトル H（光の方向と視線から作る）を使う
+  - 光 k のハイライト: `color × strength × 帯(1 − N·H) × 可視性`。帯は `size`・`feather` の smoothstep を反転したもの（縁の内側が 1）
+  - 光が鏡面を持たないスロット（鏡面の寄与がほぼ 0。Lambert など）は出さない
+  - 全スロットのハイライトを足す。結果と物理の鏡面を `physical + (stylized − physical) × specular` で混ぜる
+  - 環境の映り込みなど、直接光でない鏡面（間接鏡面）は、物理の鏡面に含まれたまま。`hybridSurface.specular` が 1 のときは、直接光のハイライトだけでなく間接鏡面も含めて置き換わる（v0.1 の制限）
 - `rimLight` は最終色にリムを加算する。法線 N、視線 V、光の方向 L から次で求める
   - 帯: `x = 1 − max(N·V, 0)` を、閾値 `1 − width`、ぼかし幅 `feather` の smoothstep にかけた値。`width` が大きいほど内側まで出る
   - 光への追従: `lerp(1, saturate(N·L), followLight)`。L は光ごとのスロットの方向
@@ -84,7 +103,7 @@
 - `shadowPalette` は `hybridSurface.shadow` が 0 より大きいときだけ効く。補正の強さは `shadow` に比例する
   - 影の度合い `w` は、直接拡散が光から受け取れる量にどれだけ届いていないか（0 は全面照明、1 は完全な影）。直接拡散と間接拡散を、それぞれ `補正前 + (補正後 − 補正前) × w × shadow` に置き換える
   - 色相・彩度・明度は、最大チャンネルを明度とする HSV で扱う。黒は補正しても黒のまま（影が真っ黒になる材質では、直接影は色が付かない。`toonRamp` の暗いバンドで色を持たせる）
-- 効くのは `hybridSurface.diffuse`、`hybridSurface.shadow`、`toonRamp`、`shadowPalette`、`rimLight` だけ。他の成分の値は読み込んで保持するが、描画には効かない（REQ-STY-004 などの実装後に効く）
+- 効くのは `hybridSurface.diffuse`・`specular`・`shadow`、`toonRamp`、`shadowPalette`、`rimLight`、`stylizedSpecular` だけ。`hybridSurface` の `gi`・`outline` は読み込んで保持するが、描画には効かない（実装後に効く）
 - 層は材質に書いた順に適用する。同じ種類の層を複数書いても、順に適用する（glTF 拡張では種類ごとに 1 つ）
 - パレットの色は glTF の色係数と同じく線形 Rec.709 で書く。取り込み時に作業色空間へ変換する
 - Reference モードは拡張を読み込んでも適用しない（ADR-0008）。拡張の有無で Reference の画は変わらない
@@ -97,6 +116,7 @@
 - `thresholds` が厳密に増加する
 - `palette` の長さが `thresholds` の長さ + 1 になる
 - `rimLight.color` と `rimLight.strength` が 0 以上の有限値になる
+- `stylizedSpecular.color` と `stylizedSpecular.strength` が 0 以上の有限値になる。`stylizedSpecular.shape` が `"band"` である
 
 範囲外の値や上の条件違反は、そのファイルの取り込みエラーにする（黙って丸めない）。未知のプロパティは警告して無視する。
 
@@ -125,7 +145,7 @@
 
 ## 未決
 
-- `StylizedSpecular`（REQ-STY-004）の記述は、実装時にこの仕様へ追加する
+- 楕円・手描き風のハイライト形状（REQ-STY-004）。楕円は接線、手描き風はテクスチャが要る
 
 ## 決定済みの近似
 

@@ -72,6 +72,34 @@
         }
       }
     },
+    "stylizedSpecular": {
+      "type": "object",
+      "description": "Per-light banded highlight that replaces the physical specular, blended by hybridSurface.specular. Non-physical.",
+      "properties": {
+        "shape": {
+          "const": "band"
+        },
+        "size": {
+          "$ref": "#/$defs/unit"
+        },
+        "feather": {
+          "$ref": "#/$defs/unit"
+        },
+        "color": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
     "rimLight": {
       "type": "object",
       "description": "Non-physical rim added to the final color; independent of the light's strength.",
