@@ -2,3 +2,4 @@
 .DS_Store
 # Real-world HDRIs are fetched by scripts/fetch_hdri.sh
 assets/hdri/real/
+__pycache__/
