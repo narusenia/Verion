@@ -5,13 +5,13 @@ The geometry is embedded, so the file is self-contained. With a second argument 
 red base with no sheen, three sheen roughnesses and a blue sheen, lit mostly from behind.
 With `matcap` it writes the MatCap comparison instead: the same clay-colored base lit physically, then clay, metal and toon
 MatCap pictures (scripts/gen_matcaps.py, embedded) at strength 1, and the clay one at strength 0.5.
-Other modes: `toon` (five Toon recipes: ramp bands, rim light, highlight ramp, shadow palette, thick outline), `lights`
+Other modes: `highlights` (stylizedSpecular shapes: round, ellipse, rotated ellipse, star image, tall stepped ellipse), `toon` (five Toon recipes: ramp bands, rim light, highlight ramp, shadow palette, thick outline), `lights`
 (five Toon spheres under five colored lights listed weakest first, to exercise the strength-ordered light slots) and `glass`
 (transmission spheres of roughness 0, 0.15, 0.3, 0.5 and 0.8, no dispersion).
-glTF's metallicFactor defaults to 1, so non-metals set it to 0. Usage: gen_showcase_scene.py OUT_FILE [sheen|matcap|toon|lights|glass]"""
+glTF's metallicFactor defaults to 1, so non-metals set it to 0. Usage: gen_showcase_scene.py OUT_FILE [sheen|matcap|toon|lights|glass|highlights]"""
 import base64, json, math, struct, sys
 
-from gen_matcaps import matcap_png
+from gen_matcaps import matcap_png, star_png
 
 RINGS, SEGS = 48, 96
 
@@ -128,6 +128,20 @@ def main(path, mode="showcase"):
                                         "shadowPalette": {"direct": {"hueShift": -25, "saturation": 1.3, "value": 0.55}},
                                         "outlineStyle": {"width": 4, "color": [0.1, 0.02, 0.0]}}),
         ]
+    if mode == "highlights":
+        images.append({"uri": "data:image/png;base64," + base64.b64encode(star_png()).decode()})
+        textures.append({"source": 0})
+        base = {"hybridSurface": hybrid, "toonRamp": {"thresholds": [0.3], "feather": 0.02, "palette": [[0.3, 0.3, 0.55], [1, 1, 1]]},
+                "outlineStyle": {"width": 2}}
+        materials[:5] = [stylized(name, {**base, "stylizedSpecular": spec}) for name, spec in [
+            ("round", {"size": 0.06}),
+            ("ellipse", {"shape": "ellipse", "size": 0.04, "stretch": 3}),
+            ("ellipse 45", {"shape": "ellipse", "size": 0.04, "stretch": 3, "angle": 45}),
+            ("star", {"shape": "texture", "texture": {"index": 0}, "size": 0.1}),
+            ("star 2 steps", {"shape": "ellipse", "size": 0.1, "stretch": 0.5,
+                              "ramp": {"thresholds": [0.3, 0.7], "feather": 0.05, "palette": [[0, 0, 0], [0.5, 0.5, 0.5], [1, 1, 1]]}}),
+        ]]
+        materials[4]["name"] = "tall ellipse with steps"
     if mode == "glass":
         materials[:5] = [
             {"name": f"glass roughness {r}", "pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0, "roughnessFactor": r},

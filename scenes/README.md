@@ -10,6 +10,7 @@ the viewer: `./target/release/viewer scenes/NAME.gltf --hdri assets/hdri/sunny.h
 | `sheen_compare.gltf` | sheen roughness and color against no sheen | `... OUT sheen` |
 | `matcap_compare.gltf` | physical, clay, metal and toon MatCaps, and a half-strength blend | `... OUT matcap` |
 | `toon_compare.gltf` | five Toon recipes: two hard bands, four soft bands, rim light, highlight ramp, shadow palette with a thick outline | `... OUT toon` |
+| `highlight_compare.gltf` | `stylizedSpecular` shapes: round, ellipse, rotated ellipse, star image (hand-drawn), tall ellipse with steps | `... OUT highlights` |
 | `lights_compare.gltf` | the same Toon sphere under five colored lights listed weakest first (light slots follow strength) | `... OUT lights` |
 | `glass_compare.gltf` | transmission at roughness 0, 0.15, 0.3, 0.5, 0.8 (checks the multiple-scattering compensation; try `--no-multiscatter`) | `... OUT glass` |
 | `cornell_box.gltf` | the Cornell Box of the Mitsuba cross-check (`render_ppm` mode `box`) as glTF; its mean matches the example's render within 0.03% (render with `--no-multiscatter`, as the cross-check does) | `gen_cornell_scene.py OUT` |

@@ -62,25 +62,42 @@ def toon(n):
 KINDS = {"clay": clay, "metal": metal, "toon": toon}
 
 
-def matcap_png(kind):
-    shade = KINDS[kind]
+def png_rgb(size, pixel):
+    """PNG bytes of a size x size picture; pixel(x, y) gives linear RGB for x, y in -1..1 (+y up)."""
     rows = bytearray()
-    for j in range(SIZE):
+    for j in range(size):
         rows.append(0)  # PNG filter: none
-        for i in range(SIZE):
-            x, y = 2 * (i + 0.5) / SIZE - 1, 1 - 2 * (j + 0.5) / SIZE
-            r2 = x * x + y * y
-            if r2 > 0.999:  # outside the disk: the silhouette normal
-                s = math.sqrt(r2)
-                x, y, z = x / s * 0.9995, y / s * 0.9995, math.sqrt(1 - 0.9995 ** 2)
-            else:
-                z = math.sqrt(1 - r2)
-            rows.extend(srgb(c) for c in shade((x, y, z)))
+        for i in range(size):
+            rows.extend(srgb(c) for c in pixel(2 * (i + 0.5) / size - 1, 1 - 2 * (j + 0.5) / size))
     def chunk(tag, data):
         body = tag + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", SIZE, SIZE, 8, 2, 0, 0, 0))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(bytes(rows), 9)) + chunk(b"IEND", b""))
+
+
+def matcap_png(kind):
+    shade = KINDS[kind]
+
+    def pixel(x, y):
+        r2 = x * x + y * y
+        if r2 > 0.999:  # outside the disk: the silhouette normal
+            s = math.sqrt(r2)
+            x, y, z = x / s * 0.9995, y / s * 0.9995, math.sqrt(1 - 0.9995 ** 2)
+        else:
+            z = math.sqrt(1 - r2)
+        return shade((x, y, z))
+    return png_rgb(SIZE, pixel)
+
+
+def star_png():
+    """A white five-pointed star on black, a hand-drawn highlight shape for stylizedSpecular."""
+    def pixel(x, y):
+        r, a = math.hypot(x, y), math.atan2(y, x) - math.pi / 2
+        # Radius of the star outline at this angle: 0.9 at the points, 0.4 between them.
+        k = abs(((a / (2 * math.pi / 5)) % 1) - 0.5) * 2
+        return (1.0, 1.0, 1.0) if r < 0.4 + 0.5 * k ** 2 else (0.0, 0.0, 0.0)
+    return png_rgb(64, pixel)
 
 
 if __name__ == "__main__":
