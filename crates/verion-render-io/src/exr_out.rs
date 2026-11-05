@@ -25,6 +25,8 @@ pub struct ExrAovs<'a> {
     pub depth: Option<&'a [f32]>,
     /// Instance id plus one (0 = background), written as the 32-bit integer channel `ObjectId`.
     pub object_id: Option<&'a [u32]>,
+    /// Material index plus one (0 = background), written as the 32-bit integer channel `MaterialId`.
+    pub material_id: Option<&'a [u32]>,
     pub lighting: Option<ExrLighting<'a>>,
 }
 
@@ -99,6 +101,7 @@ pub fn write_exr(
         || a.albedo.is_some_and(|p| p.len() != size)
         || a.depth.is_some_and(|p| p.len() != size)
         || a.object_id.is_some_and(|p| p.len() != size)
+        || a.material_id.is_some_and(|p| p.len() != size)
         || a.lighting.is_some_and(|l| {
             [
                 l.direct_diffuse,
@@ -175,6 +178,12 @@ pub fn write_exr(
     }
     if let Some(ids) = a.object_id {
         channels.push(AnyChannel::new("ObjectId", FlatSamples::U32(ids.to_vec())));
+    }
+    if let Some(ids) = a.material_id {
+        channels.push(AnyChannel::new(
+            "MaterialId",
+            FlatSamples::U32(ids.to_vec()),
+        ));
     }
 
     let untouched = transform.tone_map == ToneMap::None && transform.oetf == Oetf::Linear;
@@ -300,6 +309,7 @@ mod tests {
             albedo: Some(&albedo),
             depth: Some(&[3.0, 0.0]),
             object_id: Some(&[7, 0]),
+            material_id: Some(&[3, 0]),
             ..Default::default()
         };
         let path = temp("ids.exr");
@@ -311,6 +321,7 @@ mod tests {
         assert_eq!(values(&img, "Albedo.R"), [1.0, 0.5]);
         assert_eq!(values(&img, "Z"), [3.0, 0.0]);
         assert_eq!(values(&img, "ObjectId"), [7.0, 0.0]);
+        assert_eq!(values(&img, "MaterialId"), [3.0, 0.0]);
         let list = &img.layer_data.channel_data.list;
         let id = list
             .iter()

@@ -75,6 +75,7 @@ fn reports_albedo_depth_and_ids() {
 
     let c = at(N / 2, N / 2);
     assert_eq!(aov.object_id[c], 1);
+    assert_eq!(aov.material_id[c], 1);
     assert_eq!(aov.albedo[c], [0.2, 0.4, 0.6]);
     assert!((aov.depth[c] - 3.0).abs() < 1e-3, "{}", aov.depth[c]);
 
@@ -82,14 +83,20 @@ fn reports_albedo_depth_and_ids() {
     // the plane z = -1 reads 4 whatever its ray angle.
     let r = at(54, N / 2);
     assert_eq!(aov.object_id[r], 2);
+    assert_eq!(aov.material_id[r], 2);
     assert_eq!(aov.albedo[r], [0.9, 0.1, 0.3]);
     assert!((aov.depth[r] - 4.0).abs() < 1e-3, "{}", aov.depth[r]);
 
     // Top-left corner: nothing there.
     let m = at(1, 1);
     assert_eq!(
-        (aov.object_id[m], aov.albedo[m], aov.depth[m]),
-        (0, [0.0; 3], 0.0)
+        (
+            aov.object_id[m],
+            aov.material_id[m],
+            aov.albedo[m],
+            aov.depth[m]
+        ),
+        (0, 0, [0.0; 3], 0.0)
     );
 }
 

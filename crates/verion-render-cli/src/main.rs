@@ -209,6 +209,7 @@ fn run(args: &Args) -> Result<(), String> {
             albedo: Some(&aov.albedo),
             depth: Some(&aov.depth),
             object_id: Some(&aov.object_id),
+            material_id: Some(&aov.material_id),
             lighting: lighting.as_ref().map(|l| ExrLighting {
                 direct_diffuse: &l.direct_diffuse,
                 indirect_diffuse: &l.indirect_diffuse,

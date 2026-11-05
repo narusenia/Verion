@@ -198,6 +198,8 @@ pub struct Aovs {
     pub depth: Vec<f32>,
     /// Instance index plus one.
     pub object_id: Vec<u32>,
+    /// Material index plus one.
+    pub material_id: Vec<u32>,
 }
 
 /// Floats per pixel in the lighting buffer; must match `shaders/pathtrace.slang`.
@@ -572,6 +574,7 @@ impl Renderer {
         };
         let albedo_depth = buffer(pixels * size_of::<[f32; 4]>())?;
         let ids = buffer(pixels * size_of::<u32>())?;
+        let material_ids = buffer(pixels * size_of::<u32>())?;
 
         let cb = self
             .ctx
@@ -586,7 +589,7 @@ impl Renderer {
             enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
         }
         // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, camera, materials, uvs, texInfo, texels, albedoDepth, objectIds).
+        // indices, instances, camera, materials, uvs, texInfo, texels, albedoDepth, objectIds, materialIds).
         unsafe {
             enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
             enc.setBuffer_offset_atIndex(Some(&self.positions), 0, 1);
@@ -599,6 +602,7 @@ impl Renderer {
             enc.setBuffer_offset_atIndex(Some(&self.texels), 0, 8);
             enc.setBuffer_offset_atIndex(Some(&albedo_depth), 0, 9);
             enc.setBuffer_offset_atIndex(Some(&ids), 0, 10);
+            enc.setBuffer_offset_atIndex(Some(&material_ids), 0, 11);
         }
         enc.dispatchThreads_threadsPerThreadgroup(
             MTLSize {
@@ -617,13 +621,14 @@ impl Renderer {
         cb.waitUntilCompleted();
 
         // SAFETY: the buffers hold `pixels` float4 and u32 values and the command buffer has completed.
-        let (ad, ids) = unsafe {
+        let (ad, ids, mids) = unsafe {
             (
                 std::slice::from_raw_parts(
                     albedo_depth.contents().as_ptr().cast::<f32>(),
                     pixels * 4,
                 ),
                 std::slice::from_raw_parts(ids.contents().as_ptr().cast::<u32>(), pixels),
+                std::slice::from_raw_parts(material_ids.contents().as_ptr().cast::<u32>(), pixels),
             )
         };
         let ad = ad.as_chunks::<4>().0;
@@ -631,6 +636,7 @@ impl Renderer {
             albedo: ad.iter().map(|p| [p[0], p[1], p[2]]).collect(),
             depth: ad.iter().map(|p| p[3]).collect(),
             object_id: ids.to_vec(),
+            material_id: mids.to_vec(),
         })
     }
 }

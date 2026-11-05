@@ -14,6 +14,7 @@ StructuredBuffer<uint> texInfo;     // 4 words per texture: texel offset, width,
 StructuredBuffer<float> texels;     // rgb texels, each texture's mip chain level 0 first
 RWStructuredBuffer<float> albedoDepth; // rgb albedo then depth (distance along the camera's forward axis), per pixel
 RWStructuredBuffer<uint> objectIds;    // instance index + 1 per pixel, 0 where the ray misses
+RWStructuredBuffer<uint> materialIds;  // material index + 1 per pixel, 0 where the ray misses
 
 float3 vertex(uint v) { return float3(positions[3 * v], positions[3 * v + 1], positions[3 * v + 2]); }
 
@@ -84,6 +85,7 @@ void aov(uint3 tid : SV_DispatchThreadID)
     float3 albedo = float3(0.0);
     float depth = 0.0;
     uint id = 0;
+    uint matId = 0;
     if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
     {
         uint instance = q.CommittedInstanceIndex();
@@ -91,6 +93,7 @@ void aov(uint3 tid : SV_DispatchThreadID)
         uint tri = instances[inst + 1] + 3 * q.CommittedPrimitiveIndex();
         uint vo = instances[inst];
         id = instance + 1;
+        matId = instances[inst + 2] + 1;
         depth = q.CommittedRayT() * -d.z; // d is unit length in camera space, so -d.z is the forward component
 
         uint mi = instances[inst + 2] * 16;
@@ -125,4 +128,5 @@ void aov(uint3 tid : SV_DispatchThreadID)
     albedoDepth[4 * pixel + 2] = albedo.z;
     albedoDepth[4 * pixel + 3] = depth;
     objectIds[pixel] = id;
+    materialIds[pixel] = matId;
 }
