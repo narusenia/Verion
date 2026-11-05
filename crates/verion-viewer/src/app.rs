@@ -204,7 +204,10 @@ impl eframe::App for App {
         let mut restart = false;
         egui::Panel::left("controls").show(ui, |ui| {
             let spp = self.acc.samples();
-            ui.label(format!("{spp} / {} spp", self.max_spp));
+            ui.add(
+                egui::ProgressBar::new(spp as f32 / self.max_spp as f32)
+                    .text(format!("{spp} / {} spp", self.max_spp)),
+            );
             ui.separator();
             let before = (self.view, self.stylized);
             ui.label("AOV");
