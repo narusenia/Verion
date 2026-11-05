@@ -18,6 +18,11 @@ pub struct BaseBsdf {
     /// 0 = opaque, 1 = fully transmissive dielectric.
     pub transmission: f32,
     pub ior: f32,
+    /// Strength of the clear coat, a dielectric (IOR 1.5) GGX layer over the base, in `0..=1`
+    /// (`KHR_materials_clearcoat`). 0 = none.
+    pub clearcoat: f32,
+    /// Roughness of the coat, in `0..=1`.
+    pub clearcoat_roughness: f32,
     pub emission: [f32; 3],
     /// Textures multiply the factors above (glTF semantics) and hold linear values. Sampling is
     /// repeat-wrapped trilinear; UVs come from the mesh. The image ids must come from the same scene.
@@ -39,6 +44,8 @@ impl Default for BaseBsdf {
             roughness: 0.5,
             transmission: 0.0,
             ior: 1.5,
+            clearcoat: 0.0,
+            clearcoat_roughness: 0.0,
             emission: [0.0; 3],
             base_color_texture: None,
             metallic_roughness_texture: None,

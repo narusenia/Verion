@@ -10,12 +10,13 @@ use verion_scene::{
 };
 
 /// Extensions this importer understands; any other one in `extensionsUsed` is warned about.
-const SUPPORTED: [&str; 5] = [
+const SUPPORTED: [&str; 6] = [
     stylization_ext::NAME,
     "KHR_lights_punctual",
     "KHR_materials_transmission",
     "KHR_materials_ior",
     "KHR_materials_emissive_strength",
+    "KHR_materials_clearcoat",
 ];
 
 pub struct Import {
@@ -256,6 +257,27 @@ impl Importer<'_> {
 
         let name = m.index().map_or("default".to_string(), |i| i.to_string());
         let mut base = base;
+        // The gltf crate has no accessor for clearcoat, so read the raw extension (REQ-CORE-003).
+        if let Some(cc) = m.extension_value("KHR_materials_clearcoat") {
+            let get = |key: &str, default: f32| {
+                cc.get(key)
+                    .and_then(|v| v.as_f64())
+                    .map_or(default, |v| v as f32)
+            };
+            base.clearcoat = get("clearcoatFactor", 0.0).clamp(0.0, 1.0);
+            base.clearcoat_roughness = get("clearcoatRoughnessFactor", 0.0).clamp(0.0, 1.0);
+            for key in [
+                "clearcoatTexture",
+                "clearcoatRoughnessTexture",
+                "clearcoatNormalTexture",
+            ] {
+                if cc.get(key).is_some() {
+                    self.warnings.push(format!(
+                        "material {name}: {key} is not supported yet and was ignored"
+                    ));
+                }
+            }
+        }
         base.base_color_texture = pbr.base_color_texture().and_then(|t| {
             self.texture(
                 &name,
@@ -486,7 +508,7 @@ mod tests {
     /// One triangle: node 0 (mesh, +2 x), node 1 (camera at z = 5), node 2 (point light at y = 3).
     const JSON: &str = r#"{
       "asset": {"version": "2.0"},
-      "extensionsUsed": ["KHR_lights_punctual", "KHR_materials_clearcoat"],
+      "extensionsUsed": ["KHR_lights_punctual", "KHR_materials_sheen"],
       "scene": 0,
       "scenes": [{"nodes": [0, 1, 2]}],
       "nodes": [
@@ -586,7 +608,7 @@ mod tests {
         );
         assert_eq!(
             warnings,
-            ["extension KHR_materials_clearcoat is not supported and was ignored"]
+            ["extension KHR_materials_sheen is not supported and was ignored"]
         );
     }
 
@@ -599,9 +621,27 @@ mod tests {
             ),
         )
         .replace(
-            r#""extensionsUsed": ["KHR_lights_punctual", "KHR_materials_clearcoat"]"#,
+            r#""extensionsUsed": ["KHR_lights_punctual", "KHR_materials_sheen"]"#,
             r#""extensionsUsed": ["KHR_lights_punctual", "VERION_materials_stylization"]"#,
         )
+    }
+
+    #[test]
+    fn imports_clearcoat() {
+        let json = JSON
+            .replace("KHR_materials_sheen", "KHR_materials_clearcoat")
+            .replace(
+                r#""roughnessFactor": 0.25}"#,
+                r#""roughnessFactor": 0.25},
+                "extensions": {"KHR_materials_clearcoat": {"clearcoatFactor": 1.5, "clearcoatRoughnessFactor": 0.2, "clearcoatTexture": {"index": 0}}}"#,
+            );
+        let Import { scene, warnings } = load_gltf_slice(&glb(&json, &[])).unwrap();
+        let base = &scene.materials()[0].base;
+        assert_eq!((base.clearcoat, base.clearcoat_roughness), (1.0, 0.2)); // factor clamped to 1
+        assert_eq!(
+            warnings,
+            ["material 0: clearcoatTexture is not supported yet and was ignored"]
+        );
     }
 
     #[test]
