@@ -221,6 +221,7 @@ const SLOT_WORDS: usize = 12;
 /// First-hit lighting split (REQ-STY-006), mean per pixel, row-major from the top-left. Radiance
 /// parts sum to the beauty image; indirect light is filed under the lobe taken at the first bounce.
 /// Rays that miss the scene file the sky as `emission`.
+#[derive(Clone)]
 pub struct LightingAovs {
     pub direct_diffuse: Vec<[f32; 3]>,
     pub indirect_diffuse: Vec<[f32; 3]>,
@@ -246,6 +247,37 @@ pub struct LightingAovs {
     /// Per light slot: share of the slot's contribution that is not shadowed, 0 to 1 (0 where the
     /// slot's light never reaches the pixel). The visibility that goes with `light_s`.
     pub light_lit: Vec<[f32; LIGHT_SLOTS]>,
+}
+
+impl LightingAovs {
+    /// Calls `f` on every radiance plane (the five parts, then `light_u` and `light_s` per used
+    /// slot), writing back what it leaves, e.g. a denoiser. The ratios (response, direction,
+    /// visibility) carry no radiance scale and are left alone.
+    pub fn for_each_radiance<E>(
+        &mut self,
+        mut f: impl FnMut(&mut [[f32; 3]]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        for part in [
+            &mut self.direct_diffuse,
+            &mut self.indirect_diffuse,
+            &mut self.specular,
+            &mut self.transmission,
+            &mut self.emission,
+        ] {
+            f(part)?;
+        }
+        for slots in [&mut self.light_u, &mut self.light_s] {
+            for k in 0..LIGHT_SLOTS {
+                let mut plane: Vec<[f32; 3]> = slots.iter().map(|s| s[k]).collect();
+                if plane.iter().all(|p| *p == [0.0; 3]) {
+                    continue; // an unused slot
+                }
+                f(&mut plane)?;
+                slots.iter_mut().zip(plane).for_each(|(s, p)| s[k] = p);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Sum of `lum(u) + lum(s)` over the samples of the slot whose record starts at `o`.

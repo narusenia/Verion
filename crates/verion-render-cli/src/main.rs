@@ -36,6 +36,15 @@ impl Mode {
     }
 }
 
+/// Where `--denoise` filters a stylized render (ADR-0013). Reference renders denoise the beauty.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum DenoiseStage {
+    /// The lighting AOVs the Stylization Pass reads, so Toon bands are cut after denoising.
+    Input,
+    /// The stylized beauty, before the outline and the color grade (for comparison, REQ-QA-003).
+    Output,
+}
+
 /// Linear RGB primaries selectable for the working space and the EXR output (REQ-CORE-005).
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum Space {
@@ -95,6 +104,12 @@ struct Args {
     /// White balance as per-channel multipliers `R,G,B`, applied last (needs `--mode stylized`)
     #[arg(long, value_delimiter = ',', default_values_t = [1.0, 1.0, 1.0])]
     white_balance: Vec<f32>,
+    /// Denoise with Intel Open Image Denoise (loaded at run time; marks the output non-physical)
+    #[arg(long)]
+    denoise: bool,
+    /// What `--denoise` filters in `--mode stylized`
+    #[arg(long, value_enum, default_value_t = DenoiseStage::Input)]
+    denoise_stage: DenoiseStage,
     /// Write timing metrics as JSON
     #[arg(long)]
     metrics: Option<PathBuf>,
@@ -202,7 +217,7 @@ fn run(args: &Args) -> Result<(), String> {
     bar.finish_and_clear();
     let gpu_s = acc.gpu_seconds();
     let mut beauty = acc.mean();
-    let lighting = acc.lighting();
+    let mut lighting = acc.lighting();
     let render_s = t.elapsed().as_secs_f64();
 
     let t = Instant::now();
@@ -212,6 +227,32 @@ fn run(args: &Args) -> Result<(), String> {
     let aov = renderer
         .render_aovs(w, h)
         .map_err(|e| format!("aovs: {e:?}"))?;
+    let aov_s = t.elapsed().as_secs_f64();
+
+    let t = Instant::now();
+    let mut denoiser = if args.denoise {
+        Some(verion_denoise::Denoiser::load().map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    let aux = verion_denoise::Aux {
+        albedo: Some(&aov.albedo),
+        normal: Some(&normals),
+    };
+    let (wu, hu) = (w as usize, h as usize);
+    if let Some(d) = denoiser.as_mut() {
+        let denoise_err = |e: verion_denoise::Error| format!("denoise: {e}");
+        match (args.mode, lighting.as_mut()) {
+            (Mode::Stylized, Some(l)) if args.denoise_stage == DenoiseStage::Input => l
+                .for_each_radiance(|p| d.denoise(p, aux, wu, hu))
+                .map_err(denoise_err)?,
+            (Mode::Reference, _) => d.denoise(&mut beauty, aux, wu, hu).map_err(denoise_err)?,
+            _ => {}
+        }
+    }
+    let mut denoise_s = t.elapsed().as_secs_f64();
+
+    let t = Instant::now();
     if let (Mode::Stylized, Some(l)) = (args.mode, &lighting) {
         if scene.materials().iter().all(|m| m.stylization.is_empty()) {
             eprintln!("warning: no material has stylization layers; the output equals Reference");
@@ -237,6 +278,14 @@ fn run(args: &Args) -> Result<(), String> {
                 width: w as usize,
             },
         );
+        if let Some(d) = denoiser.as_mut()
+            && args.denoise_stage == DenoiseStage::Output
+        {
+            let t = Instant::now();
+            d.denoise(&mut beauty, aux, wu, hu)
+                .map_err(|e| format!("denoise: {e}"))?;
+            denoise_s += t.elapsed().as_secs_f64();
+        }
         verion_stylization::outline(
             scene.materials(),
             &verion_stylization::PostFrame {
@@ -250,7 +299,7 @@ fn run(args: &Args) -> Result<(), String> {
         );
         verion_stylization::color_grade(&mut beauty, &grade);
     }
-    let aov_s = t.elapsed().as_secs_f64();
+    let stylize_s = t.elapsed().as_secs_f64();
 
     let space = scene.working_space();
     let frame = ExrFrame {
@@ -282,6 +331,7 @@ fn run(args: &Args) -> Result<(), String> {
                 saturation: grade.saturation,
                 white_balance: grade.white_balance,
             }),
+            denoiser: args.denoise.then_some("oidn"),
         },
     };
     let t = Instant::now();
@@ -296,7 +346,7 @@ fn run(args: &Args) -> Result<(), String> {
     if let Some(path) = &args.metrics {
         let json = format!(
             "{{\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\
-\"load_s\":{load_s},\"build_s\":{build_s},\"render_s\":{render_s},\"gpu_s\":{gpu_s},\"aov_s\":{aov_s},\
+\"load_s\":{load_s},\"build_s\":{build_s},\"render_s\":{render_s},\"gpu_s\":{gpu_s},\"aov_s\":{aov_s},\"denoise_s\":{denoise_s},\"stylize_s\":{stylize_s},\
 \"write_s\":{write_s},\"total_s\":{}}}\n",
             json_str(&args.scene.display().to_string()),
             json_str(&args.output.display().to_string()),
