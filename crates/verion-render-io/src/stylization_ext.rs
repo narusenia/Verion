@@ -3,7 +3,8 @@
 
 use gltf::json::Value;
 use verion_scene::{
-    ColorAdjust, ColorSpace, HybridSurface, RimLight, ShadowPalette, StylizationLayer, ToonRamp,
+    ColorAdjust, ColorSpace, HybridSurface, RimLight, ShadowPalette, StylizationLayer,
+    StylizedSpecular, ToonRamp,
 };
 
 pub const NAME: &str = "VERION_materials_stylization";
@@ -16,9 +17,14 @@ pub fn parse(
     let root = value.as_object().ok_or("must be an object")?;
     let mut warnings = Vec::new();
     let mut layers = Vec::new();
-    for key in root.keys().filter(|k| {
-        !["hybridSurface", "toonRamp", "shadowPalette", "rimLight"].contains(&k.as_str())
-    }) {
+    let known = [
+        "hybridSurface",
+        "toonRamp",
+        "shadowPalette",
+        "rimLight",
+        "stylizedSpecular",
+    ];
+    for key in root.keys().filter(|k| !known.contains(&k.as_str())) {
         warnings.push(format!("unknown property {key}"));
     }
     if let Some(h) = root.get("hybridSurface") {
@@ -86,6 +92,25 @@ pub fn parse(
             width: get("width", d.width)?,
             feather: get("feather", d.feather)?,
             follow_light: get("followLight", d.follow_light)?,
+            strength: get("strength", d.strength)?,
+        }));
+    }
+    if let Some(s) = root.get("stylizedSpecular") {
+        let o = s.as_object().ok_or("stylizedSpecular must be an object")?;
+        let known = ["shape", "size", "feather", "color", "strength"];
+        warn_unknown("stylizedSpecular", o.keys(), &known, &mut warnings);
+        if o.get("shape").is_some_and(|v| v.as_str() != Some("band")) {
+            return Err("stylizedSpecular.shape must be \"band\"".into());
+        }
+        let d = StylizedSpecular::default();
+        let get = |k: &str, default| number(o.get(k), default, &format!("stylizedSpecular.{k}"));
+        layers.push(StylizationLayer::StylizedSpecular(StylizedSpecular {
+            size: get("size", d.size)?,
+            feather: get("feather", d.feather)?,
+            color: match o.get("color") {
+                Some(c) => rgb(c, "stylizedSpecular.color", space)?,
+                None => d.color,
+            },
             strength: get("strength", d.strength)?,
         }));
     }
@@ -233,6 +258,24 @@ mod tests {
         assert!(parse_str(r#"{"rimLight":{"color":[1,-1,1]}}"#).is_err());
         assert!(parse_str(r#"{"rimLight":{"strength":-1}}"#).is_err());
         assert!(parse_str(r#"{"rimLight":{"followLight":2}}"#).is_err());
+    }
+
+    #[test]
+    fn reads_the_stylized_specular_with_defaults() {
+        let (layers, warnings) =
+            parse_str(r#"{"stylizedSpecular":{"shape":"band","size":0.1,"strength":3}}"#).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(
+            layers,
+            [StylizationLayer::StylizedSpecular(StylizedSpecular {
+                size: 0.1,
+                strength: 3.0,
+                ..Default::default()
+            })]
+        );
+        assert!(parse_str(r#"{"stylizedSpecular":{"shape":"ellipse"}}"#).is_err());
+        assert!(parse_str(r#"{"stylizedSpecular":{"size":2}}"#).is_err());
+        assert!(parse_str(r#"{"stylizedSpecular":{"color":[1,-1,1]}}"#).is_err());
     }
 
     #[test]
