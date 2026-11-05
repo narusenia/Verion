@@ -4,15 +4,17 @@ use std::{cell::OnceCell, collections::HashMap, ffi::c_void, ptr::NonNull};
 
 mod wavefront;
 
-pub use wavefront::Integrator;
-
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
 use objc2_metal::{
     MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder,
     MTLComputePipelineState, MTLDevice, MTLLibrary, MTLResourceOptions, MTLResourceUsage, MTLSize,
 };
-use verion_scene::{Camera, Image, LIGHT_SLOTS, Light, Scene, Transform};
+use verion_scene::{Camera, Image, Light, Scene, Transform};
+
+use verion_gpu::{
+    Accumulation as _, Adaptive, Aovs, Integrator, LightingAovs, MemoryUsage, RayTracingBackend,
+};
 
 use crate::{Blas, Error, Instance, MetalContext, Obj, Tlas};
 
@@ -22,38 +24,6 @@ const PATHTRACE_MSL: &str = include_str!("../shaders/pathtrace.metal");
 
 /// Path length limit. Radiance beyond it is dropped, so closed furnaces read slightly dark.
 const MAX_DEPTH: u32 = 8;
-
-/// Per-pixel adaptive sampling (REQ-ACC-007): a pixel stops taking samples once it has `min_spp`
-/// and the standard error of its luminance mean is at most `threshold` times the mean (with a
-/// floor of 0.05 for dark pixels). Stopping on the pixel's own estimate biases it slightly, so
-/// the result is non-physical. Works with both integrators.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Adaptive {
-    pub threshold: f32,
-    pub min_spp: u32,
-}
-
-impl Default for Adaptive {
-    fn default() -> Self {
-        Self {
-            threshold: 0.02,
-            min_spp: 16,
-        }
-    }
-}
-
-impl Adaptive {
-    /// Whether a pixel with `n` samples, luminance sum `s` and square sum `s2` takes more samples.
-    /// Mirrors `pixelActive` in `shaders/include/pt_core.slang`.
-    pub fn active(&self, n: f32, s: f32, s2: f32) -> bool {
-        if n < self.min_spp as f32 {
-            return true;
-        }
-        let mean = s / n;
-        let var = (s2 / n - mean * mean).max(0.0) * n / (n - 1.0);
-        (var / n).sqrt() > self.threshold * mean.max(0.05)
-    }
-}
 
 type CommandBuffer = Obj<dyn objc2_metal::MTLCommandBuffer>;
 type Encoder = Obj<dyn MTLComputeCommandEncoder>;
@@ -246,84 +216,10 @@ fn camera_params(cam: &Camera) -> [f32; 16] {
     camera
 }
 
-/// Primary-ray AOVs, row-major from the top-left. Misses are zero in every field.
-pub struct Aovs {
-    /// Base color factor times the base color texture at the hit.
-    pub albedo: Vec<[f32; 3]>,
-    /// Distance along the camera's forward axis (not along the ray).
-    pub depth: Vec<f32>,
-    /// Instance index plus one.
-    pub object_id: Vec<u32>,
-    /// Material index plus one.
-    pub material_id: Vec<u32>,
-}
-
 /// Floats per pixel in the lighting buffer; must match `shaders/pathtrace.slang`.
 const LIGHTING_STRIDE: usize = 65;
 /// Floats per light slot after the first 17.
 const SLOT_WORDS: usize = 12;
-
-/// First-hit lighting split (REQ-STY-006), mean per pixel, row-major from the top-left. Radiance
-/// parts sum to the beauty image; indirect light is filed under the lobe taken at the first bounce.
-/// Rays that miss the scene file the sky as `emission`.
-#[derive(Clone)]
-pub struct LightingAovs {
-    pub direct_diffuse: Vec<[f32; 3]>,
-    pub indirect_diffuse: Vec<[f32; 3]>,
-    pub specular: Vec<[f32; 3]>,
-    pub transmission: Vec<[f32; 3]>,
-    pub emission: Vec<[f32; 3]>,
-    /// Share of the direct light that is not shadowed, 0 to 1 (1 where no light reaches the point).
-    pub visibility: Vec<f32>,
-    /// Per light slot: the light's diffuse contribution without cos and without shadowing (`u`).
-    /// The physical direct diffuse is `u * light_response`, summed over slots (see `LIGHT_SLOTS`).
-    pub light_u: Vec<[[f32; 3]; LIGHT_SLOTS]>,
-    /// Per light slot: cos(N, L) times visibility, averaged weighted by the light's contribution.
-    /// 0 where the slot's light never reaches the pixel.
-    pub light_response: Vec<[f32; LIGHT_SLOTS]>,
-    /// Per light slot: the light's specular contribution without cos and without shadowing (`s`),
-    /// the specular counterpart of `light_u`.
-    pub light_s: Vec<[[f32; 3]; LIGHT_SLOTS]>,
-    /// Per light slot: unit vector from the point toward the light, averaged weighted by the light's
-    /// diffuse plus specular contribution. Zero where the slot's light never reaches the pixel; for a
-    /// slot that pools several lights it is the mean direction, so it shortens (and is only
-    /// approximate) when they disagree.
-    pub light_dir: Vec<[[f32; 3]; LIGHT_SLOTS]>,
-    /// Per light slot: share of the slot's contribution that is not shadowed, 0 to 1 (0 where the
-    /// slot's light never reaches the pixel). The visibility that goes with `light_s`.
-    pub light_lit: Vec<[f32; LIGHT_SLOTS]>,
-}
-
-impl LightingAovs {
-    /// Calls `f` on every radiance plane (the five parts, then `light_u` and `light_s` per used
-    /// slot), writing back what it leaves, e.g. a denoiser. The ratios (response, direction,
-    /// visibility) carry no radiance scale and are left alone.
-    pub fn for_each_radiance<E>(
-        &mut self,
-        mut f: impl FnMut(&mut [[f32; 3]]) -> Result<(), E>,
-    ) -> Result<(), E> {
-        for part in [
-            &mut self.direct_diffuse,
-            &mut self.indirect_diffuse,
-            &mut self.specular,
-            &mut self.transmission,
-            &mut self.emission,
-        ] {
-            f(part)?;
-        }
-        for slots in [&mut self.light_u, &mut self.light_s] {
-            for k in 0..LIGHT_SLOTS {
-                let mut plane: Vec<[f32; 3]> = slots.iter().map(|s| s[k]).collect();
-                if plane.iter().all(|p| *p == [0.0; 3]) {
-                    continue; // an unused slot
-                }
-                f(&mut plane)?;
-                slots.iter_mut().zip(plane).for_each(|(s, p)| s[k] = p);
-            }
-        }
-        Ok(())
-    }
-}
 
 /// Sum of `lum(u) + lum(s)` over the samples of the slot whose record starts at `o`.
 fn slot_weight(r: &[f32; LIGHTING_STRIDE], o: usize) -> f32 {
@@ -625,199 +521,8 @@ impl Renderer {
         })
     }
 
-    /// Replaces the camera without rebuilding the acceleration structures. Start a new
-    /// accumulation afterwards; samples gathered from the old camera no longer match.
-    pub fn set_camera(&mut self, cam: &Camera) {
-        self.camera = camera_params(cam);
-        self.aperture = cam.aperture_radius;
-        self.focus = cam.focus_distance;
-    }
-
-    /// Turns the multiple-scattering compensation of rough metals on (the default) or off. Off gives
-    /// the plain single-scattering GGX that other renderers such as Mitsuba 3 use, which the
-    /// cross-check against them needs.
-    pub fn set_multiscatter(&mut self, on: bool) {
-        self.multiscatter = on;
-    }
-
-    /// Chooses the megakernel (the default) or the wavefront path tracer for later `accumulate`
-    /// calls. Both run the same path code and give the same image (REQ-GPU-005).
-    pub fn set_integrator(&mut self, integrator: Integrator) {
-        self.integrator = integrator;
-    }
-
-    pub fn integrator(&self) -> Integrator {
-        self.integrator
-    }
-
-    /// Wavefront only: submit each stage separately so `Accumulation::stage_seconds` splits the GPU
-    /// time into extend (closest-hit tracing) and shade (REQ-GPU-004). Slows the render down.
-    pub fn set_stage_timing(&mut self, on: bool) {
-        self.stage_timing = on;
-    }
-
-    /// Turns per-pixel adaptive sampling on or off for accumulations started afterwards.
-    /// `accumulate` then takes `samples` as the most each pixel gets, and
-    /// `Accumulation::active_pixels` tells how many pixels still take samples.
-    pub fn set_adaptive(&mut self, adaptive: Option<Adaptive>) {
-        self.adaptive = adaptive;
-    }
-
     pub fn adaptive(&self) -> Option<Adaptive> {
         self.adaptive
-    }
-
-    /// World-space normal of the first hit per pixel, row-major from the top-left; misses are zero.
-    /// Interpolated vertex normals (geometric normals for meshes without them), facing the viewer.
-    pub fn render_normals(&self, width: u32, height: u32) -> Result<Vec<[f32; 3]>, Error> {
-        if width == 0 || height == 0 {
-            return Err(Error::Scene("image size must be non-zero".into()));
-        }
-        let mut camera = self.camera;
-        camera[0] = width as f32;
-        camera[1] = height as f32;
-        let camera = upload(&self.ctx, &camera)?;
-
-        let pixels = width as usize * height as usize;
-        let out = self
-            .ctx
-            .device
-            .newBufferWithLength_options(
-                pixels * size_of::<[f32; 3]>(),
-                MTLResourceOptions::StorageModeShared,
-            )
-            .ok_or(Error::Resource("output buffer"))?;
-
-        let cb = self
-            .ctx
-            .queue
-            .commandBuffer()
-            .ok_or(Error::Resource("command buffer"))?;
-        let enc = cb
-            .computeCommandEncoder()
-            .ok_or(Error::Resource("compute encoder"))?;
-        enc.setComputePipelineState(&self.normals);
-        for blas in self.tlas.blases() {
-            enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
-        }
-        // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, camera, output, vnormals).
-        unsafe {
-            enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
-            enc.setBuffer_offset_atIndex(Some(&self.positions), 0, 1);
-            enc.setBuffer_offset_atIndex(Some(&self.indices), 0, 2);
-            enc.setBuffer_offset_atIndex(Some(&self.instances), 0, 3);
-            enc.setBuffer_offset_atIndex(Some(&camera), 0, 4);
-            enc.setBuffer_offset_atIndex(Some(&out), 0, 5);
-            enc.setBuffer_offset_atIndex(Some(&self.vnormals), 0, 6);
-        }
-        enc.dispatchThreads_threadsPerThreadgroup(
-            MTLSize {
-                width: width as usize,
-                height: height as usize,
-                depth: 1,
-            },
-            MTLSize {
-                width: 8,
-                height: 8,
-                depth: 1,
-            },
-        );
-        enc.endEncoding();
-        cb.commit();
-        cb.waitUntilCompleted();
-
-        // SAFETY: `out` holds `pixels` packed float3 values and the command buffer has completed.
-        let data = unsafe {
-            std::slice::from_raw_parts(out.contents().as_ptr().cast::<f32>(), pixels * 3)
-        };
-        Ok(data.as_chunks::<3>().0.to_vec())
-    }
-
-    /// Albedo, depth and instance id of the first hit through each pixel centre (one sample, so ids
-    /// and depth are never blended).
-    pub fn render_aovs(&self, width: u32, height: u32) -> Result<Aovs, Error> {
-        if width == 0 || height == 0 {
-            return Err(Error::Scene("image size must be non-zero".into()));
-        }
-        let mut camera = self.camera;
-        camera[0] = width as f32;
-        camera[1] = height as f32;
-        let camera = upload(&self.ctx, &camera)?;
-
-        let pixels = width as usize * height as usize;
-        let buffer = |bytes: usize| {
-            self.ctx
-                .device
-                .newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
-                .ok_or(Error::Resource("output buffer"))
-        };
-        let albedo_depth = buffer(pixels * size_of::<[f32; 4]>())?;
-        let ids = buffer(pixels * size_of::<u32>())?;
-        let material_ids = buffer(pixels * size_of::<u32>())?;
-
-        let cb = self
-            .ctx
-            .queue
-            .commandBuffer()
-            .ok_or(Error::Resource("command buffer"))?;
-        let enc = cb
-            .computeCommandEncoder()
-            .ok_or(Error::Resource("compute encoder"))?;
-        enc.setComputePipelineState(&self.aov);
-        for blas in self.tlas.blases() {
-            enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
-        }
-        // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, camera, materials, uvs, texInfo, texels, albedoDepth, objectIds, materialIds).
-        unsafe {
-            enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
-            enc.setBuffer_offset_atIndex(Some(&self.positions), 0, 1);
-            enc.setBuffer_offset_atIndex(Some(&self.indices), 0, 2);
-            enc.setBuffer_offset_atIndex(Some(&self.instances), 0, 3);
-            enc.setBuffer_offset_atIndex(Some(&camera), 0, 4);
-            enc.setBuffer_offset_atIndex(Some(&self.materials), 0, 5);
-            enc.setBuffer_offset_atIndex(Some(&self.uvs), 0, 6);
-            enc.setBuffer_offset_atIndex(Some(&self.tex_info), 0, 7);
-            enc.setBuffer_offset_atIndex(Some(&self.texels), 0, 8);
-            enc.setBuffer_offset_atIndex(Some(&albedo_depth), 0, 9);
-            enc.setBuffer_offset_atIndex(Some(&ids), 0, 10);
-            enc.setBuffer_offset_atIndex(Some(&material_ids), 0, 11);
-        }
-        enc.dispatchThreads_threadsPerThreadgroup(
-            MTLSize {
-                width: width as usize,
-                height: height as usize,
-                depth: 1,
-            },
-            MTLSize {
-                width: 8,
-                height: 8,
-                depth: 1,
-            },
-        );
-        enc.endEncoding();
-        cb.commit();
-        cb.waitUntilCompleted();
-
-        // SAFETY: the buffers hold `pixels` float4 and u32 values and the command buffer has completed.
-        let (ad, ids, mids) = unsafe {
-            (
-                std::slice::from_raw_parts(
-                    albedo_depth.contents().as_ptr().cast::<f32>(),
-                    pixels * 4,
-                ),
-                std::slice::from_raw_parts(ids.contents().as_ptr().cast::<u32>(), pixels),
-                std::slice::from_raw_parts(material_ids.contents().as_ptr().cast::<u32>(), pixels),
-            )
-        };
-        let ad = ad.as_chunks::<4>().0;
-        Ok(Aovs {
-            albedo: ad.iter().map(|p| [p[0], p[1], p[2]]).collect(),
-            depth: ad.iter().map(|p| p[3]).collect(),
-            object_id: ids.to_vec(),
-            material_id: mids.to_vec(),
-        })
     }
 }
 
@@ -841,8 +546,125 @@ pub struct Accumulation {
 }
 
 impl Accumulation {
+    fn stats(&self) -> Option<&[f32]> {
+        let buffer = self.pixel_stats.as_ref()?;
+        let n = self.width as usize * self.height as usize;
+        // SAFETY: 3 floats per pixel, and `accumulate` waits for the GPU.
+        Some(unsafe { std::slice::from_raw_parts(buffer.contents().as_ptr().cast::<f32>(), n * 3) })
+    }
+
+    /// 1 / samples per pixel, for turning the sums into means.
+    fn inverse_samples(&self) -> Vec<f32> {
+        let n = self.width as usize * self.height as usize;
+        match self.stats() {
+            Some(stats) => stats
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|s| 1.0 / s[0].max(1.0))
+                .collect(),
+            None => vec![1.0 / self.samples.max(1) as f32; n],
+        }
+    }
+}
+
+impl Renderer {
+    /// A command buffer and a compute encoder with the path tracer's bindings 0..18 set.
+    fn open_encoder(&self, acc: &Accumulation) -> Result<(CommandBuffer, Encoder), Error> {
+        let cb = self
+            .ctx
+            .queue
+            .commandBuffer()
+            .ok_or(Error::Resource("command buffer"))?;
+        let enc = cb
+            .computeCommandEncoder()
+            .ok_or(Error::Resource("compute encoder"))?;
+        enc.setComputePipelineState(&self.pathtrace);
+        for blas in self.tlas.blases() {
+            enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
+        }
+        // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
+        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional, uvs, texels, texInfo, vnormals, lighting, pixelStats). Dispatches in one encoder run in
+        // order, so the `+=` on `accum` never races.
+        unsafe {
+            enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
+            enc.setBuffer_offset_atIndex(Some(&self.positions), 0, 1);
+            enc.setBuffer_offset_atIndex(Some(&self.indices), 0, 2);
+            enc.setBuffer_offset_atIndex(Some(&self.instances), 0, 3);
+            enc.setBuffer_offset_atIndex(Some(&self.materials), 0, 4);
+            enc.setBuffer_offset_atIndex(Some(&self.lights), 0, 5);
+            enc.setBuffer_offset_atIndex(Some(&acc.buffer), 0, 7);
+            enc.setBuffer_offset_atIndex(Some(&self.emitters), 0, 8);
+            enc.setBuffer_offset_atIndex(Some(&self.emit_cdf), 0, 9);
+            enc.setBuffer_offset_atIndex(Some(&self.env.pixels), 0, 10);
+            enc.setBuffer_offset_atIndex(Some(&self.env.marginal), 0, 11);
+            enc.setBuffer_offset_atIndex(Some(&self.env.conditional), 0, 12);
+            enc.setBuffer_offset_atIndex(Some(&self.uvs), 0, 13);
+            enc.setBuffer_offset_atIndex(Some(&self.texels), 0, 14);
+            enc.setBuffer_offset_atIndex(Some(&self.tex_info), 0, 15);
+            enc.setBuffer_offset_atIndex(Some(&self.vnormals), 0, 16);
+            enc.setBuffer_offset_atIndex(
+                Some(acc.lighting.as_ref().unwrap_or(&self.no_lighting)),
+                0,
+                17,
+            );
+            enc.setBuffer_offset_atIndex(
+                Some(acc.pixel_stats.as_ref().unwrap_or(&self.no_lighting)),
+                0,
+                18,
+            );
+        }
+        Ok((cb, enc))
+    }
+
+    /// # Safety
+    /// `enc` must have bindings 0..18 of `shaders/pathtrace.slang` set.
+    unsafe fn encode_megakernel(
+        &self,
+        enc: &ProtocolObject<dyn MTLComputeCommandEncoder>,
+        acc: &Accumulation,
+        params: &mut [u32; PARAM_WORDS],
+        samples: u32,
+    ) {
+        let mut k = 0;
+        while k < samples {
+            params[6] = acc.samples + k;
+            params[35] = (samples - k).min(SAMPLES_PER_DISPATCH);
+            k += params[35];
+            // SAFETY: the block outlives the call and Metal copies it.
+            unsafe {
+                enc.setBytes_length_atIndex(
+                    NonNull::from(&*params).cast::<c_void>(),
+                    size_of_val(params),
+                    6,
+                );
+            }
+            enc.dispatchThreads_threadsPerThreadgroup(
+                MTLSize {
+                    width: acc.width as usize,
+                    height: acc.height as usize,
+                    depth: 1,
+                },
+                MTLSize {
+                    width: 8,
+                    height: 8,
+                    depth: 1,
+                },
+            );
+        }
+    }
+
+    /// One-shot render: mean radiance over `samples` paths per pixel.
+    pub fn render(&self, width: u32, height: u32, samples: u32) -> Result<Vec<[f32; 3]>, Error> {
+        let mut acc = self.new_accumulation(width, height, false)?;
+        self.accumulate(&mut acc, samples)?;
+        Ok(acc.mean())
+    }
+}
+
+impl verion_gpu::Accumulation for Accumulation {
     /// Mean lighting split, or `None` unless made with `new_accumulation_with_lighting`.
-    pub fn lighting(&self) -> Option<LightingAovs> {
+    fn lighting(&self) -> Option<LightingAovs> {
         let buffer = self.lighting.as_ref()?;
         let n = self.width as usize * self.height as usize;
         // SAFETY: the buffer holds `n` records of `LIGHTING_STRIDE` floats and `accumulate` waits for the GPU.
@@ -943,27 +765,27 @@ impl Accumulation {
 
     /// GPU execution time of all `accumulate` calls so far, from command-buffer timestamps.
     /// The trace / shade split is `stage_seconds` (wavefront only).
-    pub fn gpu_seconds(&self) -> f64 {
+    fn gpu_seconds(&self) -> f64 {
         self.gpu_seconds
     }
 
-    pub fn samples(&self) -> u32 {
+    fn samples(&self) -> u32 {
         self.samples
     }
 
     /// GPU seconds spent in the wavefront's extend (closest hit, with the dispatch sizing) and shade
     /// (shading with its shadow rays) stages; `None` unless `Renderer::set_stage_timing` was on.
-    pub fn stage_seconds(&self) -> Option<[f64; 2]> {
+    fn stage_seconds(&self) -> Option<[f64; 2]> {
         self.stage_seconds
     }
 
     /// GPU memory of the wavefront queues and path state (0 until a wavefront `accumulate`).
-    pub fn wavefront_bytes(&self) -> usize {
+    fn wavefront_bytes(&self) -> usize {
         self.wavefront.as_ref().map_or(0, wavefront::Buffers::bytes)
     }
 
     /// Mean radiance per pixel, row-major from the top-left. All zero before the first sample.
-    pub fn mean(&self) -> Vec<[f32; 3]> {
+    fn mean(&self) -> Vec<[f32; 3]> {
         let n = self.width as usize * self.height as usize;
         // SAFETY: the buffer holds `n` packed float3 values and `accumulate` waits for the GPU.
         let data = unsafe {
@@ -978,7 +800,7 @@ impl Accumulation {
     }
 
     /// Samples each pixel took, row-major from the top-left; `None` unless adaptive sampling ran.
-    pub fn sample_counts(&self) -> Option<Vec<u32>> {
+    fn sample_counts(&self) -> Option<Vec<u32>> {
         let stats = self.stats()?;
         Some(
             stats
@@ -992,7 +814,7 @@ impl Accumulation {
 
     /// Pixels the next sample would trace: all of them unless adaptive sampling stopped some.
     /// 0 means every pixel has converged and more samples change nothing.
-    pub fn active_pixels(&self) -> usize {
+    fn active_pixels(&self) -> usize {
         match (self.stats(), self.adaptive) {
             (Some(stats), Some(a)) => stats
                 .as_chunks::<3>()
@@ -1003,78 +825,218 @@ impl Accumulation {
             _ => self.width as usize * self.height as usize,
         }
     }
-
-    fn stats(&self) -> Option<&[f32]> {
-        let buffer = self.pixel_stats.as_ref()?;
-        let n = self.width as usize * self.height as usize;
-        // SAFETY: 3 floats per pixel, and `accumulate` waits for the GPU.
-        Some(unsafe { std::slice::from_raw_parts(buffer.contents().as_ptr().cast::<f32>(), n * 3) })
-    }
-
-    /// 1 / samples per pixel, for turning the sums into means.
-    fn inverse_samples(&self) -> Vec<f32> {
-        let n = self.width as usize * self.height as usize;
-        match self.stats() {
-            Some(stats) => stats
-                .as_chunks::<3>()
-                .0
-                .iter()
-                .map(|s| 1.0 / s[0].max(1.0))
-                .collect(),
-            None => vec![1.0 / self.samples.max(1) as f32; n],
-        }
-    }
 }
 
-impl Renderer {
-    pub fn new_accumulation(&self, width: u32, height: u32) -> Result<Accumulation, Error> {
+impl RayTracingBackend for Renderer {
+    type Context = MetalContext;
+    type Accumulation = Accumulation;
+    type Error = Error;
+
+    fn context() -> Result<MetalContext, Error> {
+        MetalContext::new()
+    }
+
+    fn memory(ctx: &MetalContext) -> MemoryUsage {
+        ctx.memory()
+    }
+
+    fn new(ctx: &MetalContext, scene: &Scene) -> Result<Self, Error> {
+        Renderer::new(ctx, scene)
+    }
+
+    /// Replaces the camera without rebuilding the acceleration structures. Start a new
+    /// accumulation afterwards; samples gathered from the old camera no longer match.
+    fn set_camera(&mut self, cam: &Camera) {
+        self.camera = camera_params(cam);
+        self.aperture = cam.aperture_radius;
+        self.focus = cam.focus_distance;
+    }
+
+    /// Turns the multiple-scattering compensation of rough metals on (the default) or off. Off gives
+    /// the plain single-scattering GGX that other renderers such as Mitsuba 3 use, which the
+    /// cross-check against them needs.
+    fn set_multiscatter(&mut self, on: bool) {
+        self.multiscatter = on;
+    }
+
+    /// Chooses the megakernel (the default) or the wavefront path tracer for later `accumulate`
+    /// calls. Both run the same path code and give the same image (REQ-GPU-005).
+    fn set_integrator(&mut self, integrator: Integrator) {
+        self.integrator = integrator;
+    }
+
+    fn integrator(&self) -> Integrator {
+        self.integrator
+    }
+
+    /// Wavefront only: submit each stage separately so `Accumulation::stage_seconds` splits the GPU
+    /// time into extend (closest-hit tracing) and shade (REQ-GPU-004). Slows the render down.
+    fn set_stage_timing(&mut self, on: bool) {
+        self.stage_timing = on;
+    }
+
+    /// Turns per-pixel adaptive sampling on or off for accumulations started afterwards.
+    /// `accumulate` then takes `samples` as the most each pixel gets, and
+    /// `Accumulation::active_pixels` tells how many pixels still take samples.
+    fn set_adaptive(&mut self, adaptive: Option<Adaptive>) {
+        self.adaptive = adaptive;
+    }
+
+    /// World-space normal of the first hit per pixel, row-major from the top-left; misses are zero.
+    /// Interpolated vertex normals (geometric normals for meshes without them), facing the viewer.
+    fn render_normals(&self, width: u32, height: u32) -> Result<Vec<[f32; 3]>, Error> {
         if width == 0 || height == 0 {
             return Err(Error::Scene("image size must be non-zero".into()));
         }
-        // Metal zero-fills new buffers, which is the empty sum.
-        let buffer = self
+        let mut camera = self.camera;
+        camera[0] = width as f32;
+        camera[1] = height as f32;
+        let camera = upload(&self.ctx, &camera)?;
+
+        let pixels = width as usize * height as usize;
+        let out = self
             .ctx
             .device
             .newBufferWithLength_options(
-                width as usize * height as usize * size_of::<[f32; 3]>(),
+                pixels * size_of::<[f32; 3]>(),
                 MTLResourceOptions::StorageModeShared,
             )
-            .ok_or(Error::Resource("accumulation buffer"))?;
-        Ok(Accumulation {
-            buffer,
-            width,
-            height,
-            samples: 0,
-            gpu_seconds: 0.0,
-            lighting: None,
-            wavefront: None,
-            stage_seconds: None,
-            pixel_stats: None,
-            adaptive: None,
+            .ok_or(Error::Resource("output buffer"))?;
+
+        let cb = self
+            .ctx
+            .queue
+            .commandBuffer()
+            .ok_or(Error::Resource("command buffer"))?;
+        let enc = cb
+            .computeCommandEncoder()
+            .ok_or(Error::Resource("compute encoder"))?;
+        enc.setComputePipelineState(&self.normals);
+        for blas in self.tlas.blases() {
+            enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
+        }
+        // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
+        // indices, instances, camera, output, vnormals).
+        unsafe {
+            enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
+            enc.setBuffer_offset_atIndex(Some(&self.positions), 0, 1);
+            enc.setBuffer_offset_atIndex(Some(&self.indices), 0, 2);
+            enc.setBuffer_offset_atIndex(Some(&self.instances), 0, 3);
+            enc.setBuffer_offset_atIndex(Some(&camera), 0, 4);
+            enc.setBuffer_offset_atIndex(Some(&out), 0, 5);
+            enc.setBuffer_offset_atIndex(Some(&self.vnormals), 0, 6);
+        }
+        enc.dispatchThreads_threadsPerThreadgroup(
+            MTLSize {
+                width: width as usize,
+                height: height as usize,
+                depth: 1,
+            },
+            MTLSize {
+                width: 8,
+                height: 8,
+                depth: 1,
+            },
+        );
+        enc.endEncoding();
+        cb.commit();
+        cb.waitUntilCompleted();
+
+        // SAFETY: `out` holds `pixels` packed float3 values and the command buffer has completed.
+        let data = unsafe {
+            std::slice::from_raw_parts(out.contents().as_ptr().cast::<f32>(), pixels * 3)
+        };
+        Ok(data.as_chunks::<3>().0.to_vec())
+    }
+
+    /// Albedo, depth and instance id of the first hit through each pixel centre (one sample, so ids
+    /// and depth are never blended).
+    fn render_aovs(&self, width: u32, height: u32) -> Result<Aovs, Error> {
+        if width == 0 || height == 0 {
+            return Err(Error::Scene("image size must be non-zero".into()));
+        }
+        let mut camera = self.camera;
+        camera[0] = width as f32;
+        camera[1] = height as f32;
+        let camera = upload(&self.ctx, &camera)?;
+
+        let pixels = width as usize * height as usize;
+        let buffer = |bytes: usize| {
+            self.ctx
+                .device
+                .newBufferWithLength_options(bytes, MTLResourceOptions::StorageModeShared)
+                .ok_or(Error::Resource("output buffer"))
+        };
+        let albedo_depth = buffer(pixels * size_of::<[f32; 4]>())?;
+        let ids = buffer(pixels * size_of::<u32>())?;
+        let material_ids = buffer(pixels * size_of::<u32>())?;
+
+        let cb = self
+            .ctx
+            .queue
+            .commandBuffer()
+            .ok_or(Error::Resource("command buffer"))?;
+        let enc = cb
+            .computeCommandEncoder()
+            .ok_or(Error::Resource("compute encoder"))?;
+        enc.setComputePipelineState(&self.aov);
+        for blas in self.tlas.blases() {
+            enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
+        }
+        // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
+        // indices, instances, camera, materials, uvs, texInfo, texels, albedoDepth, objectIds, materialIds).
+        unsafe {
+            enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
+            enc.setBuffer_offset_atIndex(Some(&self.positions), 0, 1);
+            enc.setBuffer_offset_atIndex(Some(&self.indices), 0, 2);
+            enc.setBuffer_offset_atIndex(Some(&self.instances), 0, 3);
+            enc.setBuffer_offset_atIndex(Some(&camera), 0, 4);
+            enc.setBuffer_offset_atIndex(Some(&self.materials), 0, 5);
+            enc.setBuffer_offset_atIndex(Some(&self.uvs), 0, 6);
+            enc.setBuffer_offset_atIndex(Some(&self.tex_info), 0, 7);
+            enc.setBuffer_offset_atIndex(Some(&self.texels), 0, 8);
+            enc.setBuffer_offset_atIndex(Some(&albedo_depth), 0, 9);
+            enc.setBuffer_offset_atIndex(Some(&ids), 0, 10);
+            enc.setBuffer_offset_atIndex(Some(&material_ids), 0, 11);
+        }
+        enc.dispatchThreads_threadsPerThreadgroup(
+            MTLSize {
+                width: width as usize,
+                height: height as usize,
+                depth: 1,
+            },
+            MTLSize {
+                width: 8,
+                height: 8,
+                depth: 1,
+            },
+        );
+        enc.endEncoding();
+        cb.commit();
+        cb.waitUntilCompleted();
+
+        // SAFETY: the buffers hold `pixels` float4 and u32 values and the command buffer has completed.
+        let (ad, ids, mids) = unsafe {
+            (
+                std::slice::from_raw_parts(
+                    albedo_depth.contents().as_ptr().cast::<f32>(),
+                    pixels * 4,
+                ),
+                std::slice::from_raw_parts(ids.contents().as_ptr().cast::<u32>(), pixels),
+                std::slice::from_raw_parts(material_ids.contents().as_ptr().cast::<u32>(), pixels),
+            )
+        };
+        let ad = ad.as_chunks::<4>().0;
+        Ok(Aovs {
+            albedo: ad.iter().map(|p| [p[0], p[1], p[2]]).collect(),
+            depth: ad.iter().map(|p| p[3]).collect(),
+            object_id: ids.to_vec(),
+            material_id: mids.to_vec(),
         })
     }
 
-    /// Like `new_accumulation`, plus per-pixel buffers for the lighting split
-    /// (37 floats per pixel, so about 150 bytes per pixel more than the beauty sum).
-    pub fn new_accumulation_with_lighting(
-        &self,
-        width: u32,
-        height: u32,
-    ) -> Result<Accumulation, Error> {
-        let mut acc = self.new_accumulation(width, height)?;
-        let len = width as usize * height as usize * LIGHTING_STRIDE * size_of::<f32>();
-        self.ctx.check_fits(len)?;
-        acc.lighting = Some(
-            self.ctx
-                .device
-                .newBufferWithLength_options(len, MTLResourceOptions::StorageModeShared)
-                .ok_or(Error::Resource("lighting buffer"))?,
-        );
-        Ok(acc)
-    }
-
     /// Traces `samples` more paths per pixel into `acc` and waits for the GPU.
-    pub fn accumulate(&self, acc: &mut Accumulation, samples: u32) -> Result<(), Error> {
+    fn accumulate(&self, acc: &mut Accumulation, samples: u32) -> Result<(), Error> {
         let mut params = [0u32; PARAM_WORDS];
         params[0] = acc.width;
         params[1] = acc.height;
@@ -1148,95 +1110,49 @@ impl Renderer {
         Ok(())
     }
 
-    /// A command buffer and a compute encoder with the path tracer's bindings 0..18 set.
-    fn open_encoder(&self, acc: &Accumulation) -> Result<(CommandBuffer, Encoder), Error> {
-        let cb = self
-            .ctx
-            .queue
-            .commandBuffer()
-            .ok_or(Error::Resource("command buffer"))?;
-        let enc = cb
-            .computeCommandEncoder()
-            .ok_or(Error::Resource("compute encoder"))?;
-        enc.setComputePipelineState(&self.pathtrace);
-        for blas in self.tlas.blases() {
-            enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
-        }
-        // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional, uvs, texels, texInfo, vnormals, lighting, pixelStats). Dispatches in one encoder run in
-        // order, so the `+=` on `accum` never races.
-        unsafe {
-            enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
-            enc.setBuffer_offset_atIndex(Some(&self.positions), 0, 1);
-            enc.setBuffer_offset_atIndex(Some(&self.indices), 0, 2);
-            enc.setBuffer_offset_atIndex(Some(&self.instances), 0, 3);
-            enc.setBuffer_offset_atIndex(Some(&self.materials), 0, 4);
-            enc.setBuffer_offset_atIndex(Some(&self.lights), 0, 5);
-            enc.setBuffer_offset_atIndex(Some(&acc.buffer), 0, 7);
-            enc.setBuffer_offset_atIndex(Some(&self.emitters), 0, 8);
-            enc.setBuffer_offset_atIndex(Some(&self.emit_cdf), 0, 9);
-            enc.setBuffer_offset_atIndex(Some(&self.env.pixels), 0, 10);
-            enc.setBuffer_offset_atIndex(Some(&self.env.marginal), 0, 11);
-            enc.setBuffer_offset_atIndex(Some(&self.env.conditional), 0, 12);
-            enc.setBuffer_offset_atIndex(Some(&self.uvs), 0, 13);
-            enc.setBuffer_offset_atIndex(Some(&self.texels), 0, 14);
-            enc.setBuffer_offset_atIndex(Some(&self.tex_info), 0, 15);
-            enc.setBuffer_offset_atIndex(Some(&self.vnormals), 0, 16);
-            enc.setBuffer_offset_atIndex(
-                Some(acc.lighting.as_ref().unwrap_or(&self.no_lighting)),
-                0,
-                17,
-            );
-            enc.setBuffer_offset_atIndex(
-                Some(acc.pixel_stats.as_ref().unwrap_or(&self.no_lighting)),
-                0,
-                18,
-            );
-        }
-        Ok((cb, enc))
-    }
-
-    /// # Safety
-    /// `enc` must have bindings 0..18 of `shaders/pathtrace.slang` set.
-    unsafe fn encode_megakernel(
+    fn new_accumulation(
         &self,
-        enc: &ProtocolObject<dyn MTLComputeCommandEncoder>,
-        acc: &Accumulation,
-        params: &mut [u32; PARAM_WORDS],
-        samples: u32,
-    ) {
-        let mut k = 0;
-        while k < samples {
-            params[6] = acc.samples + k;
-            params[35] = (samples - k).min(SAMPLES_PER_DISPATCH);
-            k += params[35];
-            // SAFETY: the block outlives the call and Metal copies it.
-            unsafe {
-                enc.setBytes_length_atIndex(
-                    NonNull::from(&*params).cast::<c_void>(),
-                    size_of_val(params),
-                    6,
-                );
-            }
-            enc.dispatchThreads_threadsPerThreadgroup(
-                MTLSize {
-                    width: acc.width as usize,
-                    height: acc.height as usize,
-                    depth: 1,
-                },
-                MTLSize {
-                    width: 8,
-                    height: 8,
-                    depth: 1,
-                },
-            );
+        width: u32,
+        height: u32,
+        lighting: bool,
+    ) -> Result<Accumulation, Error> {
+        if width == 0 || height == 0 {
+            return Err(Error::Scene("image size must be non-zero".into()));
         }
-    }
-
-    /// One-shot render: mean radiance over `samples` paths per pixel.
-    pub fn render(&self, width: u32, height: u32, samples: u32) -> Result<Vec<[f32; 3]>, Error> {
-        let mut acc = self.new_accumulation(width, height)?;
-        self.accumulate(&mut acc, samples)?;
-        Ok(acc.mean())
+        // Metal zero-fills new buffers, which is the empty sum.
+        let pixels = width as usize * height as usize;
+        let buffer = self
+            .ctx
+            .device
+            .newBufferWithLength_options(
+                pixels * size_of::<[f32; 3]>(),
+                MTLResourceOptions::StorageModeShared,
+            )
+            .ok_or(Error::Resource("accumulation buffer"))?;
+        // The lighting split is 65 floats per pixel, about 260 bytes per pixel more.
+        let lighting = if lighting {
+            let len = pixels * LIGHTING_STRIDE * size_of::<f32>();
+            self.ctx.check_fits(len)?;
+            Some(
+                self.ctx
+                    .device
+                    .newBufferWithLength_options(len, MTLResourceOptions::StorageModeShared)
+                    .ok_or(Error::Resource("lighting buffer"))?,
+            )
+        } else {
+            None
+        };
+        Ok(Accumulation {
+            buffer,
+            width,
+            height,
+            samples: 0,
+            gpu_seconds: 0.0,
+            lighting,
+            wavefront: None,
+            stage_seconds: None,
+            pixel_stats: None,
+            adaptive: None,
+        })
     }
 }

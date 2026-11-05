@@ -1,6 +1,7 @@
 //! Needs a Metal RT device; skips on machines without one (e.g. CI runners).
 #![cfg(target_os = "macos")]
 
+use verion_gpu::RayTracingBackend as _;
 use verion_gpu_metal::{Error, MetalContext, Renderer};
 use verion_scene::{Camera, IDENTITY, Instance, Material, Mesh, Scene, Transform};
 

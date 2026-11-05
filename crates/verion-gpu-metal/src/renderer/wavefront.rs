@@ -27,16 +27,6 @@ const SPLIT_WORDS: usize = 17;
 /// Threads per group of the extend and shade kernels (`WF_GROUP`).
 const GROUP: usize = 64;
 
-/// Which form of the path tracer `Renderer::accumulate` runs. Both give the same image.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Integrator {
-    /// One thread runs a whole path.
-    #[default]
-    Megakernel,
-    /// One kernel per stage and bounce, with path queues in between (REQ-GPU-005).
-    Wavefront,
-}
-
 pub(super) struct Pipelines {
     args: Obj<dyn MTLComputePipelineState>,
     extend: Obj<dyn MTLComputePipelineState>,

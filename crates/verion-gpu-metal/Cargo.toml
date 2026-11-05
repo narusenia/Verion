@@ -9,6 +9,7 @@ publish.workspace = true
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-metal = "0.3"
+verion-gpu = { version = "0.0.0", path = "../verion-gpu" }
 verion-scene = { version = "0.0.0", path = "../verion-scene" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

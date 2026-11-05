@@ -5,7 +5,11 @@ use std::{
 
 use eframe::egui::{self, Align, Align2, Color32, Key, Layout, PointerButton, RichText};
 use egui_material_icons::icons::*;
-use verion_gpu_metal::{Accumulation, Adaptive, Integrator, LightingAovs, MetalContext, Renderer};
+use verion_gpu::{Accumulation as _, Adaptive, Aovs, Integrator, LightingAovs, RayTracingBackend};
+
+/// The GPU backend of this platform (REQ-GPU-003).
+type Backend = verion_gpu_metal::Renderer;
+type Accumulation = <Backend as RayTracingBackend>::Accumulation;
 use verion_scene::{Camera, Light, Material, OutputTransform, Scene};
 use verion_stylization::{ColorGrade, Frame, PostFrame};
 
@@ -188,12 +192,12 @@ struct Stats {
 }
 
 pub struct App {
-    ctx: MetalContext,
+    ctx: <Backend as RayTracingBackend>::Context,
     scene: Scene,
-    renderer: Renderer,
+    renderer: Backend,
     acc: Accumulation,
     normals: Vec<[f32; 3]>,
-    aov: verion_gpu_metal::Aovs,
+    aov: Aovs,
     width: u32,
     height: u32,
     max_spp: u32,
@@ -274,12 +278,11 @@ impl App {
             scene.frame_camera();
         }
         resolve_hdri(&mut scene, args)?;
-        let ctx =
-            MetalContext::new().map_err(|e| format!("Metal ray tracing is required: {e:?}"))?;
-        let renderer = Renderer::new(&ctx, &scene).map_err(|e| format!("renderer: {e:?}"))?;
+        let ctx = Backend::context().map_err(|e| format!("GPU ray tracing is required: {e}"))?;
+        let renderer = Backend::new(&ctx, &scene).map_err(|e| format!("renderer: {e:?}"))?;
         let (w, h) = (args.width, args.height);
         let acc = renderer
-            .new_accumulation_with_lighting(w, h)
+            .new_accumulation(w, h, true)
             .map_err(|e| format!("render: {e:?}"))?;
         let normals = renderer
             .render_normals(w, h)
@@ -387,7 +390,7 @@ impl App {
     /// shortcut: a material or light edit rebuilds the whole renderer (acceleration structures
     /// included); upgrade to a materials / lights buffer update when a scene is big enough to feel it.
     fn rebuild(&mut self) {
-        match Renderer::new(&self.ctx, &self.scene) {
+        match Backend::new(&self.ctx, &self.scene) {
             Ok(mut r) => {
                 r.set_multiscatter(self.multiscatter);
                 r.set_integrator(self.integrator);
@@ -469,11 +472,7 @@ impl App {
     /// pixel; skipping them keeps a restart per frame cheap while the camera moves.
     fn restart(&mut self) {
         let (w, h) = (self.width, self.height);
-        let acc = if self.stylized {
-            self.renderer.new_accumulation_with_lighting(w, h)
-        } else {
-            self.renderer.new_accumulation(w, h)
-        };
+        let acc = self.renderer.new_accumulation(w, h, self.stylized);
         match acc {
             Ok(acc) => {
                 self.active = acc.active_pixels();

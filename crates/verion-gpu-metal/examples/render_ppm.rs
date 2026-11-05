@@ -8,6 +8,7 @@
 mod imp {
     use std::{collections::HashMap, fs, io::Write, path::Path};
 
+    use verion_gpu::RayTracingBackend as _;
     use verion_gpu_metal::{MetalContext, Renderer};
     use verion_render_io::{ExrAovs, ExrFrame, RenderInfo, load_hdri, write_exr};
     use verion_scene::{

@@ -2549,12 +2549,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "verion-gpu"
+version = "0.0.0"
+dependencies = [
+ "verion-scene",
+]
+
+[[package]]
 name = "verion-gpu-metal"
 version = "0.0.0"
 dependencies = [
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
+ "verion-gpu",
  "verion-render-io",
  "verion-scene",
 ]
@@ -2566,6 +2574,7 @@ dependencies = [
  "clap",
  "indicatif",
  "verion-denoise",
+ "verion-gpu",
  "verion-gpu-metal",
  "verion-render-io",
  "verion-scene",
@@ -2602,6 +2611,7 @@ dependencies = [
  "egui_kittest",
  "egui_material_icons",
  "verion-denoise",
+ "verion-gpu",
  "verion-gpu-metal",
  "verion-render-io",
  "verion-scene",

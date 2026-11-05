@@ -2,6 +2,7 @@
 #![cfg(target_os = "macos")]
 
 use std::collections::HashMap;
+use verion_gpu::{Accumulation as _, RayTracingBackend as _};
 use verion_gpu_metal::{Adaptive, Error, Integrator, MetalContext, Renderer};
 
 use verion_scene::{BaseBsdf, Camera, IDENTITY, Image, Instance, Light, Material, Mesh, Scene};
@@ -150,7 +151,7 @@ fn variance_decreases_with_samples() {
 fn progressive_accumulation_equals_one_shot_sample_count() {
     let Some(ctx) = context() else { return };
     let r = Renderer::new(&ctx, &furnace_room(0.5, 1.0)).unwrap();
-    let mut acc = r.new_accumulation(16, 16).unwrap();
+    let mut acc = r.new_accumulation(16, 16, false).unwrap();
     assert_eq!(acc.mean()[0], [0.0; 3]);
     r.accumulate(&mut acc, 8).unwrap();
     r.accumulate(&mut acc, 8).unwrap();
@@ -160,7 +161,7 @@ fn progressive_accumulation_equals_one_shot_sample_count() {
 }
 
 fn accumulate(r: &Renderer, samples: u32) -> verion_gpu_metal::Accumulation {
-    let mut acc = r.new_accumulation(16, 16).unwrap();
+    let mut acc = r.new_accumulation(16, 16, false).unwrap();
     r.accumulate(&mut acc, samples).unwrap();
     acc
 }
@@ -1364,7 +1365,7 @@ fn lighting_parts_sum_to_the_beauty() {
     ];
     for scene in &scenes {
         let r = Renderer::new(&ctx, scene).unwrap();
-        let mut acc = r.new_accumulation_with_lighting(33, 33).unwrap();
+        let mut acc = r.new_accumulation(33, 33, true).unwrap();
         r.accumulate(&mut acc, 16).unwrap();
         let (beauty, l) = (acc.mean(), acc.lighting().unwrap());
         for (i, b) in beauty.iter().enumerate() {
@@ -1392,7 +1393,7 @@ fn lighting_split_files_light_by_source() {
     };
     let center = |scene: &Scene| {
         let r = Renderer::new(&ctx, scene).unwrap();
-        let mut acc = r.new_accumulation_with_lighting(65, 65).unwrap();
+        let mut acc = r.new_accumulation(65, 65, true).unwrap();
         r.accumulate(&mut acc, 64).unwrap();
         let l = acc.lighting().unwrap();
         let i = 32 * 65 + 32;
@@ -1420,7 +1421,7 @@ fn lighting_split_files_light_by_source() {
 fn lighting_is_off_unless_requested() {
     let Some(ctx) = context() else { return };
     let r = Renderer::new(&ctx, &furnace_room(0.5, 1.0)).unwrap();
-    let mut acc = r.new_accumulation(8, 8).unwrap();
+    let mut acc = r.new_accumulation(8, 8, false).unwrap();
     r.accumulate(&mut acc, 1).unwrap();
     assert!(acc.lighting().is_none());
 }
@@ -1441,7 +1442,7 @@ fn the_strongest_lights_get_the_own_light_slots() {
     scene.add_light(point([0.0, 1.0, 1.0], 20.0));
     scene.add_light(point([0.0, -1.0, 1.0], 5.0));
     let r = Renderer::new(&ctx, &scene).unwrap();
-    let mut acc = r.new_accumulation_with_lighting(65, 65).unwrap();
+    let mut acc = r.new_accumulation(65, 65, true).unwrap();
     r.accumulate(&mut acc, 16).unwrap();
     let l = acc.lighting().unwrap();
     let dir = l.light_dir[32 * 65 + 32];
@@ -1472,7 +1473,7 @@ fn light_slots_hold_potential_diffuse_and_response() {
     };
     let center = |scene: &Scene| {
         let r = Renderer::new(&ctx, scene).unwrap();
-        let mut acc = r.new_accumulation_with_lighting(65, 65).unwrap();
+        let mut acc = r.new_accumulation(65, 65, true).unwrap();
         r.accumulate(&mut acc, 64).unwrap();
         let l = acc.lighting().unwrap();
         let i = 32 * 65 + 32;

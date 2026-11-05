@@ -5,7 +5,8 @@ mod accel;
 mod renderer;
 
 pub use accel::{Blas, Instance, Tlas};
-pub use renderer::{Accumulation, Adaptive, Aovs, Integrator, LightingAovs, Renderer};
+pub use renderer::{Accumulation, Renderer};
+pub use verion_gpu::{Adaptive, Aovs, Integrator, LightingAovs, MemoryUsage};
 
 use std::{
     fmt,
@@ -72,17 +73,6 @@ pub struct MetalContext {
     pub(crate) queue: Obj<dyn MTLCommandQueue>,
     /// Bytes copied from the host into GPU buffers through this context (shared by its clones).
     uploaded: Arc<AtomicU64>,
-}
-
-/// GPU memory against the budget (REQ-PERF-006, step 2: measured, behavior unchanged).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MemoryUsage {
-    /// The device's recommended working set; allocations past it fail with `Error::OutOfMemory`.
-    pub budget: u64,
-    /// Bytes the device has allocated now, all clients of the process included.
-    pub allocated: u64,
-    /// Bytes uploaded from the host through this context so far.
-    pub uploaded: u64,
 }
 
 impl MetalContext {

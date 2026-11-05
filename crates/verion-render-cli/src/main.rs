@@ -184,7 +184,8 @@ const CHUNK_SPP: u32 = 8;
 #[cfg(target_os = "macos")]
 fn run(args: &Args) -> Result<(), String> {
     use indicatif::{ProgressBar, ProgressStyle};
-    use verion_gpu_metal::{MetalContext, Renderer};
+    use verion_gpu::{Accumulation as _, Adaptive, Integrator, RayTracingBackend};
+    type Backend = verion_gpu_metal::Renderer;
     use verion_render_io::{
         ExrAovs, ExrFrame, ExrLighting, GradeInfo, RenderInfo, load_gltf_in, load_hdri, write_exr,
     };
@@ -217,31 +218,28 @@ fn run(args: &Args) -> Result<(), String> {
     let load_s = t.elapsed().as_secs_f64();
 
     let t = Instant::now();
-    let ctx = MetalContext::new().map_err(|e| format!("Metal ray tracing is required: {e:?}"))?;
-    let mut renderer = Renderer::new(&ctx, &scene).map_err(|e| format!("renderer: {e:?}"))?;
+    let ctx = Backend::context().map_err(|e| format!("GPU ray tracing is required: {e}"))?;
+    let mut renderer = Backend::new(&ctx, &scene).map_err(|e| format!("renderer: {e:?}"))?;
     renderer.set_multiscatter(!args.no_multiscatter);
     renderer.set_integrator(match args.integrator {
-        IntegratorArg::Megakernel => verion_gpu_metal::Integrator::Megakernel,
-        IntegratorArg::Wavefront => verion_gpu_metal::Integrator::Wavefront,
+        IntegratorArg::Megakernel => Integrator::Megakernel,
+        IntegratorArg::Wavefront => Integrator::Wavefront,
     });
     renderer.set_stage_timing(args.stage_timing);
-    renderer.set_adaptive(args.adaptive.map(|threshold| verion_gpu_metal::Adaptive {
+    renderer.set_adaptive(args.adaptive.map(|threshold| Adaptive {
         threshold,
         min_spp: args.adaptive_min_spp,
     }));
     // shortcut: the peak is the largest of the samples taken at stage boundaries, not a true high-water mark.
-    let mut peak = ctx.memory().allocated;
+    let mut peak = Backend::memory(&ctx).allocated;
     let build_s = t.elapsed().as_secs_f64();
 
     let (w, h) = (args.width, args.height);
     let t = Instant::now();
     let lighting_on = args.lighting_aovs || args.mode == Mode::Stylized;
-    let mut acc = if lighting_on {
-        renderer.new_accumulation_with_lighting(w, h)
-    } else {
-        renderer.new_accumulation(w, h)
-    }
-    .map_err(|e| format!("render: {e:?}"))?;
+    let mut acc = renderer
+        .new_accumulation(w, h, lighting_on)
+        .map_err(|e| format!("render: {e:?}"))?;
     // Hidden automatically when stderr is not a terminal.
     let bar = ProgressBar::new(args.spp as u64)
         .with_style(ProgressStyle::with_template("{bar:40} {pos}/{len} spp ({eta})").unwrap());
@@ -258,7 +256,7 @@ fn run(args: &Args) -> Result<(), String> {
     bar.finish_and_clear();
     let gpu_s = acc.gpu_seconds();
     let wavefront_bytes = acc.wavefront_bytes();
-    peak = peak.max(ctx.memory().allocated);
+    peak = peak.max(Backend::memory(&ctx).allocated);
     let stages = acc.stage_seconds().map_or(String::new(), |[e, s]| {
         format!("\"extend_s\":{e},\"shade_s\":{s},")
     });
@@ -278,7 +276,7 @@ fn run(args: &Args) -> Result<(), String> {
         .render_aovs(w, h)
         .map_err(|e| format!("aovs: {e:?}"))?;
     let aov_s = t.elapsed().as_secs_f64();
-    let memory = ctx.memory();
+    let memory = Backend::memory(&ctx);
     peak = peak.max(memory.allocated);
 
     let t = Instant::now();
