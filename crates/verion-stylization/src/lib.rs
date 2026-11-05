@@ -196,7 +196,7 @@ pub fn stylized_specular(sp: &StylizedSpecular, p: &PixelInput) -> [f32; 3] {
     if sp.strength == 0.0 || dot(p.normal, p.normal) < 0.5 {
         return [0.0; 3]; // off, or no surface (a zero normal)
     }
-    let mut sum = 0.0;
+    let mut sum = [0.0f32; 3];
     for k in 0..LIGHT_SLOTS {
         let h: [f32; 3] = std::array::from_fn(|i| p.light_dir[k][i] + p.view[i]);
         let len2 = dot(h, h);
@@ -205,14 +205,24 @@ pub fn stylized_specular(sp: &StylizedSpecular, p: &PixelInput) -> [f32; 3] {
             continue;
         }
         let x = 1.0 - (dot(p.normal, h) / len2.sqrt()).max(0.0);
-        let band = if sp.feather > 0.0 {
-            1.0 - smoothstep(sp.size - 0.5 * sp.feather, sp.size + 0.5 * sp.feather, x)
-        } else {
-            (x <= sp.size) as u8 as f32
+        let band = match &sp.ramp {
+            // Response 1 at the center of the highlight, 0 at the edge `size`.
+            Some(ramp) => {
+                let r = if sp.size > 0.0 {
+                    (1.0 - x / sp.size).clamp(0.0, 1.0)
+                } else {
+                    (x <= 0.0) as u8 as f32
+                };
+                ramp_color(ramp, r)
+            }
+            None if sp.feather > 0.0 => {
+                [1.0 - smoothstep(sp.size - 0.5 * sp.feather, sp.size + 0.5 * sp.feather, x); 3]
+            }
+            None => [(x <= sp.size) as u8 as f32; 3],
         };
-        sum += band * p.light_lit[k];
+        sum = std::array::from_fn(|i| sum[i] + band[i] * p.light_lit[k]);
     }
-    sp.color.map(|c| c * sp.strength * sum)
+    std::array::from_fn(|i| sp.color[i] * sp.strength * sum[i])
 }
 
 /// The rim added by a `RimLight` (REQ-STY-005): a band where the surface turns away from the
@@ -430,6 +440,33 @@ mod tests {
         off.light_dir[0] = [1.0, 0.0, 0.0];
         assert_eq!(stylized_specular(&s, &off), [0.0; 3]);
         assert_eq!(stylized_specular(&spec(|s| s.size = 0.3), &off), [1.0; 3]);
+    }
+
+    #[test]
+    fn specular_ramp_gives_a_core_inside_a_halo() {
+        // Outside 0, halo 0.4 from response 0.3, core 1.0 from response 0.8. size 0.2.
+        let ramp = ToonRamp {
+            thresholds: vec![0.3, 0.8],
+            feather: 0.0,
+            palette: vec![[0.0; 3], [0.4; 3], [1.0; 3]],
+            light_wrap: 0.0,
+        };
+        let s = StylizedSpecular {
+            size: 0.2,
+            ramp: Some(ramp),
+            ..Default::default()
+        };
+        let mut p = spec_px();
+        // L = (sin 2a, 0, cos 2a) gives H at angle a from the normal, 1 - N·H = 1 - cos a.
+        let at = |p: &mut PixelInput, x: f32| {
+            let a = (1.0 - x).acos();
+            p.light_dir[0] = [(2.0 * a).sin(), 0.0, (2.0 * a).cos()];
+            stylized_specular(&s, p)[0]
+        };
+        assert!((at(&mut p, 0.0) - 1.0).abs() < 1e-5); // center: response 1
+        assert!((at(&mut p, 0.1) - 0.4).abs() < 1e-5); // response 0.5: halo
+        assert!(at(&mut p, 0.19).abs() < 1e-5); // response 0.05: outside
+        assert!(at(&mut p, 0.3).abs() < 1e-5); // beyond size
     }
 
     #[test]
