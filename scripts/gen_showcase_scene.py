@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes scenes/showcase.gltf: a floor and five spheres, one per M2 material feature
 (clearcoat, sheen, dispersion, toon stylization, rough metal), lit by two directional lights.
-The geometry is embedded, so the file is self-contained. Usage: gen_showcase_scene.py OUT_FILE"""
+The geometry is embedded, so the file is self-contained. glTF's metallicFactor defaults to 1, so non-metals set it to 0. Usage: gen_showcase_scene.py OUT_FILE"""
 import base64, json, math, struct, sys
 
 RINGS, SEGS = 48, 96
@@ -70,18 +70,19 @@ def main(path):
                          "palette": [[0.25, 0.3, 0.55], [0.6, 0.7, 0.95], [1, 1, 1]]},
             "stylizedSpecular": {"size": 0.08, "feather": 0.02, "strength": 1},
             "outlineStyle": {"width": 2}}
+    # The glass dispersion is exaggerated (realistic values are 0..1) so the color fringes show.
     materials = [
-        {"name": "clearcoat red", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.03, 0.03, 1], "roughnessFactor": 0.45},
+        {"name": "clearcoat red", "pbrMetallicRoughness": {"baseColorFactor": [0.8, 0.03, 0.03, 1], "metallicFactor": 0, "roughnessFactor": 0.45},
          "extensions": {"KHR_materials_clearcoat": {"clearcoatFactor": 1, "clearcoatRoughnessFactor": 0.03}}},
-        {"name": "sheen velvet", "pbrMetallicRoughness": {"baseColorFactor": [0.25, 0.02, 0.1, 1], "roughnessFactor": 0.9},
+        {"name": "sheen velvet", "pbrMetallicRoughness": {"baseColorFactor": [0.25, 0.02, 0.1, 1], "metallicFactor": 0, "roughnessFactor": 0.9},
          "extensions": {"KHR_materials_sheen": {"sheenColorFactor": [1, 0.55, 0.7], "sheenRoughnessFactor": 0.35}}},
-        {"name": "dispersive glass", "pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1], "roughnessFactor": 0},
+        {"name": "dispersive glass", "pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0, "roughnessFactor": 0},
          "extensions": {"KHR_materials_transmission": {"transmissionFactor": 1}, "KHR_materials_ior": {"ior": 1.8},
-                        "KHR_materials_dispersion": {"dispersion": 3}}},
-        {"name": "toon", "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.6, 0.2, 1], "roughnessFactor": 0.5},
+                        "KHR_materials_dispersion": {"dispersion": 10}}},
+        {"name": "toon", "pbrMetallicRoughness": {"baseColorFactor": [0.9, 0.6, 0.2, 1], "metallicFactor": 0, "roughnessFactor": 0.5},
          "extensions": {"VERION_materials_stylization": toon}},
         {"name": "rough gold", "pbrMetallicRoughness": {"baseColorFactor": [1.0, 0.77, 0.34, 1], "metallicFactor": 1, "roughnessFactor": 0.55}},
-        {"name": "floor", "pbrMetallicRoughness": {"baseColorFactor": [0.55, 0.55, 0.55, 1], "roughnessFactor": 0.8}},
+        {"name": "floor", "pbrMetallicRoughness": {"baseColorFactor": [0.55, 0.55, 0.55, 1], "metallicFactor": 0, "roughnessFactor": 0.8}},
     ]
     nodes, scene_nodes = [], []
     for k in range(5):
