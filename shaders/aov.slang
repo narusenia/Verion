@@ -8,7 +8,7 @@ StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
 StructuredBuffer<uint> instances;   // 16 words each: vertex offset, index offset, material, emitter base, 12 floats (row-major 3x4)
 StructuredBuffer<float> camera;     // width, height, tan(fov/2), pad, 12 floats (camera-to-world 3x4)
-StructuredBuffer<float> materials;  // 16 words each; 0..2 base color, 10 = base color texture + 1 (0 = none)
+StructuredBuffer<float> materials;  // 21 words each; 0..2 base color, 10 = base color texture + 1 (0 = none), 15 clearcoat, 16 its roughness, 17 sheen roughness, 18..20 sheen color
 StructuredBuffer<float> uvs;        // uv per vertex (zero when a mesh has none)
 StructuredBuffer<uint> texInfo;     // 4 words per texture: texel offset, width, height, mip level count
 StructuredBuffer<float> texels;     // rgb texels, each texture's mip chain level 0 first
@@ -96,7 +96,7 @@ void aov(uint3 tid : SV_DispatchThreadID)
         matId = instances[inst + 2] + 1;
         depth = q.CommittedRayT() * -d.z; // d is unit length in camera space, so -d.z is the forward component
 
-        uint mi = instances[inst + 2] * 18;
+        uint mi = instances[inst + 2] * 21;
         albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
         uint texBase = uint(materials[mi + 10]);
         if (texBase > 0)

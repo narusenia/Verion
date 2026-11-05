@@ -570,6 +570,51 @@ fn clearcoat_furnace_conserves_energy() {
 }
 
 #[test]
+fn sheen_adds_its_directional_albedo_to_a_black_base() {
+    let Some(ctx) = context() else { return };
+    // Black mirror-smooth base reflects 0.04. A full-white sheen at roughness 1 reflects E(1, 1) = 0.137
+    // (the generated table) of the light and the base keeps the rest.
+    let m = bsdf(BaseBsdf {
+        base_color: [0.0; 3],
+        roughness: 0.0,
+        sheen_color: [1.0; 3],
+        sheen_roughness: 1.0,
+        ..BaseBsdf::default()
+    });
+    let img = Renderer::new(&ctx, &sky_scene(plane(5.0, 0.0), m, 3.0))
+        .unwrap()
+        .render(32, 32, 128)
+        .unwrap();
+    let got = center_mean(&img, 32, 16);
+    let want = 0.137 + (1.0 - 0.137) * 0.04;
+    assert!((got - want).abs() < 0.01, "{got} vs {want}");
+}
+
+#[test]
+fn sheen_furnace_conserves_energy() {
+    let Some(ctx) = context() else { return };
+    for sheen_roughness in [0.3, 1.0] {
+        let m = bsdf(BaseBsdf {
+            base_color: [1.0; 3],
+            roughness: 0.5,
+            sheen_color: [1.0; 3],
+            sheen_roughness,
+            ..BaseBsdf::default()
+        });
+        let img = Renderer::new(&ctx, &sky_scene(cube(0.5), m, 3.0))
+            .unwrap()
+            .render(32, 32, 64)
+            .unwrap();
+        let got = center_mean(&img, 32, 16);
+        // The sheen takes its albedo from the base, so the sum stays near 1 and never exceeds it.
+        assert!(
+            got > 0.95 && got < 1.02,
+            "sheen roughness {sheen_roughness}: {got}"
+        );
+    }
+}
+
+#[test]
 fn metal_tints_by_base_color() {
     let Some(ctx) = context() else { return };
     let m = bsdf(BaseBsdf {

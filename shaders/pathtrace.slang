@@ -3,13 +3,15 @@
 // crates/verion-gpu-metal/src/renderer.rs.
 
 #include "include/ggx_albedo.slang"
+#include "include/sheen_albedo.slang"
 
 RaytracingAccelerationStructure scene;
 StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
 StructuredBuffer<uint> instances;   // 16 words: vertex offset, index offset, material, emitter base + 1 (0 = not emissive), 12 floats (row-major 3x4)
-StructuredBuffer<float> materials;  // 16 words: base color rgb, emission rgb, metallic, roughness, transmission, ior,
-                                    // base color / metallic-roughness / emission / normal texture + 1 (0 = none), normal scale, 1 pad
+StructuredBuffer<float> materials;  // 21 words: base color rgb, emission rgb, metallic, roughness, transmission, ior,
+                                    // base color / metallic-roughness / emission / normal texture + 1 (0 = none), normal scale,
+                                    // clearcoat, clearcoat roughness, sheen roughness, sheen color rgb
 StructuredBuffer<uint> lights;      // 16 words: kind (0 point, 1 directional, 2 spot), color rgb, intensity, position or travel direction xyz,
                                     // spot axis xyz, spot falloff scale, spot falloff offset, 3 pad (floats as bits)
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
@@ -303,6 +305,9 @@ struct Surface
     float fSel; // chance the dielectric base lobe reflects specularly
     float coat;      // clear coat strength, 0 = none
     float coatAlpha; // GGX alpha of the coat
+    float3 sheenColor;
+    float sheenAlpha;
+    float sheenP;    // chance the sampler takes the sheen lobe: max(sheenColor) * E(view); the base keeps 1 - sheenP
     float coatP;     // chance the sampler takes the coat lobe: coat * Fresnel at the view angle; the base keeps 1 - coatP
 };
 
@@ -338,6 +343,30 @@ float3 multiscatterFactor(Surface s, float cosO)
     return 1.0 + s.albedo * (1.0 / max(ggxAlbedo(cosO, s.alpha), 0.05) - 1.0);
 }
 
+// Directional albedo of the sheen lobe (color 1), bilinear in the generated table (r, cos wo).
+float sheenAlbedo(float cosO, float r)
+{
+    float x = saturate(cosO) * (SHEEN_ALBEDO_N - 1);
+    float y = saturate(r) * (SHEEN_ALBEDO_N - 1);
+    uint x0 = min(uint(x), SHEEN_ALBEDO_N - 2);
+    uint y0 = min(uint(y), SHEEN_ALBEDO_N - 2);
+    float fx = x - x0;
+    float fy = y - y0;
+    float a = lerp(SHEEN_ALBEDO[y0 * SHEEN_ALBEDO_N + x0], SHEEN_ALBEDO[y0 * SHEEN_ALBEDO_N + x0 + 1], fx);
+    float b = lerp(SHEEN_ALBEDO[(y0 + 1) * SHEEN_ALBEDO_N + x0], SHEEN_ALBEDO[(y0 + 1) * SHEEN_ALBEDO_N + x0 + 1], fx);
+    return lerp(a, b, fy);
+}
+
+// Sheen BRDF times cos(wi): the Charlie distribution (Estevez and Kulla) with the Neubelt visibility,
+// as in KHR_materials_sheen. Color is the caller's.
+float sheenCore(float woz, float wiz, float hz, float alpha)
+{
+    float sinH = sqrt(max(1.0 - hz * hz, 0.0));
+    float d = (2.0 + 1.0 / alpha) * pow(sinH, 1.0 / alpha) / (2.0 * PI);
+    float v = 1.0 / (4.0 * (wiz + woz - wiz * woz));
+    return d * v * wiz;
+}
+
 // f * cos(wi) of the reflective lobes, split into the diffuse base and the specular lobes.
 // Rough transmission is not included.
 Lobes evalLobes(Surface s, float3 woL, float3 wiL)
@@ -351,6 +380,12 @@ Lobes evalLobes(Surface s, float3 woL, float3 wiL)
     l.specular = s.metallic * schlick(s.albedo, woh) * multiscatterFactor(s, woL.z) * core
         + (1.0 - s.metallic) * (t * fresnelDielectric(woh, s.eta) + (1.0 - t) * fresnelDielectric(woh, s.ior)) * core;
     l.diffuse = (1.0 - s.metallic) * (1.0 - t) * (1.0 - s.fSel) * s.albedo * (wiL.z / PI);
+    // Layers, outermost last: base, sheen scaled so the pair keeps energy, then the coat.
+    if (s.sheenP > 0.0)
+    {
+        l.specular = (1.0 - s.sheenP) * l.specular + s.sheenColor * sheenCore(woL.z, wiL.z, hh.z, s.sheenAlpha);
+        l.diffuse *= 1.0 - s.sheenP;
+    }
     if (s.coat > 0.0)
     {
         // Clear coat (IOR 1.5): the base loses what the coat reflects at the view angle, and the coat
@@ -424,6 +459,8 @@ float reflectivePdf(Surface s, float3 woL, float3 wiL)
     float pSpec = s.metallic + (1.0 - s.metallic) * (t * fresnelDielectric(woh, s.eta) + (1.0 - t) * s.fSel);
     float pDiff = (1.0 - s.metallic) * (1.0 - t) * (1.0 - s.fSel) * wiL.z / PI;
     float q = pSpec * spec + pDiff;
+    if (s.sheenP > 0.0)
+        q = (1.0 - s.sheenP) * q + s.sheenP * wiL.z / PI; // the sheen lobe is sampled by cosine
     if (s.coat > 0.0)
     {
         float specC = G1(woL.z, s.coatAlpha) * D(hh.z, s.coatAlpha) / (4.0 * woL.z);
@@ -562,7 +599,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         }
         float3 n = outside ? ns : -ns;
 
-        uint mi = instances[inst + 2] * 18;
+        uint mi = instances[inst + 2] * 21;
         float3 albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
         // Textures multiply the material factors. The filter footprint comes from the ray cone.
         uint texBase = uint(materials[mi + 10]);
@@ -650,6 +687,11 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         surf.coatAlpha = max(materials[mi + 16] * materials[mi + 16], 1.0e-3);
         float coatF = fresnelDielectric(woL.z, 1.5);
         surf.coatP = surf.coat * coatF;
+        surf.sheenColor = outside ? float3(materials[mi + 18], materials[mi + 19], materials[mi + 20]) : float3(0.0);
+        float sheenMax = max(surf.sheenColor.x, max(surf.sheenColor.y, surf.sheenColor.z));
+        float sheenR = max(materials[mi + 17], 0.07);
+        surf.sheenAlpha = sheenR * sheenR;
+        surf.sheenP = sheenMax > 0.0 ? sheenMax * sheenAlbedo(woL.z, sheenR) : 0.0;
 
         // Next-event estimation for delta lights (no MIS: sampling can never hit them). Includes the
         // reflective lobes only; rough transmission of a delta light is not evaluated.
@@ -809,6 +851,7 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
         bool refracted = false;
         uint lobeCls = 1;
         float uc = surf.coat > 0.0 ? rng.next() : 1.0;
+        float us = surf.sheenP > 0.0 ? rng.next() : 1.0;
         if (uc < surf.coatP)
         {
             float3 h = sampleVndf(woL, surf.coatAlpha, u1, u2);
@@ -816,6 +859,13 @@ void pathtrace(uint3 tid : SV_DispatchThreadID)
             wiL = 2.0 * woh * h - woL;
             ok = wiL.z > 0.0;
             w = float3(fresnelDielectric(woh, 1.5) / coatF * G1(max(wiL.z, 0.0), surf.coatAlpha));
+        }
+        else if (us < surf.sheenP)
+        {
+            // Cosine sampling: f * cos / pdf = D * V * pi, divided by the chance of taking this lobe.
+            wiL = cosineLocal(u1, u2);
+            float3 hh = normalize(woL + wiL);
+            w = surf.sheenColor * sheenCore(woL.z, wiL.z, hh.z, surf.sheenAlpha) * PI / (wiL.z * surf.sheenP);
         }
         else if (lobe < metallic)
         {
