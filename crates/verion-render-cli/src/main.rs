@@ -82,6 +82,10 @@ struct Args {
     /// Emission, Visibility); costs about 260 bytes of GPU memory per pixel
     #[arg(long)]
     lighting_aovs: bool,
+    /// Plain single-scattering GGX for rough metals, as other renderers (Mitsuba 3) do, instead of
+    /// the default multiple-scattering compensation
+    #[arg(long)]
+    no_multiscatter: bool,
     /// Gain in stops, applied last (needs `--mode stylized`; write it as `--exposure=-1` for a negative value)
     #[arg(long, default_value_t = 0.0, allow_negative_numbers = true)]
     exposure: f32,
@@ -201,7 +205,8 @@ fn run(args: &Args) -> Result<(), String> {
 
     let t = Instant::now();
     let ctx = MetalContext::new().map_err(|e| format!("Metal ray tracing is required: {e:?}"))?;
-    let renderer = Renderer::new(&ctx, &scene).map_err(|e| format!("renderer: {e:?}"))?;
+    let mut renderer = Renderer::new(&ctx, &scene).map_err(|e| format!("renderer: {e:?}"))?;
+    renderer.set_multiscatter(!args.no_multiscatter);
     let build_s = t.elapsed().as_secs_f64();
 
     let (w, h) = (args.width, args.height);
