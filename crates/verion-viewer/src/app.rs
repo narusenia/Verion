@@ -5,7 +5,7 @@ use std::{
 
 use eframe::egui::{self, Align, Align2, Color32, Key, Layout, PointerButton, RichText};
 use egui_material_icons::icons::*;
-use verion_gpu_metal::{Accumulation, MetalContext, Renderer};
+use verion_gpu_metal::{Accumulation, LightingAovs, MetalContext, Renderer};
 use verion_scene::{Camera, Light, Material, OutputTransform, Scene};
 use verion_stylization::{ColorGrade, Frame, PostFrame};
 
@@ -197,6 +197,12 @@ pub struct App {
     view: View,
     stylized: bool,
     multiscatter: bool,
+    /// Denoise the finished (or paused) accumulation with OIDN (ADR-0013).
+    denoise: bool,
+    /// Loaded on first use; the error is shown when OIDN is missing.
+    denoiser: Option<Result<verion_denoise::Denoiser, String>>,
+    /// Denoised beauty and lighting split for the accumulation at this sample count.
+    denoised: Option<(u32, Vec<[f32; 3]>, Option<LightingAovs>)>,
     paused: bool,
     grade: ColorGrade,
     /// View-only gain in stops for the beauty pass.
@@ -306,6 +312,9 @@ impl App {
             view: View::Beauty,
             stylized: false,
             multiscatter: true,
+            denoise: false,
+            denoiser: None,
+            denoised: None,
             paused: false,
             grade: ColorGrade::default(),
             exposure: 0.0,
@@ -454,11 +463,59 @@ impl App {
             Ok(acc) => self.acc = acc,
             Err(e) => eprintln!("render: {e:?}"),
         }
+        self.denoised = None;
         self.dirty = true;
     }
 
+    /// Denoising takes about a second, so it runs once the accumulation is done or paused.
+    fn denoise_ready(&self) -> bool {
+        let spp = self.acc.samples();
+        self.denoise && spp > 0 && (spp >= self.max_spp || self.paused)
+    }
+
+    /// Beauty and (stylized only) lighting split, denoised when `denoise_ready`. A stylized frame
+    /// denoises the Pass input, so Toon bands are cut after the denoiser (as `render-cli` does).
+    fn beauty_inputs(&mut self) -> (Vec<[f32; 3]>, Option<LightingAovs>) {
+        let lighting = || {
+            if self.stylized {
+                self.acc.lighting()
+            } else {
+                None
+            }
+        };
+        if !self.denoise_ready() {
+            return (self.acc.mean(), lighting());
+        }
+        let spp = self.acc.samples();
+        if let Some((at, b, l)) = &self.denoised
+            && *at == spp
+        {
+            return (b.clone(), l.clone());
+        }
+        let (mut beauty, mut light) = (self.acc.mean(), lighting());
+        let d = self
+            .denoiser
+            .get_or_insert_with(|| verion_denoise::Denoiser::load().map_err(|e| e.to_string()));
+        if let Ok(d) = d {
+            let aux = verion_denoise::Aux {
+                albedo: Some(&self.aov.albedo),
+                normal: Some(&self.normals),
+            };
+            let (w, h) = (self.width as usize, self.height as usize);
+            let result = match light.as_mut() {
+                Some(l) => l.for_each_radiance(|p| d.denoise(p, aux, w, h)),
+                None => d.denoise(&mut beauty, aux, w, h),
+            };
+            if let Err(e) = result {
+                eprintln!("denoise: {e}");
+            }
+        }
+        self.denoised = Some((spp, beauty.clone(), light.clone()));
+        (beauty, light)
+    }
+
     /// The displayed image in the working space (linear), before the display transform.
-    fn linear_image(&self) -> Vec<[f32; 3]> {
+    fn linear_image(&mut self) -> Vec<[f32; 3]> {
         match self.view {
             View::Albedo => self.aov.albedo.clone(),
             View::Normal => self
@@ -471,8 +528,8 @@ impl App {
                 self.aov.depth.iter().map(|d| [d / far; 3]).collect()
             }
             View::Beauty => {
-                let mut beauty = self.acc.mean();
-                if let (true, Some(l)) = (self.stylized, self.acc.lighting()) {
+                let (mut beauty, lighting) = self.beauty_inputs();
+                if let (true, Some(l)) = (self.stylized, lighting) {
                     beauty = verion_stylization::stylize_image(
                         self.scene.materials(),
                         &Frame {
@@ -855,6 +912,14 @@ impl App {
             self.renderer.set_multiscatter(self.multiscatter);
             self.restart();
         }
+        if widgets::checkbox(ui, &mut self.denoise, "Denoise when done (OIDN)") {
+            self.dirty = true;
+        }
+        if self.denoise
+            && let Some(Err(e)) = &self.denoiser
+        {
+            ui.colored_label(WARNING, e);
+        }
     }
 
     fn display_section(&mut self, ui: &mut egui::Ui) {
@@ -1098,10 +1163,12 @@ impl App {
     fn overlay(&self, ui: &egui::Ui, rect: egui::Rect) {
         let p = ui.painter_at(rect);
         let name = VIEWS.iter().find(|v| v.0 == self.view).map_or("", |v| v.1);
-        let mode = if self.view == View::Beauty && self.stylized {
-            " · Stylized"
-        } else {
-            ""
+        let beauty = self.view == View::Beauty;
+        let mode = match (beauty && self.stylized, beauty && self.denoise_ready()) {
+            (true, true) => " · Stylized · Denoised",
+            (true, false) => " · Stylized",
+            (false, true) => " · Denoised",
+            (false, false) => "",
         };
         let font = egui::FontId::monospace(11.0);
         p.text(
