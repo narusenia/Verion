@@ -3,7 +3,7 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 import numpy as np
 
-from . import compat, native
+from . import compat, cryptomatte, native
 from .sync import Sync
 from .viewport import View, Viewport
 
@@ -58,6 +58,9 @@ class VerionRenderEngine(bpy.types.RenderEngine):
 
     def update_render_passes(self, scene=None, renderlayer=None):
         self.register_pass(scene, renderlayer, "Combined", 4, "RGBA", "COLOR")
+        for kind, flag in cryptomatte.KINDS:
+            if getattr(renderlayer, flag, False):
+                self.register_pass(scene, renderlayer, f"Crypto{kind}00", 4, "RGBA", "COLOR")
         for name, chan, n, _key, flag in PASSES:
             if getattr(renderlayer, flag, False):
                 self.register_pass(scene, renderlayer, name, n, chan, "VALUE" if n == 1 else "VECTOR" if chan == "XYZ" else "COLOR")
@@ -145,7 +148,7 @@ class VerionRenderEngine(bpy.types.RenderEngine):
             return
         finally:
             engine.close()
-        self._write(result, layer, scene, width, height)
+        self._write(result, layer, scene, width, height, sync)
         self.update_progress(1.0)
 
     @staticmethod
@@ -167,20 +170,33 @@ class VerionRenderEngine(bpy.types.RenderEngine):
         res.layers[0].passes["Combined"].rect.foreach_set(np.ascontiguousarray(crop[::-1]).ravel())
         self.end_result(res, highlight=True)
 
-    def _write(self, result, layer, scene, width, height):
+    def _write(self, result, layer, scene, width, height, sync=None):
         x0, y0, x1, y1 = self._region(scene, width, height)
         # Blender places the border region itself: tile coordinates start at its corner.
         res = self.begin_result(0, 0, x1 - x0, y1 - y0, layer=layer.name)
         passes = res.layers[0].passes
         # Row 0 of our arrays is the top of the image; Blender's is the bottom.
         top = height - y1
-        for name, (_n, arr) in pass_arrays(result, set(passes.keys())).items():
+        crypto = {}
+        if sync is not None:
+            objects, mats, assets = sync.id_names()
+            for kind, flag in cryptomatte.KINDS:
+                if f"Crypto{kind}00" in passes:
+                    names = {"Object": objects, "Material": mats, "Asset": assets}[kind]
+                    ids = result["material_id"] if kind == "Material" else result["object_id"]
+                    crypto[f"Crypto{kind}00"] = (4, cryptomatte.layer_pass(ids, names), kind, names)
+        arrays = pass_arrays(result, set(passes.keys()))
+        arrays.update({k: v[:2] for k, v in crypto.items()})
+        for name, (_n, arr) in arrays.items():
             crop = arr[top : top + (y1 - y0), x0:x1]
             passes[name].rect.foreach_set(np.ascontiguousarray(crop[::-1], dtype=np.float32).ravel())
         self.end_result(res)
         # The stamp fields reach the saved image (EXR header) only when added to the finished result.
         final = self.get_result()
-        for key, value in stamp_fields(scene.verion, result["info"]).items():
+        fields = stamp_fields(scene.verion, result["info"])
+        for _name, (_n, _a, kind, names) in crypto.items():
+            fields.update(cryptomatte.metadata(layer.name, kind, names))
+        for key, value in fields.items():
             compat.stamp_field(final, scene, key, value)
 
 

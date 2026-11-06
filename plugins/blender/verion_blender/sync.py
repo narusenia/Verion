@@ -150,6 +150,25 @@ class Sync:
 
     # -- viewport edits ---------------------------------------------------------------------------
 
+    def id_names(self):
+        """Names for the id AOVs: (objects, materials, assets), indexed by `id - 1`."""
+        n = max([i for recs in self.instances.values() for i, *_ in recs] + [r[2][2] for r in self.lights.values() if r[0] == "area"] + [-1]) + 1
+        objects, assets = [""] * n, [""] * n
+        for recs in self.instances.values():
+            for idx, _mesh, _slot, ob in recs:
+                objects[idx] = ob.original.name
+                top = ob.original
+                while top.parent is not None:
+                    top = top.parent
+                assets[idx] = top.name
+        for key, rec in self.lights.items():
+            if rec[0] == "area":
+                objects[rec[2][2]] = assets[rec[2][2]] = key[0].split(":")[-1]
+        mats = [""] * (len(self.materials.index))
+        for k, i in self.materials.index.items():
+            mats[i] = k or "None"
+        return objects, mats, assets
+
     def keys(self, depsgraph):
         return {self.instance_key(i) for i in depsgraph.object_instances if i.object.type in GEOMETRY | {"LIGHT"}}
 

@@ -90,3 +90,29 @@ class FinalTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])
+
+
+class CryptomatteTests(unittest.TestCase):
+    def test_hash_matches_the_reference_vectors(self):
+        from verion_blender import cryptomatte as c
+
+        self.assertEqual(c.murmur3_32(b"test"), 0xBA6BD213)
+        self.assertEqual(c.murmur3_32(b"Hello, world!", 0x9747B28C), 0x24884CBA)
+        import struct
+
+        bits = struct.unpack("<I", struct.pack("<f", c.hash_float("ball")))[0]
+        self.assertNotIn((bits >> 23) & 255, (0, 255))  # a finite, normal float
+
+    def test_ids_and_manifest_reach_the_exr(self):
+        from verion_blender import cryptomatte as c
+
+        scene()
+        sc = bpy.context.scene
+        sc.view_layers[0].use_pass_cryptomatte_object = True
+        sc.view_layers[0].use_pass_cryptomatte_material = True
+        common.render("VERION", os.path.join(TMP, "crypto.exr"), 64, 48, 4)
+        h = exr_header(os.path.join(TMP, "crypto.exr"))
+        self.assertIn(b"MurmurHash3_32", h)
+        self.assertIn(b"uint32_to_float32", h)
+        self.assertIn(b'"ball":"%08x"' % c._bits("ball"), h)
+        self.assertIn(b"CryptoObject00", h)
