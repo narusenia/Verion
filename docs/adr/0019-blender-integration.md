@@ -19,4 +19,4 @@ M6 で Blender 連携を作る（REQ-DCC-001 / 002 / 003）。決めることは
 ## 結果
 
 - `verion-py` は Scene IR の構築、描画、結果の取り出しだけを持つ。ロジックは Rust のコアに置き、Python のアドオンは Blender のデータの読み取りと表示だけにする（DCC を増やす M9 で薄いまま使い回すため）
-- Blender の本体は開発機に入っていない（`~/Applications/Blender/stable/` は空）。M6 の最初に利用者が用意する
+- 開発機の Blender は `~/Applications/Blender/stable/` の 4.5.15 LTS（Python 3.11.15、numpy 1.26.4）と 5.2.3 LTS（Python 3.13.13、numpy 2.3.4）。numpy の主な版が違うので、`numpy` クレートが両方で動くことを `verion-py` の最初に確かめる

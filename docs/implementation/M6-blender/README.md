@@ -7,7 +7,7 @@
 
 | # | 項目 | REQ | 状態 |
 |---|------|-----|------|
-| 1 | Blender の本体を用意する（4.5 LTS と 5.x。`blender -b` で Python を実行できること） | — | 未着手（利用者が用意する） |
+| 1 | Blender の本体を用意する（4.5 LTS と 5.x。`blender -b` で Python を実行できること） | — | 済（`~/Applications/Blender/stable/` に 4.5.15 LTS と 5.2.3 LTS。Python は 3.11.15 と 3.13.13、numpy は 1.26.4 と 2.3.4） |
 | 2 | `verion-py`（PyO3、abi3）: Scene IR の構築 API（メッシュ・Instance・材質・ライト・カメラを numpy で受ける）、Renderer と Accumulation、結果を numpy で返す。`maturin` でビルド。Blender 抜きの Python スクリプトで glTF と同じ画像になる | REQ-DCC-001 | 未着手 |
 | 3 | アドオンの骨格 `plugins/blender/`: `RenderEngine` の登録、プロパティ（spp・モード・ReSTIR・Adaptive・デノイズ）、拡張の読み込みと版の確認。4.5 LTS と 5.x の API 差は薄い層に閉じる | REQ-DCC-001 | 未着手 |
 | 4 | シーン同期（Final）: depsgraph からメッシュ（三角形化・法線・UV）、Instance（Transform・材質の割り当て）、カメラ（センサーフィット・シフト・被写界深度）、ライト（Point / Spot / Sun / Area）、ワールド（色・HDRI）。同じシーンを glTF 経由の `render-cli` と比べて一致する | REQ-DCC-001 / REQ-CORE-001 | 未着手 |
@@ -30,11 +30,11 @@
 - アダプタは Blender のデータの読み取りと表示だけを持ち、ロジックは Rust に置く。Scene IR を直接作る（glTF を経由しない。経由する場合は検証用の比較だけ）
 - 画像は最初は CPU のバッファで渡す。GPU テクスチャの共有は First Clean Preview の計測で足りないと分かってから
 - OIDN は CPU 版だけを同梱し、GPU 版は利用者が足す（ADR-0018）
+- 開発機の Blender は 4.5.15 LTS（Python 3.11、numpy 1.26）と 5.2.3 LTS（Python 3.13、numpy 2.3）。numpy の主な版が違うので、`numpy` クレートは両方の ABI で動くことを項目 2 で確かめる
 - 新しい依存は PyO3・maturin・`numpy` クレートまで（利用者が許可）。それ以外は追加のたびに確認する
 
 ## 要確認（利用者）
 
-- 項目 1: Blender 本体の用意（`~/Applications/Blender/stable/` は空だった）。4.5 LTS と 5.x の両方
 - 項目 13: 環境光だけの Toon の段の方針（案が複数あるため、M6 の最初に決める）
 - Octane との比較は、この M6 の後に Blender 用の無料版で行う（M5 の持ち越し。REQ-ACC-002）
 
