@@ -16,7 +16,7 @@
 4. `mise run bench` が Metal の基準に対して通ること（`bench.sh` の分岐を足したため）
 
 ## 要確認（利用者）
-- Octane の利用環境（項目 14）
+- Octane の利用環境（項目 14）: 保留。まだ課金しておらず、利用者が C4D / Blender + Octane の環境を後で用意する
 - Verion のライセンス判断の時期（ADR-0004）
 - OIDN の DLL の配布方法
 

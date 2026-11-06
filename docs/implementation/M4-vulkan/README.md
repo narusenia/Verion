@@ -18,7 +18,7 @@
 | 11 | GPU 計測（timestamp query）とメモリのメトリクスを Metal と同じ metrics 項目で出す | REQ-GPU-004 / REQ-PERF-006 | 済（`accumulate` ごとの timestamp。Wavefront の段別は Dispatch ごとの timestamp 対。メモリは `VK_EXT_memory_budget`、なければ自前の集計。`--metrics` の項目は Metal と同じで `backend` を足した） |
 | 12 | RTX 3080 のベンチ基準（`benchmarks/baseline/`）と退行ゲート | REQ-PERF-001 / 002 | 済（`benchmarks/baseline/nvidia-geforce-rtx-3080-ac.json`: cube 0.0506 s、scale 0.0923 s。M5 の同条件は 0.335 s と 0.402 s。`mise run bench` が 10% の退行ゲート） |
 | 13 | Windows での OIDN（DLL の探索。CUDA デバイスが使えるなら比較） | REQ-ACC-001 | 済（OIDN 2.5.1 の Windows zip で確認。Cornell 16 spp のデノイズは CPU 0.34 s、CUDA 0.15 s、画質は同じ。`--denoise-device cpu\|cuda`。GPU デバイスにはホスト画像を直接渡せないので OIDN バッファ経由。DLL は `VERION_OIDN_LIB` で指定する） |
-| 14 | Octane 比較の基準値: 比較条件（ハードウェア・解像度・シーン・画質の合わせ方・デノイズ）を決めて記録する | REQ-PERF-004 | 条件は記録済（下の「Octane 比較の条件」）。Octane の利用環境の確認待ち |
+| 14 | Octane 比較の基準値: 比較条件（ハードウェア・解像度・シーン・画質の合わせ方・デノイズ）を決めて記録する | REQ-PERF-004 | 条件は記録済（下の「Octane 比較の条件」）。Octane の環境は利用者が後で用意する（保留） |
 | 15 | CI に Windows のビルドとテスト（GPU 不要の範囲）を足す | REQ-INFRA-002 | 済（M4 以前から `ci.yml` が `windows-latest` で `mise run check` を通している。Vulkan の依存を足したら同じ CI で確かめる） |
 
 ## 決めてあること
@@ -55,7 +55,7 @@
 
 ## 要確認（利用者）
 
-- Octane の利用環境（ライセンスと、比較用シーンを Octane 側で組む手段）。上の条件で比較を始める前に確認する
+- Octane の利用環境（保留）: まだ課金していない。利用者が C4D / Blender + Octane の環境を用意してから、上の条件で比較を始める
 - Verion のライセンス判断（ADR-0004 は「M4 前後、NVIDIA SDK 等の条件確認後」）。M4 では NVIDIA SDK を使っていない（OIDN の CUDA モジュールは OIDN の DLL に含まれる）ので、判断の時期だけが残る
 - OIDN の DLL の配布方法（Windows 向けに同梱するか、利用者に置いてもらうか）
 - Mac での確認: Metal の置き換え（`verion-gpu` への切り替え）が CI の macOS で通ること、Metal の参照画像セットの作成（項目 9）
