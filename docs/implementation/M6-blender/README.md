@@ -8,17 +8,17 @@
 | # | 項目 | REQ | 状態 |
 |---|------|-----|------|
 | 1 | Blender の本体を用意する（4.5 LTS と 5.x。`blender -b` で Python を実行できること） | — | 済（`~/Applications/Blender/stable/` に 4.5.15 LTS と 5.2.3 LTS。Python は 3.11.15 と 3.13.13、numpy は 1.26.4 と 2.3.4） |
-| 2 | `verion-py`（PyO3、abi3）: Scene IR の構築 API（メッシュ・Instance・材質・ライト・カメラを numpy で受ける）、Renderer と Accumulation、結果を numpy で返す。`maturin` でビルド。Blender 抜きの Python スクリプトで glTF と同じ画像になる | REQ-DCC-001 | 未着手 |
-| 3 | アドオンの骨格 `plugins/blender/`: `RenderEngine` の登録、プロパティ（spp・モード・ReSTIR・Adaptive・デノイズ）、拡張の読み込みと版の確認。4.5 LTS と 5.x の API 差は薄い層に閉じる | REQ-DCC-001 | 未着手 |
-| 4 | シーン同期（Final）: depsgraph からメッシュ（三角形化・法線・UV）、Instance（Transform・材質の割り当て）、カメラ（センサーフィット・シフト・被写界深度）、ライト（Point / Spot / Sun / Area）、ワールド（色・HDRI。手続き型の Sky Texture は HDRI へベイク）。ライトの W は Cycles の換算に合わせ、ライト種別ごとに Cycles との明るさを比べて記録する。同じシーンを glTF 経由の `render-cli` と比べて一致する | REQ-DCC-001 / REQ-CORE-001 | 未着手 |
-| 5 | 材質変換: Principled BSDF を Base BSDF に変換（色・金属・粗さ・透過・IOR・発光・コート・シーン・アルファ・ノーマルマップ・画像）。非対応ノードは警告して代替値にし、プロシージャルはベイク | REQ-DCC-003 | 未着手 |
-| 6 | Final 出力: Render Result に Combined と AOV（Lighting AOV・Depth・Normal・Albedo・SampleCount）。進捗とキャンセル、OIDN のデノイズ、EXR のメタデータ（非物理の印） | REQ-DCC-001 / REQ-ACC-001 | 未着手 |
-| 7 | ビューポートレンダ: `view_update` を `Changes` に変換して `update` を呼び、`view_draw` で表示する。Interactive モード（ReSTIR）を使う。描画中も UI を止めない（GIL を放して別スレッド）。First Clean Preview を計測して記録する | REQ-DCC-002 / REQ-VIEW-003 | 未着手 |
+| 2 | `verion-py`（PyO3、abi3）: Scene IR の構築 API（メッシュ・Instance・材質・ライト・カメラを numpy で受ける）、Renderer と Accumulation、結果を numpy で返す。`maturin` でビルド。Blender 抜きの Python スクリプトで glTF と同じ画像になる | REQ-DCC-001 | 済（`crates/verion-py`。abi3 の 1 本が Blender 4.5（numpy 1.26）と 5.2（numpy 2.3）と素の Python で動く。`scripts/py_test.sh`。Scene のビルダーは glTF インポータと同じ画像） |
+| 3 | アドオンの骨格 `plugins/blender/`: `RenderEngine` の登録、プロパティ（spp・モード・ReSTIR・Adaptive・デノイズ）、拡張の読み込みと版の確認。4.5 LTS と 5.x の API 差は薄い層に閉じる | REQ-DCC-001 | 済（`plugins/blender/verion_blender`。RenderEngine、プロパティ、版の確認 `native.py`、API 差は `compat.py`） |
+| 4 | シーン同期（Final）: depsgraph からメッシュ（三角形化・法線・UV）、Instance（Transform・材質の割り当て）、カメラ（センサーフィット・シフト・被写界深度）、ライト（Point / Spot / Sun / Area）、ワールド（色・HDRI。手続き型の Sky Texture は HDRI へベイク）。ライトの W は Cycles の換算に合わせ、ライト種別ごとに Cycles との明るさを比べて記録する。同じシーンを glTF 経由の `render-cli` と比べて一致する | REQ-DCC-001 / REQ-CORE-001 | 一部済（メッシュ・Instance・カメラ（センサーフィット・シフト・DoF）・ライト 4 種・ワールド（色・HDRI・手続き型は Cycles でベイク）。ライトの換算は `light-units.md`。glTF 経由との画像比較は項目 14） |
+| 5 | 材質変換: Principled BSDF を Base BSDF に変換（色・金属・粗さ・透過・IOR・発光・コート・シーン・アルファ・ノーマルマップ・画像）。非対応ノードは警告して代替値にし、プロシージャルはベイク | REQ-DCC-003 | 一部済（Principled・Diffuse・Glossy・Glass・Emission・Mix、画像・法線マップ・UDIM 対応。非対応は警告。手続き型の材質ベイクは未着手） |
+| 6 | Final 出力: Render Result に Combined と AOV（Lighting AOV・Depth・Normal・Albedo・SampleCount）。進捗とキャンセル、OIDN のデノイズ、EXR のメタデータ（非物理の印） | REQ-DCC-001 / REQ-ACC-001 | 済（Combined と AOV、進捗とキャンセル、OIDN、EXR の非物理の印、レンダ範囲） |
+| 7 | ビューポートレンダ: `view_update` を `Changes` に変換して `update` を呼び、`view_draw` で表示する。Interactive モード（ReSTIR）を使う。描画中も UI を止めない（GIL を放して別スレッド）。First Clean Preview を計測して記録する | REQ-DCC-002 / REQ-VIEW-003 | 実装済・実機確認待ち（`Viewport` のロジックはヘッドレスでテスト済み。3D ビューへの描画 `view_draw` は Blender の GUI での確認が必要。計測は `first-clean-preview.md`） |
 | 8 | Stylization ノード: Blender のノードで Stylization レイヤー（ToonRamp・ShadowPalette など）を編集し、glTF 拡張と同じスキーマの IR に変換する | REQ-DCC-001 / REQ-STY | 未着手 |
 | 9 | IES とライトリンク: `.ies` の配光を Spot / Point に使う。ライトごとの対象 Instance の絞り込み（TLAS のマスク）。NEE と MIS を保つ | REQ-CORE-004 / REQ-DCC-001 | 未着手 |
 | 10 | Cryptomatte: Object・Material・Asset の ID（規格どおりのハッシュ）を Render Result と EXR に出す | REQ-DCC-001 | 未着手 |
 | 11 | Shadow Catcher とアルファ合成 | REQ-DCC-001 | 未着手 |
-| 12 | UDIM・タイル化したテクスチャ | REQ-IO-004 | 未着手 |
+| 12 | UDIM・タイル化したテクスチャ | REQ-IO-004 | 済（UDIM を 1 枚のアトラスに変換。`test_udim.py`） |
 | 13 | 環境光だけで照明したときの Toon の段: HDRI から支配的な光の方向を求めて仮想の主光源にする（ADR-0020）。上書き（方向・強さ・無効化）、影の光線 1 本、一様な空では出さない。太陽のない HDRI で段が出る検証 | REQ-STY | 方針決定済み（ADR-0020）、実装は未着手 |
 | 14 | DCC 間の一貫性: 同じシーンを Blender 経由と glTF 経由で描いて閾値内で一致する。Cycles との比較は参考値として記録する | REQ-QA | 未着手 |
 | 15 | 配布: アドオン zip（macOS Apple silicon・Windows x64）。ネイティブライブラリと OIDN の CPU 版・ライセンス文書を同梱（ADR-0018）。GPU 版 OIDN を足す導線（GUI） | REQ-INFRA-003 | 未着手 |
