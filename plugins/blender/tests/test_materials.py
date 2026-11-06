@@ -117,6 +117,41 @@ class MaterialTests(unittest.TestCase):
         r = self.check("cube with uv texture", cube)
         self.assertGreater(r["VERION"].std(), 0.02)
 
+    def test_image_alpha_cuts_out_a_cube(self):
+        import bmesh
+
+        def cube():
+            me = bpy.data.meshes.new("cube")
+            bm = bmesh.new()
+            bm.loops.layers.uv.verify()
+            bmesh.ops.create_cube(bm, size=1.6, calc_uvs=True)
+            bm.to_mesh(me)
+            bm.free()
+            ob = bpy.data.objects.new("cube", me)
+            ob.location = (0, 0, 0.9)
+            ob.rotation_euler = (0.3, 0.2, 0.6)
+            bpy.context.scene.collection.objects.link(ob)
+            m = bpy.data.materials.new("m")
+            m.use_nodes = True
+            me.materials.append(m)
+            nt = m.node_tree
+            tex = nt.nodes.new("ShaderNodeTexImage")
+            img = bpy.data.images.new("leaf", 32, 32, alpha=True)
+            yy, xx = np.mgrid[:32, :32]
+            px = np.ones((32, 32, 4), np.float32)
+            px[..., :3] = np.array([0.2, 0.7, 0.2])
+            px[..., 3] = ((xx // 8 + yy // 8) % 2).astype(np.float32)  # opaque squares and holes
+            img.pixels.foreach_set(px.ravel())
+            tex.image = img
+            tex.interpolation = "Closest"
+            nt.links.new(tex.outputs["Color"], nt.nodes["Principled BSDF"].inputs["Base Color"])
+            nt.links.new(tex.outputs["Alpha"], nt.nodes["Principled BSDF"].inputs["Alpha"])
+            nt.nodes["Principled BSDF"].inputs["Roughness"].default_value = 1.0
+
+        r = self.check("cube with an alpha cutout", cube)
+        # Holes show the floor and the far faces: the cutout makes the image differ from the opaque cube.
+        self.assertGreater(r["VERION"].std(), 0.02)
+
     def test_dispersion_is_a_material_property(self):
         from verion_blender import materials
 

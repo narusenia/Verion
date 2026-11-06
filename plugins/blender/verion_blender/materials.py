@@ -21,7 +21,7 @@ CLEAR = dict(base_color=[1.0, 1.0, 1.0], metallic=0.0, roughness=1.0, opacity=0.
 def blend_clear(solid, weight):
     """`solid` with `weight` of its rays passing straight through, as a Mix with a Transparent BSDF.
 
-    shortcut: a cutout from an alpha texture is not supported (the alpha of an image is not read)."""
+    An opacity texture in `solid` stays: its alpha multiplies the passing weight too."""
     out = dict(solid)
     out["opacity"] = out.get("opacity", 1.0) * (1.0 - weight)
     return out
@@ -160,7 +160,10 @@ class Converter:
         nt = self.texture_of(i["Normal Map"], material)
         if nt is not None:
             p.update(normal_texture=nt, normal_scale=v("Normal Scale"))
-        if v("Opacity") < 1.0:
+        alpha_tex = self.alpha_of(i["Opacity"], material)
+        if alpha_tex is not None:
+            p["opacity_texture"] = alpha_tex
+        elif v("Opacity") < 1.0:
             p = blend_clear(p, 1.0 - v("Opacity"))
         return p
 
@@ -220,8 +223,7 @@ class Converter:
         if v("Subsurface Weight", "Subsurface") > 0:
             self.warn(f"Material '{material.name}': subsurface scattering is not supported")
         alpha = get("Alpha")
-        if alpha is not None and alpha.is_linked:
-            self.warn(f"Material '{material.name}': an alpha texture (cutout) is not supported; rendering opaque")
+        alpha_tex = self.alpha_of(alpha, material) if alpha is not None else None
         p["base_color"] = self.color(i["Base Color"], material, True)
         tex = self.texture_of(i["Base Color"], material)
         if tex is not None:
@@ -238,7 +240,11 @@ class Converter:
         p.update(self.metallic_roughness(i, p, material))
         p.update(self.baked_params(node, material, p))
         p.update(self.normal_params(node, material))
-        if alpha is not None and not alpha.is_linked and alpha.default_value < 1.0:
+        if alpha_tex is not None:
+            p["opacity_texture"] = alpha_tex
+        elif alpha is not None and alpha.is_linked:
+            self.warn(f"Material '{material.name}': only an image texture's Alpha can drive Alpha; rendering opaque")
+        elif alpha is not None and alpha.default_value < 1.0:
             p = blend_clear(p, 1.0 - float(alpha.default_value))
         return p
 
@@ -321,6 +327,28 @@ class Converter:
             if px is None:
                 return None
             self.images[key] = self.scene.add_image(px)
+        return self.images[key]
+
+    def alpha_of(self, socket, material):
+        """The Alpha output of an image texture linked to `socket` as a gray image (alpha in every channel), or
+        None. Images without an alpha channel have nothing to cut out, so they give None too."""
+        if not socket.is_linked:
+            return None
+        link = socket.links[0]
+        n = link.from_node
+        if n.bl_idname not in IMAGE_NODES or n.image is None or link.from_socket.name != "Alpha":
+            return None
+        if n.image.source == "TILED":
+            self.warn(f"Material '{material.name}': the alpha of a UDIM image is not supported; rendering opaque")
+            return None
+        if n.image.alpha_mode == "NONE" or n.image.depth not in {32, 64, 128}:
+            return None
+        key = (n.image.name_full, "alpha")
+        if key not in self.images:
+            px = images.pixels(n.image)
+            if px is None:
+                return None
+            self.images[key] = self.scene.add_image(np.repeat(px[..., 3:4], 3, axis=2))
         return self.images[key]
 
     def texture_of(self, socket, material, quiet=False):

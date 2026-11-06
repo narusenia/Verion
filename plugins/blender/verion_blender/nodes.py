@@ -174,7 +174,8 @@ class VerionNodeSurface(_Node, bpy.types.Node):
 
 
 class VerionNodeImage(_Node, bpy.types.Node):
-    """A texture. Its color feeds a color socket; a scalar socket (Roughness, Metallic) uses the red channel."""
+    """A texture. Its color feeds a color socket; a scalar socket (Roughness, Metallic) uses the red channel;
+    its Alpha feeds Opacity (a cutout, for leaves or fences)."""
 
     bl_idname = IMAGE
     bl_label = "Verion Image"
@@ -182,6 +183,7 @@ class VerionNodeImage(_Node, bpy.types.Node):
 
     def init(self, context):
         self.outputs.new("VerionSocketColor", "Color")
+        self.outputs.new("VerionSocketFactor", "Alpha")
 
     def draw_buttons(self, context, layout):
         layout.template_ID(self, "image", open="image.open")

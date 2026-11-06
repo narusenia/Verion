@@ -45,6 +45,21 @@ class NodeTests(unittest.TestCase):
             mat.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value = 1.0
         return common.render("VERION", os.path.join(TMP, "nodes.exr"), 96, 72, 24)
 
+    def test_image_alpha_feeds_opacity(self):
+        from verion_blender import materials, native
+
+        lit_scene()
+        ob, mat = sphere()
+        tree = verion_tree(mat)
+        surface = next(n for n in tree.nodes if n.bl_idname == "VerionNodeSurface")
+        node = tree.nodes.new("VerionNodeImage")
+        node.image = bpy.data.images.new("leaf", 4, 4, alpha=True)
+        conv = materials.Converter(native.load().Scene(), lambda m: None)
+        self.assertNotIn("opacity_texture", conv.params(mat))
+        tree.links.new(node.outputs["Alpha"], surface.inputs["Opacity"])
+        self.assertIn("opacity_texture", conv.params(mat))
+        self.assertNotIn("opacity", conv.params(mat), "the texture is the opacity")
+
     def test_tree_matches_the_principled_material(self):
         ref = self.render()
         got = self.render({"Base Color": (*LOOK["base_color"], 1.0), "Roughness": LOOK["roughness"], "Metallic": LOOK["metallic"]})

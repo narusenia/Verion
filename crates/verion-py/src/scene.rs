@@ -146,6 +146,7 @@ fn material_from(
             "metallic_roughness_texture" => b.metallic_roughness_texture = opt_image(s, &v)?,
             "emission_texture" => b.emission_texture = opt_image(s, &v)?,
             "normal_texture" => b.normal_texture = opt_image(s, &v)?,
+            "opacity_texture" => b.opacity_texture = opt_image(s, &v)?,
             "stylization" => json = Some(v.extract()?),
             "stylization_images" => images = v.extract()?,
             _ => return Err(value_err(format!("unknown material property {key}"))),
@@ -367,7 +368,7 @@ impl Scene {
 
     /// Keywords: base_color, metallic, roughness, transmission, ior, clearcoat, clearcoat_roughness,
     /// sheen_color, sheen_roughness, dispersion, opacity, emission, normal_scale, the `*_texture` image
-    /// indices (base_color, metallic_roughness, emission, normal), `stylization` (the JSON of a
+    /// indices (base_color, metallic_roughness, emission, normal, opacity; the opacity image's red channel), `stylization` (the JSON of a
     /// `VERION_materials_stylization` object) and `stylization_images` (image indices for the
     /// textures that JSON names). Returns the material index.
     #[pyo3(signature = (**kw))]
