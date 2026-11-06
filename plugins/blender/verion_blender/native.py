@@ -63,7 +63,8 @@ def blender_oidn():
     root = os.path.dirname(bpy.app.binary_path)
     for p in (
         os.path.join(root, "..", "Resources", "lib", "libOpenImageDenoise.dylib"),  # macOS
-        os.path.join(root, "OpenImageDenoise.dll"),                                  # Windows
+        os.path.join(root, "blender.shared", "OpenImageDenoise.dll"),                # Windows (4.5+)
+        os.path.join(root, "OpenImageDenoise.dll"),                                  # Windows (older)
         os.path.join(root, "lib", "libOpenImageDenoise.so.2"),                       # Linux
         os.path.join(root, "lib", "libOpenImageDenoise.so"),
     ):
