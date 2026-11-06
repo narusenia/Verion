@@ -2625,6 +2625,7 @@ dependencies = [
  "verion-denoise",
  "verion-gpu",
  "verion-gpu-metal",
+ "verion-gpu-vulkan",
  "verion-render-io",
  "verion-scene",
  "verion-stylization",

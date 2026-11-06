@@ -22,6 +22,9 @@ egui_material_icons = "0.9.0"
 [target.'cfg(target_os = "macos")'.dependencies]
 verion-gpu-metal = { version = "0.0.0", path = "../verion-gpu-metal" }
 
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+verion-gpu-vulkan = { version = "0.0.0", path = "../verion-gpu-vulkan" }
+
 [lints]
 workspace = true
 

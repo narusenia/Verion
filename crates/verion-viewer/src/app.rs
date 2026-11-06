@@ -7,8 +7,11 @@ use eframe::egui::{self, Align, Align2, Color32, Key, Layout, PointerButton, Ric
 use egui_material_icons::icons::*;
 use verion_gpu::{Accumulation as _, Adaptive, Aovs, Integrator, LightingAovs, RayTracingBackend};
 
-/// The GPU backend of this platform (REQ-GPU-003).
+/// The GPU backend of this platform (REQ-GPU-003): each platform builds exactly one.
+#[cfg(target_os = "macos")]
 type Backend = verion_gpu_metal::Renderer;
+#[cfg(not(target_os = "macos"))]
+type Backend = verion_gpu_vulkan::Renderer;
 type Accumulation = <Backend as RayTracingBackend>::Accumulation;
 use verion_scene::{Camera, Light, Material, OutputTransform, Scene};
 use verion_stylization::{ColorGrade, Frame, PostFrame};
