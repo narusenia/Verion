@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn megakernel_binds_the_scene_first_and_buffers_after() {
         let b = of("pathtrace");
-        assert_eq!(b.len(), 19);
+        assert_eq!(b.len(), 20);
         assert_eq!(b[0], (0, Kind::AccelerationStructure));
         assert!(b[1..].iter().all(|x| x.1 == Kind::StorageBuffer));
     }
@@ -110,9 +110,9 @@ mod tests {
     #[test]
     fn unused_globals_are_dropped_from_the_layout() {
         let nums: Vec<u32> = of("wf_args").iter().map(|b| b.0).collect();
-        assert_eq!(nums, [6, 23, 24]);
+        assert_eq!(nums, [6, 24, 25]);
         let nums: Vec<u32> = of("wf_extend").iter().map(|b| b.0).collect();
-        assert_eq!(nums, [0, 6, 19, 20, 21, 23]);
+        assert_eq!(nums, [0, 6, 20, 21, 22, 24]);
     }
 
     #[test]
