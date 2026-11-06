@@ -13,41 +13,41 @@ struct KernelContext_0
 };
 
 
-#line 84 "shaders/include/pt_core.slang"
+#line 86 "shaders/include/pt_core.slang"
 float pf_0(uint i_0, KernelContext_0 thread* kernelContext_0)
 {
 
-#line 84
+#line 86
     return (as_type<float>((kernelContext_0->params_0[i_0])));
 }
 
 
-#line 1483
+#line 1511
 bool pixelActive_0(uint p_0, KernelContext_0 thread* kernelContext_1)
 {
     uint _S1 = 3U * p_0;
 
-#line 1485
+#line 1513
     float device* _S2 = kernelContext_1->pixelStats_0+_S1;
 
-#line 1485
+#line 1513
     float n_0 = *_S2;
     if((*_S2) < float(kernelContext_1->params_0[int(34)]))
     {
 
-#line 1487
+#line 1515
         return true;
     }
 
-#line 1488
+#line 1516
     float mean_0 = *(kernelContext_1->pixelStats_0+(_S1 + 1U)) / n_0;
 
     float _S3 = sqrt(max(*(kernelContext_1->pixelStats_0+(_S1 + 2U)) / n_0 - mean_0 * mean_0, 0.0f) * n_0 / (n_0 - 1.0f) / n_0);
 
-#line 1490
+#line 1518
     float _S4 = pf_0(33U, kernelContext_1);
 
-#line 1490
+#line 1518
     return _S3 > (_S4 * max(mean_0, 0.05000000074505806f));
 }
 

@@ -18,6 +18,8 @@ StructuredBuffer<float> materials;  // 23 words: base color rgb, emission rgb, m
                                     // clearcoat, clearcoat roughness, sheen roughness, sheen color rgb, dispersion
 StructuredBuffer<uint> lights;      // 16 words: kind (0 point, 1 directional, 2 spot), color rgb, intensity, position or travel direction xyz,
                                     // spot axis xyz, spot falloff scale, spot falloff offset, 3 pad (floats as bits)
+                                    // (14 light-link mask, 15 IES profile offset + 1 or 0). After the light table: one link mask per
+                                    // instance, then the IES profiles (see `iesFactor`).
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
                                     // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle, 28 lighting AOV enable, 29 multiple-scattering compensation enable,
                                     // 30 / 31 wavefront depth and path count, 32 adaptive sampling enable, 33 adaptive threshold
@@ -177,6 +179,27 @@ float3 sampleVndf(float3 wo, float alpha, float u1, float u2)
 
 
 float lum(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
+
+// IES profile at word offset `po` of `lights`: nine frame floats (rows x, y, z of the light's world
+// frame), then 361 horizontal rows of 181 vertical samples at one degree. `d` points from the light.
+float iesFactor(uint po, float3 d)
+{
+    float3 l = float3(dot(d, float3(asfloat(lights[po]), asfloat(lights[po + 1]), asfloat(lights[po + 2]))),
+                      dot(d, float3(asfloat(lights[po + 3]), asfloat(lights[po + 4]), asfloat(lights[po + 5]))),
+                      dot(d, float3(asfloat(lights[po + 6]), asfloat(lights[po + 7]), asfloat(lights[po + 8]))));
+    float th = degrees(acos(clamp(-l.z, -1.0, 1.0)));
+    float ph = degrees(atan2(l.y, l.x));
+    if (ph < 0.0)
+        ph += 360.0;
+    uint i = min(uint(th), 179u);
+    uint j = min(uint(ph), 359u);
+    float ft = th - float(i);
+    float fp = ph - float(j);
+    uint t = po + 9;
+    float a0 = lerp(asfloat(lights[t + j * 181 + i]), asfloat(lights[t + j * 181 + i + 1]), ft);
+    float a1 = lerp(asfloat(lights[t + (j + 1) * 181 + i]), asfloat(lights[t + (j + 1) * 181 + i + 1]), ft);
+    return lerp(a0, a1, fp);
+}
 
 // Adds one light's potential diffuse `u` and specular `s` (unshadowed, without cos), its direction `wi`,
 // whether it reaches the point (`lit`) and the diffuse response `r` to its slot.
@@ -1168,6 +1191,9 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
             bool virt = lights[o] == 3;
             if (virt && !(lightingOn && depth == 0))
                 continue;
+            // Light linking: the light shines on this instance only when their masks share a bit.
+            if ((lights[o + 14] & lights[lightCount * 16 + hq.inst]) == 0)
+                continue;
             float3 wi;
             float dist;
             float3 li_;
@@ -1184,6 +1210,8 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
                 dist = sqrt(d2);
                 wi = toL / dist;
                 li_ = col / d2;
+                if (lights[o + 15] != 0)
+                    li_ *= iesFactor(lights[o + 15] - 1, -wi);
                 if (lights[o] == 2)
                 {
                     float3 axis = float3(asfloat(lights[o + 8]), asfloat(lights[o + 9]), asfloat(lights[o + 10]));

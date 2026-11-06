@@ -425,6 +425,47 @@ impl Scene {
         s.set_instance(id, inst).map_err(value_err)
     }
 
+    /// Light linking: the instance receives the light groups in `mask` (a light shines on an instance
+    /// when their masks share a bit; all ones is the default).
+    fn set_instance_light_mask(&self, index: usize, mask: u32) -> PyResult<()> {
+        let mut s = self.lock();
+        let id = s
+            .instance_id(index)
+            .ok_or_else(|| PyIndexError::new_err(format!("no instance {index}")))?;
+        s.set_instance_light_mask(id, mask);
+        Ok(())
+    }
+
+    /// Light linking and an IES profile for light `index`. `link_mask` is the light's group bits;
+    /// `ies` is the text of an LM-63 file (point and spot lights) with `frame`, the light's world
+    /// frame as three rows x, y, z (vertical angle 0 along -z, horizontal angle 0 along +x). The
+    /// light's intensity is multiplied by the file's candela value times `ies_scale`.
+    #[pyo3(signature = (index, link_mask = u32::MAX, ies = None, frame = None, ies_scale = 1.0))]
+    fn set_light_extra(
+        &self,
+        index: usize,
+        link_mask: u32,
+        ies: Option<&str>,
+        frame: Option<[[f32; 3]; 3]>,
+        ies_scale: f32,
+    ) -> PyResult<()> {
+        let mut s = self.lock();
+        let id = s
+            .light_id(index)
+            .ok_or_else(|| PyIndexError::new_err(format!("no light {index}")))?;
+        let ies = match ies {
+            Some(text) => {
+                let profile = verion_scene::IesProfile::parse(text).map_err(value_err)?;
+                let profile = profile.clone().scaled(profile.peak() * ies_scale);
+                let frame = frame.unwrap_or([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+                Some((std::sync::Arc::new(profile), frame))
+            }
+            None => None,
+        };
+        s.set_light_extra(id, verion_scene::LightExtra { link_mask, ies });
+        Ok(())
+    }
+
     /// kind: point, directional, spot, environment (a uniform sky) or environment_map (`image`).
     /// `intensity` is glTF's: candela for point and spot, lux for directional, a multiplier for
     /// the environments. Cone angles are half-angles in radians.

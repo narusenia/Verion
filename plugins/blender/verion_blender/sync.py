@@ -7,7 +7,7 @@ reports `False` when the scene's structure changed, so the caller rebuilds.
 import numpy as np
 
 from . import camera as camera_mod
-from . import convert, lights, materials, stylization, world as world_mod
+from . import convert, lights, materials, stylization, units, world as world_mod
 
 GEOMETRY = {"MESH", "CURVE", "SURFACE", "FONT", "META"}
 
@@ -21,6 +21,7 @@ class Sync:
         self._warned = set()
         self.mesh_cache = {}     # mesh key -> [(IR mesh index, material slot)]
         self.instances = {}      # instance key -> [(IR instance index, IR mesh index, slot, object)]
+        self.light_obs = {}      # light key -> Blender object
         self.lights = {}         # instance key -> IR light index
         self.world_light = None
         self.world_desc = None
@@ -127,6 +128,7 @@ class Sync:
                 self.add_geometry(depsgraph, inst)
             elif ob.type == "LIGHT":
                 key = self.instance_key(inst)
+                self.light_obs[key] = ob
                 if ob.data.type == "AREA":
                     self.lights[key] = ("area", lights.area_signature(ob.data), lights.add_area(self.scene, ob, self.warn))
                 else:
@@ -134,6 +136,7 @@ class Sync:
         self.world_desc = world_mod.describe(scene.world, self.warn)
         self.world_light = world_mod.apply(self.scene, self.world_desc, self.warn, {})
         stylization.apply_world(self.scene, scene.world)
+        self.apply_light_extras()
         cam_ob = cam_ob or scene.camera
         if not with_camera:
             pass  # the viewport sets the camera from the 3D view
@@ -150,6 +153,75 @@ class Sync:
         t, fov, focus, radius, shift = camera_mod.settings(depsgraph, cam_ob, width, height, self.warn)
         self.scene.set_camera(t, fov, focus, radius, shift)
         self.camera = (cam_ob, width, height)
+
+    # -- light linking and IES ---------------------------------------------------------------------
+
+    @staticmethod
+    def receivers(collection):
+        """(included, excluded): object names a light's receiver collection names, children included."""
+        inc, exc = set(), set()
+
+        def walk(col, state):
+            for ob, co in zip(col.objects, col.collection_objects):  # the two lists run in step
+                st = co.light_linking.link_state if state is None else state
+                (inc if st == "INCLUDE" else exc).add(ob.name_full)
+            for child, ch in zip(col.children, col.collection_children):
+                walk(child, ch.light_linking.link_state)
+
+        walk(collection, None)
+        return inc, exc
+
+    def apply_light_extras(self):
+        """Light linking (receivers, up to 31 linked lights) and IES profiles of the punctual lights.
+
+        A linked light gets one group bit; an instance carries the bits of the lights that shine on
+        it. Unlinked lights use bit 31, which every instance has. Blocker collections and linked area
+        lights are not supported."""
+        UNLINKED = 0x80000000
+        masks = {}
+        bit = 0
+        for key, rec in self.lights.items():
+            ob = self.light_obs[key]
+            ll = ob.light_linking
+            if ll.blocker_collection is not None:
+                self.warn(f"Light '{ob.name}': blocker linking is not supported")
+            if ll.receiver_collection is None:
+                continue
+            if rec[0] == "area":
+                self.warn(f"Light '{ob.name}': light linking of area lights is not supported")
+                continue
+            if bit >= 31:
+                self.warn("Light linking supports 31 linked lights; the rest shine on everything")
+                continue
+            masks[key] = (1 << bit, self.receivers(ll.receiver_collection))
+            bit += 1
+        inst_mask = {}
+        for recs in self.instances.values():
+            for idx, _mesh, _slot, ob in recs:
+                m = UNLINKED
+                name = ob.original.name_full
+                for lbit, (inc, exc) in masks.values():
+                    if (name in inc) if inc else (name not in exc):
+                        m |= lbit
+                inst_mask[idx] = m
+        for idx, m in inst_mask.items():
+            self.scene.set_instance_light_mask(idx, m)
+        for key, rec in self.lights.items():
+            if rec[0] != "punctual":
+                continue
+            ob = self.light_obs[key]
+            extra = lights.ies(ob, self.warn)
+            kw = dict(link_mask=masks[key][0] if key in masks else UNLINKED)
+            if extra is not None:
+                kw["ies"], kw["frame"] = extra
+                kw["ies_scale"] = units.IES_PER_CANDELA
+            try:
+                self.scene.set_light_extra(rec[1], **kw)
+            except ValueError as e:
+                self.warn(f"Light '{ob.name}': {e}")
+                kw.pop("ies", None)
+                kw.pop("frame", None)
+                self.scene.set_light_extra(rec[1], **kw)
 
     # -- viewport edits ---------------------------------------------------------------------------
 
@@ -203,6 +275,7 @@ class Sync:
             ob = inst.object
             key = self.instance_key(inst)
             if ob.type == "LIGHT" and key in self.lights:
+                self.light_obs[key] = ob
                 rec = self.lights[key]
                 if rec[0] == "area":
                     if rec[1] != lights.area_signature(ob.data):
@@ -214,6 +287,7 @@ class Sync:
                 mat = convert.matrix(inst.matrix_world)
                 for idx, mesh, slot, _ in self.instances[key]:
                     self.scene.set_instance(idx, mesh, self.slot_material(ob, slot), mat)
+        self.apply_light_extras()
         if self.camera is not None:
             cam_ob, w, h = self.camera
             self.set_camera(depsgraph, cam_ob, w, h)

@@ -15,3 +15,7 @@ POINT_PER_WATT = 1.0 / (4.0 * math.pi)
 SPOT_PER_WATT = POINT_PER_WATT
 SUN_PER_STRENGTH = 1.0
 AREA_RADIANCE_PER_WATT = 1.0 / math.pi   # divide by the area
+
+# An IES profile scales the light's strength by its candela value times this (measured: a uniform
+# 50 cd profile makes a Cycles point light 3.53 times brighter than the same light without a profile).
+IES_PER_CANDELA = 0.0707

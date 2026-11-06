@@ -296,7 +296,7 @@ impl Renderer {
         if plan.lights {
             report.bytes_uploaded += size_of_val(&table.lights[..]);
             self.lights = upload(&self.ctx, &table.lights)?;
-            self.info.light_count = (table.lights.len() / pack::LIGHT_WORDS) as u32;
+            self.info.light_count = table.count as u32;
             self.info.sky = table.sky;
             self.info.virtual_light = table.virtual_light;
             self.info.transparent_background = table.transparent_background;

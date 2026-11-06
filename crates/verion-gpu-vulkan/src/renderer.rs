@@ -458,7 +458,7 @@ impl RayTracingBackend for Renderer {
             let table = pack::pack_lights(scene);
             report.bytes_uploaded += size(table.lights.len());
             self.lights = put(&ctx, &table.lights, STORAGE, "lights")?;
-            self.info.light_count = (table.lights.len() / pack::LIGHT_WORDS) as u32;
+            self.info.light_count = table.count as u32;
             self.info.sky = table.sky;
             self.info.virtual_light = table.virtual_light;
             self.info.transparent_background = table.transparent_background;

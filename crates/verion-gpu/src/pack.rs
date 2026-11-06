@@ -455,7 +455,11 @@ pub fn pack_materials(scene: &Scene, textures: bool) -> Result<Materials, String
 
 /// The next-event table of delta lights and the uniform sky.
 pub struct LightTable {
+    /// `LIGHT_WORDS` per light (`count` of them), then one light-link mask per instance, then the IES
+    /// profiles: nine frame floats and the table each, at the offsets the lights name in word 15.
     pub lights: Vec<u32>,
+    /// Lights in the table, the virtual main light included.
+    pub count: usize,
     pub sky: [f32; 3],
     pub virtual_light: bool,
     pub transparent_background: bool,
@@ -561,7 +565,8 @@ pub fn pack_lights(scene: &Scene) -> LightTable {
     let mut sky = [0.0f32; 3];
     let mut lights = Vec::new();
     let mut strengths = Vec::new(); // per light in `lights`, to rank them for the light slots
-    for light in scene.lights() {
+    let mut profiles: Vec<(usize, usize)> = Vec::new(); // (light table index, extra index)
+    for (extra_index, light) in scene.lights().iter().enumerate() {
         let mut cone = [0.0f32; 4]; // axis xyz and the angular falloff scale, for spot lights
         let mut offset = 0.0;
         let (kind, color, intensity, vector) = match *light {
@@ -597,6 +602,13 @@ pub fn pack_lights(scene: &Scene) -> LightTable {
                 continue;
             }
         };
+        let extra = scene
+            .light_id(extra_index)
+            .map(|id| scene.light_extra(id))
+            .unwrap_or_default();
+        if extra.ies.is_some() && kind != 1 {
+            profiles.push((lights.len() / LIGHT_WORDS, extra_index));
+        }
         let words: [u32; LIGHT_WORDS] = std::array::from_fn(|i| match i {
             0 => kind,
             1..=3 => color[i - 1].to_bits(),
@@ -604,6 +616,7 @@ pub fn pack_lights(scene: &Scene) -> LightTable {
             5..=7 => vector[i - 5].to_bits(),
             8..=11 => cone[i - 8].to_bits(),
             12 => offset.to_bits(),
+            14 => extra.link_mask,
             _ => 0,
         });
         lights.extend(words);
@@ -626,12 +639,25 @@ pub fn pack_lights(scene: &Scene) -> LightTable {
             4 => 1.0f32.to_bits(),
             5..=7 => (-toward[i - 5]).to_bits(), // the shader reads the direction the light travels
             13 => 3,
+            14 => !0,
             _ => 0,
         });
         lights.extend(words);
     }
+    let count = lights.len() / LIGHT_WORDS;
+    lights.extend((0..scene.instances().len()).map(|i| scene.instance_light_mask(i)));
+    for (light, extra_index) in profiles {
+        let (profile, axes) = scene
+            .light_id(extra_index)
+            .and_then(|id| scene.light_extra(id).ies)
+            .expect("a profile was listed");
+        lights[light * LIGHT_WORDS + 15] = lights.len() as u32 + 1;
+        lights.extend(axes.iter().flatten().map(|v| v.to_bits()));
+        lights.extend(profile.table().iter().map(|v| v.to_bits()));
+    }
     LightTable {
         lights,
+        count,
         sky,
         virtual_light: virtual_light.is_some(),
         transparent_background: scene.transparent_background(),
@@ -641,7 +667,7 @@ pub fn pack_lights(scene: &Scene) -> LightTable {
 /// The scene-wide constants for the current lights and emitters.
 pub fn scene_info(light_table: &LightTable, emitters: &Emitters, env: &Env) -> SceneInfo {
     SceneInfo {
-        light_count: (light_table.lights.len() / LIGHT_WORDS) as u32,
+        light_count: light_table.count as u32,
         emitter_count: emitters.count(),
         env_width: env.width,
         env_height: env.height,

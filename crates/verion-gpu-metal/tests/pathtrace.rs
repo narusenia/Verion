@@ -1686,3 +1686,57 @@ fn floor_value(ctx: &MetalContext) -> f32 {
     };
     center_pixel(ctx, &floor_scene(light, false))
 }
+
+#[test]
+fn ies_profile_and_light_linking_shape_a_point_light() {
+    let Some(ctx) = context() else { return };
+    // A point light 1 m above the floor point under the camera, with a narrow downlight profile. The
+    // identity frame puts the light's -z axis (vertical angle 0) straight at the floor.
+    let light = Light::Point {
+        position: [0.0, 0.0, 1.0],
+        color: [1.0; 3],
+        intensity: 40.0,
+    };
+    let downlight =
+        "IESNA:LM-63-2002\nTILT=NONE\n1 1000 1 4 1 1 2 0 0 0\n1 1 10\n0 20 40 90\n0\n100 50 0 0\n";
+    let profile = verion_scene::IesProfile::parse(downlight).unwrap();
+    let frame = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let at = |ies: bool, mask: u32, x: f32| {
+        let mut s = floor_scene(light, false);
+        let id = s.light_id(0).unwrap();
+        s.set_light_extra(
+            id,
+            verion_scene::LightExtra {
+                link_mask: 1,
+                ies: ies.then(|| (std::sync::Arc::new(profile.clone()), frame)),
+            },
+        );
+        let inst = s.instance_id(0).unwrap();
+        s.set_instance_light_mask(inst, mask);
+        s.set_camera(Camera {
+            transform: [
+                [1.0, 0.0, 0.0, x],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 3.0],
+            ],
+            ..Camera::default()
+        });
+        let img = Renderer::new(&ctx, &s).unwrap().render(33, 33, 32).unwrap();
+        img[16 * 33 + 16][0]
+    };
+    // Straight below: the profile's peak, so the same as no profile.
+    let (plain, with) = (at(false, 1, 0.0), at(true, 1, 0.0));
+    assert!(
+        (plain - with).abs() < 0.08 * plain,
+        "peak {with} vs {plain}"
+    );
+    // 40 degrees off the axis (x = tan 40 * 1): the profile says 0.
+    let off_plain = at(false, 1, 0.84);
+    let off = at(true, 1, 0.84);
+    assert!(
+        off_plain > 0.05 && off < 0.05 * off_plain,
+        "off axis {off} vs {off_plain}"
+    );
+    // The instance is not in the light's group: no light at all.
+    assert!(at(false, 2, 0.0) < 0.01 * plain, "unlinked");
+}

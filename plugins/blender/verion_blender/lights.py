@@ -5,6 +5,7 @@ become an emissive quad or disk, which the renderer samples as an area light (em
 """
 import math
 
+import bpy
 import mathutils
 import numpy as np
 
@@ -41,6 +42,31 @@ def add(scene, ob, warn):
     if getattr(ob.data, "shadow_soft_size", 0.0) > 0.0 and ob.data.type != "SUN":
         warn(f"Light '{ob.name}': a non-zero radius is rendered as a point (no soft shadows from punctual lights)")
     return scene.add_light(**punctual(ob))
+
+
+def ies(ob, warn):
+    """(IES text, world frame rows x, y, z in Verion space) when a Point or Spot light's node tree has an
+    IES Texture, else None. Vertical angle 0 of the profile points along the light's -Z."""
+    light = ob.data
+    if light.type == "SUN" or not getattr(light, "node_tree", None):
+        return None
+    node = next((n for n in light.node_tree.nodes if n.bl_idname == "ShaderNodeTexIES"), None)
+    if node is None:
+        return None
+    try:
+        if node.mode == "INTERNAL":
+            text = node.ies.as_string() if node.ies is not None else None
+        else:
+            with open(bpy.path.abspath(node.filepath), encoding="latin-1") as f:
+                text = f.read()
+    except OSError as e:
+        warn(f"Light '{ob.name}': the IES file could not be read ({e}); using a plain light")
+        return None
+    if not text:
+        return None
+    rot = ob.matrix_world.normalized().to_3x3()
+    axes = [convert.direction(rot @ mathutils.Vector(v)) for v in ((1, 0, 0), (0, 1, 0), (0, 0, 1))]
+    return text, axes
 
 
 def update(scene, index, ob):

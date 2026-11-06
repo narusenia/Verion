@@ -2,6 +2,7 @@
 //! input format or GPU API (REQ-CORE-001).
 
 mod color;
+mod ies;
 mod image;
 mod material;
 mod mesh;
@@ -9,6 +10,7 @@ mod scene;
 mod shading;
 
 pub use color::{ColorSpace, Oetf, OutputTransform, ToneMap};
+pub use ies::{HORIZONTAL as IES_HORIZONTAL, IesError, IesProfile, VERTICAL as IES_VERTICAL};
 pub use image::{Image, ImageError};
 pub use material::{
     Aov, BaseBsdf, ColorAdjust, HighlightShape, HybridSurface, MatCap, Material, OutlineStyle,
@@ -17,7 +19,7 @@ pub use material::{
 };
 pub use mesh::{Mesh, MeshError};
 pub use scene::{
-    Camera, Changes, IDENTITY, ImageId, Instance, InstanceId, Light, LightId, MaterialId, MeshId,
-    Revisions, Scene, SceneError, StylizationWorld, Transform,
+    Camera, Changes, IDENTITY, ImageId, Instance, InstanceId, Light, LightExtra, LightId,
+    MaterialId, MeshId, Revisions, Scene, SceneError, StylizationWorld, Transform,
 };
 pub use shading::{LIGHT_SLOTS, LightComponents, ShadingContext};

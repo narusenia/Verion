@@ -173,6 +173,25 @@ impl Default for StylizationWorld {
     }
 }
 
+/// What a light carries beyond its `Light` variant (light linking and an IES profile).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LightExtra {
+    /// The light shines on an instance when `link_mask & instance mask != 0`. All ones: every instance.
+    pub link_mask: u32,
+    /// An IES distribution for a point or spot light, with the light's frame in world space: three
+    /// rows `x`, `y`, `z`. The profile's vertical angle 0 points along `-z`, horizontal angle 0 along `+x`.
+    pub ies: Option<(std::sync::Arc<crate::IesProfile>, [[f32; 3]; 3])>,
+}
+
+impl Default for LightExtra {
+    fn default() -> Self {
+        Self {
+            link_mask: !0,
+            ies: None,
+        }
+    }
+}
+
 /// Ids come from the scene that issued them; using one on another scene panics.
 #[derive(Clone, Debug, Default)]
 pub struct Scene {
@@ -181,6 +200,8 @@ pub struct Scene {
     images: Vec<Image>,
     instances: Vec<Instance>,
     lights: Vec<Light>,
+    light_extras: Vec<LightExtra>,
+    instance_masks: Vec<u32>,
     camera: Camera,
     stylization_world: StylizationWorld,
     transparent_background: bool,
@@ -340,6 +361,38 @@ impl Scene {
         self.revisions.lighting += 1;
         self.changes.lights = true;
         self.lights[id.index()] = light;
+    }
+
+    /// Light linking and the IES profile of a light (the defaults when never set).
+    pub fn light_extra(&self, id: LightId) -> LightExtra {
+        self.light_extras
+            .get(id.index())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn set_light_extra(&mut self, id: LightId, extra: LightExtra) {
+        if self.light_extras.len() <= id.index() {
+            self.light_extras
+                .resize(id.index() + 1, LightExtra::default());
+        }
+        self.revisions.lighting += 1;
+        self.changes.lights = true;
+        self.light_extras[id.index()] = extra;
+    }
+
+    /// Which light-link groups an instance receives (all ones by default); see `LightExtra::link_mask`.
+    pub fn instance_light_mask(&self, index: usize) -> u32 {
+        self.instance_masks.get(index).copied().unwrap_or(!0)
+    }
+
+    pub fn set_instance_light_mask(&mut self, id: InstanceId, mask: u32) {
+        if self.instance_masks.len() <= id.index() {
+            self.instance_masks.resize(id.index() + 1, !0);
+        }
+        self.revisions.lighting += 1;
+        self.changes.lights = true;
+        self.instance_masks[id.index()] = mask;
     }
 
     pub fn stylization_world(&self) -> StylizationWorld {
