@@ -11,11 +11,11 @@ M6 の積み残し（2026-11-06 に利用者が M7 の前に入れると決め�
 
 | # | 項目 | REQ | 状態 |
 |---|------|-----|------|
-| A1 | IR の画像にアルファを持たせ、材質に不透明度のテクスチャ（`opacity_texture`）を足す。材質の語数（`MATERIAL_WORDS`）とパックを更新する | REQ-CORE-004 / REQ-CORE-003 | 未着手 |
-| A2 | シェーダー: ヒット点で UV から不透明度を引き、既存の確率的な素通し（`shadePath` と `occluded`）に使う。影の光線にも効かせる。テクスチャのない材質ではコードを消す（M5 の `restirCompiled` と同じ特殊化定数）。Metal と Vulkan で同じ Slang | REQ-ACC-003 / REQ-GPU-006 | 未着手 |
-| A3 | glTF の取り込み: ベースカラーのテクスチャのアルファを `BLEND`（不透明度）と `MASK`（`alphaCutoff` で 0 か 1）に使う | REQ-CORE-004 | 未着手 |
-| A4 | Blender の変換: Principled の Alpha に画像のアルファがつながっている場合と、Verion Surface の `Opacity` に Verion Image のアルファをつなぐ場合。警告を外す | REQ-DCC-003 | 未着手 |
-| A5 | 検証: 葉の板の評価シーンで Cycles との比と、Blender 経由と glTF 経由の一致、Metal と Vulkan の画像一致、アルファ付きテクスチャがないシーンでベンチが退行しないこと | REQ-QA / REQ-GPU-007 / REQ-PERF-002 | 未着手 |
+| A1 | 材質に不透明度のテクスチャ（`opacity_texture`）を足す。画像のアルファは、赤チャンネルに入れた灰色の画像として渡す（IR の `Image` は RGB のまま）。材質の語数（`MATERIAL_WORDS`）は 24、パックを更新する | REQ-CORE-004 / REQ-CORE-003 | 済 |
+| A2 | シェーダー: ヒット点で UV から不透明度を引き（`opacityAt`。最も細かい階層）、既存の確率的な素通し（`shadePath` と `occluded`）とカバレッジ AOV に使う。影の光線にも効く。Metal と Vulkan で同じ Slang。特殊化定数でコードを消すことはしていない（テクスチャなしのシーンで約 2% の増加。測定は A5） | REQ-ACC-003 / REQ-GPU-006 | 済 |
+| A3 | glTF の取り込み: ベースカラーのテクスチャのアルファを `BLEND`（不透明度）と `MASK`（`alphaCutoff` で 0 か 1）に使う | REQ-CORE-004 | 済 |
+| A4 | Blender の変換: Principled の Alpha に画像のアルファがつながっている場合と、Verion Surface の `Opacity` に Verion Image の `Alpha` 出力をつなぐ場合。警告を外す | REQ-DCC-003 | 済 |
+| A5 | 検証: 葉の板の評価シーンで Cycles との比と、Blender 経由と glTF 経由の一致、Metal と Vulkan の画像一致、アルファ付きテクスチャがないシーンでベンチが退行しないこと。Cycles との比（0.834、アルファなしと同じ）、Blender 経由と glTF 経由の一致（比 1.0000、相関 1.00000）、Metal のベンチ（+2%）は済。Vulkan の画像一致は Windows で（`docs/handoff/2026-11-07-alpha-cutout-windows.md`） | REQ-QA / REQ-GPU-007 / REQ-PERF-002 | 一部済 |
 
 ## 表
 
