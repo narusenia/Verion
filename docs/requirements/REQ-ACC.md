@@ -41,7 +41,7 @@ DI → GI を M5 で導入し、PT は M7 の NRC の測定と並べて導入を
 
 - [x] 同画質到達時間が改善することを実測する（REQ-PERF-001。Metal で多光源・間接光が支配的なシーンで 1.8〜4.9 倍。ADR-0016）
 - [x] 鏡面・屈折・Motion Blur・DoF では Fallback する（ガラスを通る経路は GI の再利用から外す。Metal のテストで確認）
-- [ ] Vulkan でも同じことが動く（実装と移植したテストは済、RTX 3080 での実行待ち）
+- [x] Vulkan でも同じことが動く（RTX 3080 で GPU テスト通過）
 - [ ] Octane との同画質到達時間を比較する（Blender 連携後に、Blender 用の無料版 Octane で同種のシーンを組んで比べる）
 
 ### 依存要件
@@ -64,7 +64,7 @@ Camera / Material / Light / Transform / Mesh Deformation / Resolution の変更�
 
 - [x] 変更種別ごとの再利用範囲が表のとおりに動く（Metal。`UpdateReport` で数える）
 - [x] 間接光の遠距離伝播に対する検証サンプルがある（壁の色の更新と再構築の画像がビット一致。ADR-0017）
-- [ ] Vulkan でも同じことが動く（実装と移植したテストは済、RTX 3080 での実行待ち）
+- [x] Vulkan でも同じことが動く（RTX 3080 で GPU テスト通過）
 
 ### 依存要件
 
