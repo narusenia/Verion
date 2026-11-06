@@ -31,9 +31,9 @@ pub struct RenderInfo {
     /// then the most any pixel took. Stopping on a pixel's own noise estimate biases it, so an
     /// adaptive frame is not physical.
     pub adaptive_threshold: Option<f32>,
-    /// ReSTIR DI was on (written as `verion/restir`). Its reuse is biased near shadow edges, so
-    /// the frame is not physical.
-    pub restir: bool,
+    /// ReSTIR was on, `"di"` or `"di+gi"` (written as `verion/restir`). Its reuse is biased, so the
+    /// frame is not physical.
+    pub restir: Option<&'static str>,
 }
 
 /// Optional primary-ray AOVs (all the same size as the frame).
@@ -224,8 +224,8 @@ pub fn write_exr(
                 && untouched
                 && frame.info.denoiser.is_none()
                 && frame.info.adaptive_threshold.is_none()
-                && !frame.info.restir)
-                .to_string(),
+                && frame.info.restir.is_none())
+            .to_string(),
         ),
     );
     other.insert(
@@ -245,8 +245,8 @@ pub fn write_exr(
             AttributeValue::F32(t),
         );
     }
-    if frame.info.restir {
-        other.insert(Text::from("verion/restir"), text("di".to_string()));
+    if let Some(kind) = frame.info.restir {
+        other.insert(Text::from("verion/restir"), text(kind.to_string()));
     }
     if let Some(g) = frame.info.grade {
         other.insert(
@@ -316,7 +316,7 @@ mod tests {
                 grade: None,
                 denoiser: None,
                 adaptive_threshold: None,
-                restir: false,
+                restir: None,
             },
         }
     }
@@ -400,6 +400,19 @@ mod tests {
         assert_eq!(
             get("verion/adaptiveThreshold"),
             Some(AttributeValue::F32(0.02))
+        );
+        assert_eq!(
+            get("verion/physical"),
+            Some(AttributeValue::Text(Text::from("false")))
+        );
+
+        let mut f = frame(&beauty, None);
+        f.info.restir = Some("di+gi");
+        let restir = attrs(&f, "restir.exr");
+        let get = |k: &str| restir.get(&Text::from(k)).cloned();
+        assert_eq!(
+            get("verion/restir"),
+            Some(AttributeValue::Text(Text::from("di+gi")))
         );
         assert_eq!(
             get("verion/physical"),

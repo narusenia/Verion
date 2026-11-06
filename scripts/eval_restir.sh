@@ -1,6 +1,6 @@
 #!/bin/sh
 # Time to quality, ReSTIR DI against plain light sampling (REQ-ACC-002, REQ-PERF-001): renders each
-# scene with --mode reference and --mode interactive over a ladder of sample counts, and compares
+# scene with --mode reference, --mode interactive (ReSTIR DI) and interactive with --restir-gi over a ladder of sample counts, and compares
 # every image with a high-sample reference render (exr_diff mae/mean and PSNR) next to its GPU time.
 # Needs a Metal GPU; not run in CI.
 # Usage: eval_restir.sh [reference spp]. Output: target/eval-restir/report.md
@@ -23,10 +23,12 @@ for scene in scenes/many_lights.gltf scenes/many_lights_dark.gltf scenes/cornell
   [ "$name" = showcase ] && extra="--hdri assets/hdri/sunny.hdr"
   [ -f "$out/$name-ref.exr" ] || $cli "$scene" -o "$out/$name-ref.exr" $size --spp "$ref_spp" $extra
   for spp in 1 2 4 8 16 32 64 128 256; do
-    for mode in reference interactive; do
-      f="$out/$name-$mode-$spp"
-      $cli "$scene" -o "$f.exr" $size --spp "$spp" --mode "$mode" $extra --metrics "$f.json"
-      echo "| $name | $mode | $spp | $(jq .gpu_s "$f.json" | awk '{printf "%.4f", $1}') | $(diff "$out/$name-ref.exr" "$f.exr") |" >> "$out/report.md"
+    for variant in reference interactive interactive+gi; do
+      mode=${variant%+gi}; flag=
+      [ "$variant" = interactive+gi ] && flag=--restir-gi
+      f="$out/$name-$variant-$spp"
+      $cli "$scene" -o "$f.exr" $size --spp "$spp" --mode "$mode" $flag $extra --metrics "$f.json"
+      echo "| $name | $variant | $spp | $(jq .gpu_s "$f.json" | awk '{printf "%.4f", $1}') | $(diff "$out/$name-ref.exr" "$f.exr") |" >> "$out/report.md"
     done
   done
 done

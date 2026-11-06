@@ -1054,6 +1054,14 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
                 wB = st.qPrev * st.qPrev / (st.qPrev * st.qPrev + pl * pl);
             }
             st.parts.add(depth, cls, thr * le * wB);
+            if (depth == 1 && st.gi)
+            {
+                // Its weight depends on the first hit's view of the emitter, so it is not part of what
+                // ReSTIR GI reuses elsewhere: count it with what the first hit gathered itself.
+                uint so = restirScratch(pixel) + 18;
+                for (uint k = 0; k < 3; k++)
+                    restir[so + k] += (thr * le * wB)[k];
+            }
         }
         float metallic = materials[mi + 6] * texRM.y;
         float rough = materials[mi + 7] * texRM.x;
@@ -1402,7 +1410,7 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
     st.chan = chan;
     if (depth == 0 && st.gi)
     {
-        // What the first hit gathered and what the first bounce carries on, for `giFinish`.
+        // What the first hit gathered (and later its direct sight of an emitter) and what the first bounce carries on, for `giFinish`.
         uint so = restirScratch(pixel);
         for (uint k = 0; k < 3; k++)
         {

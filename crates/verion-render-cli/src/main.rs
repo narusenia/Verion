@@ -164,7 +164,7 @@ struct Args {
     #[arg(long, default_value_t = 4)]
     restir_candidates: u32,
     /// Most samples a reused ReSTIR reservoir counts for
-    #[arg(long, default_value_t = 20)]
+    #[arg(long, default_value_t = 4)]
     restir_history: u32,
     /// Write timing metrics as JSON
     #[arg(long)]
@@ -469,7 +469,7 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
             }),
             denoiser: args.denoise.then_some("oidn"),
             adaptive_threshold: args.adaptive,
-            restir,
+            restir: restir.then_some(if args.restir_gi { "di+gi" } else { "di" }),
         },
     };
     let t = Instant::now();

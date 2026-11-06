@@ -297,14 +297,14 @@ PathState_0 generatePathFor_0(uint px_0, uint py_0, uint sample_0, KernelContext
 }
 
 
-#line 1417
+#line 1425
 PathState_0 generatePath_0(uint px_1, uint py_1, KernelContext_0 thread* kernelContext_3)
 {
 
-#line 1417
+#line 1425
     PathState_0 _S24 = generatePathFor_0(px_1, py_1, kernelContext_3->params_0[int(6)], kernelContext_3);
 
-#line 1417
+#line 1425
     return _S24;
 }
 

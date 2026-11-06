@@ -143,7 +143,7 @@ impl Default for Restir {
             di: true,
             gi: false,
             candidates: 4,
-            history: 20,
+            history: 4,
         }
     }
 }

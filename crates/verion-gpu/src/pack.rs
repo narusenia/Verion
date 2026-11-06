@@ -742,7 +742,7 @@ mod tests {
         assert_eq!((p[0], p[1], p[5], p[23]), (64, 32, 2, 5));
         assert_eq!((p[28], p[29], p[32], p[34]), (1, 0, 1, 16));
         assert_eq!((p[6], p[30], p[31], p[35]), (0, 0, 0, 0));
-        assert_eq!((p[36], p[37], p[38]), (1, 4, 20));
+        assert_eq!((p[36], p[37], p[38]), (1, 4, 4));
         let gi = Restir {
             gi: true,
             ..Restir::default()
