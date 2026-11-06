@@ -7,12 +7,13 @@ use std::{cell::OnceCell, time::Instant};
 use ash::vk;
 use gpu_allocator::MemoryLocation;
 use verion_gpu::{
-    Adaptive, Aovs, Integrator, LightingAovs, MemoryUsage, RayTracingBackend,
+    Adaptive, Aovs, Integrator, LightingAovs, MemoryUsage, RESTIR_FLOATS_PER_PIXEL,
+    RayTracingBackend, Restir, UpdateReport,
     pack::{self, MAX_DEPTH, PARAM_WORDS, SceneInfo, View},
     readback,
     wavefront::Stage,
 };
-use verion_scene::{Camera, Scene};
+use verion_scene::{Camera, Changes, Scene};
 
 use crate::shaders::spirv;
 use crate::{
@@ -71,6 +72,7 @@ pub struct Renderer {
     /// Wavefront only: time extend and shade separately.
     stage_timing: bool,
     adaptive: Option<Adaptive>,
+    restir: Option<Restir>,
     /// Compiled on first use, so megakernel-only users skip the compile.
     wavefront: OnceCell<Result<wavefront::Pipelines, Error>>,
 }
@@ -127,6 +129,7 @@ impl Renderer {
             integrator: Integrator::default(),
             stage_timing: false,
             adaptive: None,
+            restir: None,
             wavefront: OnceCell::new(),
         })
     }
@@ -135,7 +138,7 @@ impl Renderer {
         self.adaptive
     }
 
-    /// Bindings 0..18 of the path tracer's kernels (`shaders/include/pt_core.slang`).
+    /// Bindings 0..19 of the path tracer's kernels (`shaders/include/pt_core.slang`).
     fn path_resources<'a>(
         &'a self,
         acc: &'a Accumulation,
@@ -166,6 +169,10 @@ impl Renderer {
             (
                 18,
                 Res::Buffer(acc.pixel_stats.as_ref().unwrap_or(&self.dummy)),
+            ),
+            (
+                19,
+                Res::Buffer(acc.restir.as_ref().map_or(&self.dummy, |r| &r.0)),
             ),
         ]
     }
@@ -222,6 +229,9 @@ pub struct Accumulation {
     pixel_stats: Option<Buffer>,
     /// The adaptive setting the accumulation started with; the stats are only valid under it.
     adaptive: Option<Adaptive>,
+    /// ReSTIR only: the reservoirs (80 floats per pixel, `RESTIR_FLOATS_PER_PIXEL`), the setting the
+    /// accumulation started with, and their size in bytes.
+    restir: Option<(Buffer, Restir, usize)>,
 }
 
 impl Accumulation {
@@ -264,6 +274,10 @@ impl verion_gpu::Accumulation for Accumulation {
         self.wavefront.as_ref().map_or(0, wavefront::Buffers::bytes)
     }
 
+    fn restir_bytes(&self) -> usize {
+        self.restir.as_ref().map_or(0, |r| r.2)
+    }
+
     fn mean(&self) -> Vec<[f32; 3]> {
         let sums = self.read(&self.buffer, self.pixels() * 3);
         readback::mean(&sums, &self.inverse_samples())
@@ -286,7 +300,7 @@ impl verion_gpu::Accumulation for Accumulation {
     }
 }
 
-/// The path tracer's bindings plus the wavefront's (`shaders/include/wf_state.slang`, 19..24):
+/// The path tracer's bindings plus the wavefront's (`shaders/include/wf_state.slang`, 20..25):
 /// queue `parity` is read, `out` is written.
 fn wf_resources<'a>(
     path: &[(u32, Res<'a>)],
@@ -296,12 +310,12 @@ fn wf_resources<'a>(
 ) -> Vec<(u32, Res<'a>)> {
     let mut r = path.to_vec();
     r.extend([
-        (19, Res::Buffer(&w.state)),
-        (20, Res::Buffer(&w.hits)),
-        (21, Res::Buffer(&w.queues[parity])),
-        (22, Res::Buffer(out)),
-        (23, Res::Buffer(&w.counts)),
-        (24, Res::Buffer(&w.args)),
+        (20, Res::Buffer(&w.state)),
+        (21, Res::Buffer(&w.hits)),
+        (22, Res::Buffer(&w.queues[parity])),
+        (23, Res::Buffer(out)),
+        (24, Res::Buffer(&w.counts)),
+        (25, Res::Buffer(&w.args)),
     ]);
     r
 }
@@ -358,6 +372,34 @@ impl RayTracingBackend for Renderer {
         self.adaptive = adaptive;
     }
 
+    fn set_restir(&mut self, restir: Option<Restir>) {
+        self.restir = restir;
+    }
+
+    /// shortcut: every change rebuilds the scene tables and acceleration structures (the settings
+    /// carry over); the per-change reuse of `pack::UpdatePlan` is for the Windows session, which
+    /// can run the Vulkan tests. The result is correct, just not incremental yet.
+    fn update(&mut self, scene: &Scene, changes: &Changes) -> Result<UpdateReport, Error> {
+        if changes.is_empty() {
+            return Ok(UpdateReport::default());
+        }
+        let ctx = self.ctx.clone();
+        let mut fresh = Renderer::new(&ctx, scene)?;
+        fresh.view = self.view;
+        fresh.multiscatter = self.multiscatter;
+        fresh.integrator = self.integrator;
+        fresh.stage_timing = self.stage_timing;
+        fresh.adaptive = self.adaptive;
+        fresh.restir = self.restir;
+        let report = UpdateReport {
+            blases_built: scene.meshes().len(),
+            tlas_built: true,
+            bytes_uploaded: 0,
+        };
+        *self = fresh;
+        Ok(report)
+    }
+
     fn new_accumulation(
         &self,
         width: u32,
@@ -388,6 +430,7 @@ impl RayTracingBackend for Renderer {
             stage_seconds: None,
             pixel_stats: None,
             adaptive: None,
+            restir: None,
         })
     }
 
@@ -399,9 +442,26 @@ impl RayTracingBackend for Renderer {
             acc.lighting.is_some(),
             self.multiscatter,
             self.adaptive,
+            self.restir,
         );
         if acc.samples == 0 {
             acc.adaptive = self.adaptive;
+            acc.restir = match self.restir {
+                Some(r) => {
+                    let bytes = acc.pixels() * RESTIR_FLOATS_PER_PIXEL * 4;
+                    Some((
+                        self.ctx.zeroed(bytes as u64, RESULT, "reservoirs")?,
+                        r,
+                        bytes,
+                    ))
+                }
+                None => None,
+            };
+        }
+        if acc.restir.as_ref().map(|r| r.1) != self.restir {
+            return Err(Error::Scene(
+                "ReSTIR was switched mid-accumulation; start a new accumulation".into(),
+            ));
         }
         if acc.pixel_stats.is_none() && acc.adaptive.is_some() {
             acc.pixel_stats = Some(self.ctx.zeroed(
@@ -449,7 +509,12 @@ impl RayTracingBackend for Renderer {
             while k < samples {
                 let mut b = base;
                 b[6] = acc.samples + k;
-                b[35] = (samples - k).min(SAMPLES_PER_DISPATCH);
+                // ReSTIR reads other pixels' last frame, so each dispatch is one sample.
+                b[35] = (samples - k).min(if acc.restir.is_some() {
+                    1
+                } else {
+                    SAMPLES_PER_DISPATCH
+                });
                 k += b[35];
                 blocks.push(b);
                 steps.push(Step {
