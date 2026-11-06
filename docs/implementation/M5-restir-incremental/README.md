@@ -59,7 +59,6 @@
 ## 要確認（利用者）
 
 - Octane との同画質到達時間の比較: Blender 連携後に、Blender 用の無料版 Octane で同種のシーンを組んで比べる。条件（同画質の定義、バウンス数、デノイザ無し、規約の確認）は REQ-ACC-002 とこの README に従う。RTX 3080 機で行う
-- ReSTIR 有効の Metal と Vulkan の画像一致（REQ-GPU-007）: Metal 側は `target/backend_restir/mac` に作成済み。Windows 機で同じ条件の画像を作り、`scripts/backend_diff.sh` で比べる（手順は `docs/handoff/2026-11-06-m5-mac-next.md` の 2-3）
 - Metal の画像が ReSTIR 無効時に変わっていないことは、既存の Metal テスト 48 件とベンチ（`mise run bench` が基準内）で確認済み
 
 ## 完了条件
@@ -70,4 +69,4 @@
 - [x] 同画質到達時間が改善することを実測する（上の表。多光源または間接光が支配的なシーンで 1.8〜4.9 倍）
 - [x] 鏡面・屈折・DoF では Fallback する（テスト）
 - [x] Vulkan で同じことが動く（RTX 3080 で GPU テスト 21 件通過、同画質到達時間を測定、bench の退行を解消）
-- [ ] ReSTIR 有効の Metal と Vulkan の画像が高 spp の平均で一致する（REQ-GPU-007。Windows 機の画像待ち）
+- [x] ReSTIR 有効の Metal と Vulkan の画像が高 spp の平均で一致する（REQ-GPU-007。512×384・4096 spp・`--mode interactive`。既存の閾値（チャンネル平均 0.1%、ブロック 0.5%）のまま通る: cornell_box はチャンネル 0.00%・ブロック 0.03%・75.9 dB、many_lights は 0.01%・0.12%・61.6 dB）
