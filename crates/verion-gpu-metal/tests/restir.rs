@@ -159,6 +159,12 @@ fn cube(half: f32) -> Mesh {
 /// A closed room of rough walls lit by 16 small panels and a rough ball, seen from inside:
 /// most of what the camera sees is indirect light.
 fn closed_room(roughness: f32) -> Scene {
+    room_with(roughness, false)
+}
+
+/// `closed_room` with a strongly dispersive glass block in the middle.
+fn room_with(roughness: f32, glass: bool) -> Scene {
+    let glass = glass.then_some((0.35, [-0.7, -0.9, 0.0]));
     let mut s = Scene::new();
     let room = s.add_mesh(cube(1.5));
     let ball = s.add_mesh(cube(0.4));
@@ -196,11 +202,32 @@ fn closed_room(roughness: f32) -> Scene {
         roughness,
         ..BaseBsdf::default()
     }));
-    for (mesh, material) in [(room, walls), (ball, walls), (lamps, glow)] {
+    let mut parts = vec![
+        (room, walls, IDENTITY),
+        (ball, walls, IDENTITY),
+        (lamps, glow, IDENTITY),
+    ];
+    if let Some((size, pos)) = glass {
+        let block = s.add_mesh(cube(size));
+        let dispersive = s.add_material(mat(BaseBsdf {
+            base_color: [1.0; 3],
+            transmission: 1.0,
+            roughness: 0.0,
+            ior: 1.6,
+            dispersion: 8.0,
+            ..BaseBsdf::default()
+        }));
+        let mut at = IDENTITY;
+        at[0][3] = pos[0];
+        at[1][3] = pos[1];
+        at[2][3] = pos[2];
+        parts.push((block, dispersive, at));
+    }
+    for (mesh, material, transform) in parts {
         s.add_instance(Instance {
             mesh,
             material,
-            transform: IDENTITY,
+            transform,
         })
         .unwrap();
     }
@@ -245,4 +272,37 @@ fn gi_leaves_sharp_surfaces_alone() {
     let plain = render(&r, 8);
     r.set_restir(Some(gi()));
     assert_eq!(plain, render(&r, 8));
+}
+
+/// Largest relative difference between the 8x8 block means of two images, per color channel
+/// (the blocks average the sample noise away, a stain stays).
+fn worst_block(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
+    let mut worst = 0.0f32;
+    for by in 0..8 {
+        for bx in 0..8 {
+            for c in 0..3 {
+                let (mut sa, mut sb) = (0.0, 0.0);
+                for y in 0..8 {
+                    for x in 0..8 {
+                        let i = (by * 8 + y) * 64 + bx * 8 + x;
+                        sa += a[i][c];
+                        sb += b[i][c];
+                    }
+                }
+                worst = worst.max((sa - sb).abs() / sb.max(1.0e-3));
+            }
+        }
+    }
+    worst
+}
+
+#[test]
+fn gi_leaves_no_stains_behind_dispersive_glass() {
+    let Some(ctx) = context() else { return };
+    let mut r = Renderer::new(&ctx, &room_with(0.9, true)).unwrap();
+    let plain = render(&r, 2048);
+    r.set_restir(Some(gi()));
+    let resampled = render(&r, 2048);
+    let worst = worst_block(&resampled, &plain);
+    assert!(worst < 0.15, "worst block differs by {worst}");
 }
