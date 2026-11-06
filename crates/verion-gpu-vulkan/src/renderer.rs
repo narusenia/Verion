@@ -37,6 +37,19 @@ fn groups(n: u32, size: u32) -> u32 {
     n.div_ceil(size)
 }
 
+/// One device-local buffer holding `data`.
+fn put<T: Copy>(
+    ctx: &VulkanContext,
+    data: &[T],
+    usage: vk::BufferUsageFlags,
+    name: &'static str,
+) -> Result<Buffer, Error> {
+    let mut up = Upload::new(ctx);
+    let buffer = up.buffer(data, usage, name)?;
+    up.flush()?;
+    Ok(buffer)
+}
+
 fn align_up(v: u64, a: u64) -> u64 {
     v.div_ceil(a) * a
 }
@@ -45,7 +58,11 @@ fn align_up(v: u64, a: u64) -> u64 {
 pub struct Renderer {
     ctx: VulkanContext,
     tlas: Accel,
-    _blases: Vec<Accel>,
+    blases: Vec<Accel>,
+    meshes: Vec<pack::MeshRange>,
+    /// Image per texture slot and the environment map's identity, to skip unchanged tables.
+    texture_images: Vec<usize>,
+    env_key: Option<(usize, u32)>,
     positions: Buffer,
     indices: Buffer,
     instances: Buffer,
@@ -104,7 +121,10 @@ impl Renderer {
         Ok(Self {
             ctx: ctx.clone(),
             tlas,
-            _blases: blases,
+            blases,
+            meshes: packed.meshes.clone(),
+            texture_images: packed.texture_images.clone(),
+            env_key: pack::env_key(scene),
             positions,
             indices,
             instances,
@@ -376,27 +396,104 @@ impl RayTracingBackend for Renderer {
         self.restir = restir;
     }
 
-    /// shortcut: every change rebuilds the scene tables and acceleration structures (the settings
-    /// carry over); the per-change reuse of `pack::UpdatePlan` is for the Windows session, which
-    /// can run the Vulkan tests. The result is correct, just not incremental yet.
+    /// Applies scene edits, redoing only what `pack::UpdatePlan` says (REQ-ACC-003). The pipelines
+    /// and descriptors are untouched: descriptor sets are made per `accumulate` from the buffers
+    /// held here, so replacing a buffer is enough.
     fn update(&mut self, scene: &Scene, changes: &Changes) -> Result<UpdateReport, Error> {
-        if changes.is_empty() {
-            return Ok(UpdateReport::default());
+        let plan = pack::UpdatePlan::new(changes);
+        let mut report = UpdateReport::default();
+        if plan.camera {
+            self.view = View::new(scene.camera());
         }
         let ctx = self.ctx.clone();
-        let mut fresh = Renderer::new(&ctx, scene)?;
-        fresh.view = self.view;
-        fresh.multiscatter = self.multiscatter;
-        fresh.integrator = self.integrator;
-        fresh.stage_timing = self.stage_timing;
-        fresh.adaptive = self.adaptive;
-        fresh.restir = self.restir;
-        let report = UpdateReport {
-            blases_built: scene.meshes().len(),
-            tlas_built: true,
-            bytes_uploaded: 0,
-        };
-        *self = fresh;
+        let size = |n: usize| n * 4;
+        if plan.vertices {
+            let g = pack::pack_geometry(scene);
+            let geometry =
+                STORAGE | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR;
+            let mut up = Upload::new(&ctx);
+            self.positions = up.buffer(&g.positions, geometry, "positions")?;
+            self.uvs = up.buffer(&g.uvs, STORAGE, "uvs")?;
+            self.vnormals = up.buffer(&g.vnormals, STORAGE, "vertex normals")?;
+            report.bytes_uploaded += size(g.positions.len() + g.uvs.len() + g.vnormals.len());
+            if plan.full {
+                self.indices = up.buffer(&g.indices, geometry, "indices")?;
+                report.bytes_uploaded += size(g.indices.len());
+            }
+            up.flush()?;
+            let ids: Vec<usize> = if plan.full {
+                (0..g.meshes.len()).collect()
+            } else {
+                plan.blases.clone()
+            };
+            let ranges: Vec<pack::MeshRange> = ids.iter().map(|&m| g.meshes[m]).collect();
+            // A built structure keeps its own copy of the triangles, so the BLASes of untouched
+            // meshes stay valid although the position buffer is a new one.
+            let built = accel::build_blases(&ctx, &self.positions, &self.indices, &ranges)?;
+            report.blases_built = built.len();
+            if plan.full {
+                self.blases = built;
+                self.meshes = g.meshes;
+            } else {
+                for (m, b) in ids.into_iter().zip(built) {
+                    self.blases[m] = b;
+                }
+            }
+        }
+        if plan.materials {
+            let mut m = pack::pack_materials(scene, false).map_err(Error::Scene)?;
+            report.bytes_uploaded += size(m.materials.len());
+            self.materials = put(&ctx, &m.materials, STORAGE, "materials")?;
+            if m.images != self.texture_images {
+                m = pack::pack_materials(scene, true).map_err(Error::Scene)?;
+                report.bytes_uploaded += size(m.texels.len() + m.tex_info.len());
+                self.texels = put(&ctx, &m.texels, STORAGE, "texels")?;
+                self.tex_info = put(&ctx, &m.tex_info, STORAGE, "texture info")?;
+                self.texture_images = m.images;
+            }
+        }
+        if plan.lights {
+            let table = pack::pack_lights(scene);
+            report.bytes_uploaded += size(table.lights.len());
+            self.lights = put(&ctx, &table.lights, STORAGE, "lights")?;
+            self.info.light_count = (table.lights.len() / pack::LIGHT_WORDS) as u32;
+            self.info.sky = table.sky;
+            let key = pack::env_key(scene);
+            if key != self.env_key {
+                let env = pack::pack_env(scene).map_err(Error::Scene)?;
+                report.bytes_uploaded +=
+                    size(env.pixels.len() + env.marginal.len() + env.conditional.len());
+                self.env_pixels = put(&ctx, &env.pixels, STORAGE, "env pixels")?;
+                self.env_marginal = put(&ctx, &env.marginal, STORAGE, "env marginal")?;
+                self.env_conditional = put(&ctx, &env.conditional, STORAGE, "env conditional")?;
+                self.info.env_width = env.width;
+                self.info.env_height = env.height;
+                self.info.env_pdf_scale = env.pdf_scale;
+                self.env_key = key;
+            }
+        }
+        let mut bases = None;
+        if plan.emitters {
+            let e = pack::pack_emitters(scene);
+            report.bytes_uploaded += size(e.words.len() + e.cdf.len());
+            self.emitters = put(&ctx, &e.words, STORAGE, "emitters")?;
+            self.emit_cdf = put(&ctx, &e.cdf, STORAGE, "emitter cdf")?;
+            self.info.emitter_count = e.count();
+            bases = Some(e.bases);
+        }
+        if plan.instances {
+            let bases = match bases {
+                Some(b) => b,
+                None => pack::pack_emitters(scene).bases,
+            };
+            let (table, tlas) = pack::pack_instances(scene, &self.meshes, &bases);
+            report.bytes_uploaded += size(table.len());
+            self.instances = put(&ctx, &table, STORAGE, "instances")?;
+            if plan.tlas {
+                self.tlas = accel::build_tlas(&ctx, &self.blases, &tlas)?;
+                report.tlas_built = true;
+            }
+        }
         Ok(report)
     }
 
