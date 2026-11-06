@@ -256,6 +256,7 @@ class Sync:
         if self.keys(depsgraph) != set(self.instances) | set(self.lights):
             return False
         changed_obj = set()
+        self.materials.refresh_trees()
         for u in depsgraph.updates:
             idb = u.id
             tn = type(idb).__name__

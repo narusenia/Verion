@@ -9,12 +9,13 @@ bl_info = {
 
 import bpy
 
-from . import engine, props, stylization, surface, ui
+from . import engine, nodes, props, stylization, surface, ui
 
 
 def register():
     props.register()
     stylization.register()
+    nodes.register()
     surface.register()
     bpy.utils.register_class(engine.VerionRenderEngine)
     ui.register()
@@ -24,5 +25,6 @@ def unregister():
     ui.unregister()
     bpy.utils.unregister_class(engine.VerionRenderEngine)
     surface.unregister()
+    nodes.unregister()
     stylization.unregister()
     props.unregister()

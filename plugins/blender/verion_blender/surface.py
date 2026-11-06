@@ -14,6 +14,13 @@ class VerionSurface(bpy.types.PropertyGroup):
         "(about 0.3 for glass, 1 or more for a strong effect). 0 is off",
         default=0.0, min=0.0, soft_max=2.0,
     )
+    node_tree: PointerProperty(
+        name="Verion Nodes",
+        description="A Verion node tree that defines this material instead of the Blender shader nodes",
+        type=bpy.types.NodeTree,
+        poll=lambda self, tree: tree.bl_idname == "VerionNodeTree",
+        update=lambda self, context: self.id_data.update_tag(),
+    )
 
 
 class VERION_PT_surface_extras(bpy.types.Panel):
@@ -28,7 +35,13 @@ class VERION_PT_surface_extras(bpy.types.Panel):
         return context.engine in cls.COMPAT_ENGINES and context.material is not None
 
     def draw(self, context):
-        self.layout.prop(context.material.verion_surface, "dispersion")
+        vs = context.material.verion_surface
+        row = self.layout.row(align=True)
+        row.prop(vs, "node_tree", text="Nodes")
+        row.operator("verion.node_tree_new", text="New", icon="ADD")
+        if vs.node_tree is not None:
+            self.layout.label(text="Edit it in a Verion Material node editor.", icon="INFO")
+        self.layout.prop(vs, "dispersion")
 
 
 def apply(material, params):

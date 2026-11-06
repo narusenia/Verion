@@ -9,7 +9,9 @@ import os
 import bpy
 import numpy as np
 
-from . import bake_material, images, stylization, surface
+from . import bake_material, images, nodes, stylization, surface
+
+IMAGE_NODES = {"ShaderNodeTexImage", nodes.IMAGE}
 
 DEFAULT = dict(base_color=[0.8, 0.8, 0.8], metallic=0.0, roughness=0.5)
 # Transparent BSDF: a surface that stops no ray. `_clear` marks it for `blend_clear`.
@@ -40,6 +42,7 @@ class Converter:
         self.index = {}     # material key -> IR material index
         self.images = {}    # (image key, channels) -> IR image index
         self._baked = {}
+        self.tree_sigs = {}  # material key -> signature of its Verion node tree (None: it has none)
 
     def key(self, material):
         return material.name_full if material else None
@@ -59,7 +62,22 @@ class Converter:
 
     # -- node walking -------------------------------------------------------------------------
 
+    def refresh_trees(self):
+        """Re-converts the materials whose Verion node tree changed (or was bound or unbound): a tree edit
+        does not always arrive as a depsgraph update of the material."""
+        for k, old in list(self.tree_sigs.items()):
+            m = bpy.data.materials.get(k) if k is not None else None
+            if m is not None and self.tree_signature(m) != old:
+                self.update(m)
+
+    @staticmethod
+    def tree_signature(material):
+        tree = material.verion_surface.node_tree
+        return None if tree is None else (tree.name_full, nodes.signature(tree))
+
     def params(self, material):
+        if material is not None:
+            self.tree_sigs[self.key(material)] = self.tree_signature(material)
         p = self.surface_params(material)
         p.pop("_clear", None)
         if material is not None:
@@ -72,6 +90,9 @@ class Converter:
     def surface_params(self, material):
         if material is None:
             return dict(DEFAULT)
+        tree = material.verion_surface.node_tree
+        if tree is not None:
+            return self.verion_tree(tree, material)
         if not material.use_nodes or material.node_tree is None:
             return dict(base_color=list(material.diffuse_color[:3]), metallic=material.metallic, roughness=material.roughness)
         out = _active_output(material.node_tree)
@@ -105,6 +126,40 @@ class Converter:
             return self.mix(node, material)
         self.warn(f"Material '{name}': shader node {node.bl_idname} is not supported; using grey")
         return dict(DEFAULT)
+
+    def verion_tree(self, tree, material):
+        """The parameters of a Verion node tree (the Surface node linked to the first Output)."""
+        out = next((n for n in tree.nodes if n.bl_idname == nodes.OUTPUT), None)
+        link = out.inputs["Surface"].links[0] if out is not None and out.inputs["Surface"].is_linked else None
+        if link is None or link.from_node.bl_idname != nodes.SURFACE:
+            self.warn(f"Material '{material.name}': the Verion nodes have no Surface connected to the output; using grey")
+            return dict(DEFAULT)
+        i = link.from_node.inputs
+        self._baked, self._quiet = {}, set()
+        v = lambda name: self.value(i[name], material)
+        p = dict(metallic=v("Metallic"), roughness=v("Roughness"), transmission=v("Transmission"), ior=v("IOR"),
+                 clearcoat=v("Clearcoat"), clearcoat_roughness=v("Clearcoat Roughness"))
+        if v("Dispersion") > 0:
+            p["dispersion"] = v("Dispersion")
+        p["base_color"] = self.color(i["Base Color"], material, True)
+        tex = self.texture_of(i["Base Color"], material)
+        if tex is not None:
+            p["base_color_texture"] = tex
+        sheen = self.color(i["Sheen Color"], material, False)
+        if any(sheen):
+            p["sheen_color"], p["sheen_roughness"] = sheen, v("Sheen Roughness")
+        strength = v("Emission Strength")
+        p["emission"] = [c * strength for c in self.color(i["Emission"], material, False)]
+        et = self.texture_of(i["Emission"], material)
+        if et is not None:
+            p["emission_texture"], p["emission"] = et, [strength] * 3
+        p.update(self.metallic_roughness(i, p, material))
+        nt = self.texture_of(i["Normal Map"], material)
+        if nt is not None:
+            p.update(normal_texture=nt, normal_scale=v("Normal Scale"))
+        if v("Opacity") < 1.0:
+            p = blend_clear(p, 1.0 - v("Opacity"))
+        return p
 
     def mix(self, node, material):
         fac = node.inputs["Fac"]
@@ -269,7 +324,7 @@ class Converter:
         if not socket.is_linked:
             return None
         n = socket.links[0].from_node
-        if n.bl_idname == "ShaderNodeTexImage" and n.image is not None:
+        if n.bl_idname in IMAGE_NODES and n.image is not None:
             if n.image.source == "TILED":
                 return self.udim_index(n.image, material, quiet)
             return self.image_index(n.image)
@@ -343,7 +398,7 @@ class Converter:
         w = h = 1
         sources = {}
         for name, sock in (("m", m), ("r", r)):
-            n = sock.links[0].from_node if sock.is_linked and sock.links[0].from_node.bl_idname == "ShaderNodeTexImage" else None
+            n = sock.links[0].from_node if sock.is_linked and sock.links[0].from_node.bl_idname in IMAGE_NODES else None
             if n is not None and n.image is not None:
                 px = images.pixels(n.image)
                 if px is not None:
