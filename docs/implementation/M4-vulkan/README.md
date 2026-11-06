@@ -19,7 +19,7 @@
 | 12 | RTX 3080 のベンチ基準（`benchmarks/baseline/`）と退行ゲート | REQ-PERF-001 / 002 | 未着手 |
 | 13 | Windows での OIDN（DLL の探索。CUDA デバイスが使えるなら比較） | REQ-ACC-001 | 未着手 |
 | 14 | Octane 比較の基準値: 比較条件（ハードウェア・解像度・シーン・画質の合わせ方・デノイズ）を決めて記録する | REQ-PERF-004 | 未着手 |
-| 15 | CI に Windows のビルドとテスト（GPU 不要の範囲）を足す | REQ-INFRA-002 | 未着手 |
+| 15 | CI に Windows のビルドとテスト（GPU 不要の範囲）を足す | REQ-INFRA-002 | 済（M4 以前から `ci.yml` が `windows-latest` で `mise run check` を通している。Vulkan の依存を足したら同じ CI で確かめる） |
 
 ## 決めてあること
 
