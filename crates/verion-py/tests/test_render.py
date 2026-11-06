@@ -212,6 +212,13 @@ class RenderTests(unittest.TestCase):
         finally:
             eng.close()
 
+    def test_stylization_world_is_accepted_and_checked(self):
+        s = build_scene()
+        s.set_stylization_world(virtual_light=True, direction=[0.0, 1.0, 0.5], strength=2.0)
+        s.set_stylization_world()
+        with self.assertRaises(ValueError):
+            s.set_stylization_world(strength=-1.0)
+
     def test_bad_input_is_a_python_error(self):
         s = verion.Scene()
         with self.assertRaises(ValueError):

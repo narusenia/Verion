@@ -9,7 +9,7 @@ import os
 import bpy
 import numpy as np
 
-from . import images
+from . import images, stylization
 
 DEFAULT = dict(base_color=[0.8, 0.8, 0.8], metallic=0.0, roughness=0.5)
 
@@ -45,6 +45,13 @@ class Converter:
     # -- node walking -------------------------------------------------------------------------
 
     def params(self, material):
+        p = self.surface_params(material)
+        st = stylization.material_style(material, self.image_index, self.warn) if material is not None else None
+        if st is not None:
+            p["stylization"], p["stylization_images"] = st
+        return p
+
+    def surface_params(self, material):
         if material is None:
             return dict(DEFAULT)
         if not material.use_nodes or material.node_tree is None:
@@ -285,11 +292,6 @@ class Converter:
                     return dict(normal_texture=idx, normal_scale=float(n.inputs["Strength"].default_value))
         self.warn(f"Material '{material.name}': only a tangent-space Normal Map fed by an image texture is supported")
         return {}
-
-
-def stylization_json(material):
-    """The `stylization` JSON of a material (item 8 fills this in)."""
-    return None
 
 
 def atlas_uvs(uvs, cols, rows):

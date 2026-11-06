@@ -7,7 +7,7 @@ reports `False` when the scene's structure changed, so the caller rebuilds.
 import numpy as np
 
 from . import camera as camera_mod
-from . import convert, lights, materials, world as world_mod
+from . import convert, lights, materials, stylization, world as world_mod
 
 GEOMETRY = {"MESH", "CURVE", "SURFACE", "FONT", "META"}
 
@@ -131,6 +131,7 @@ class Sync:
                     self.lights[key] = ("punctual", lights.add(self.scene, ob, self.warn))
         self.world_desc = world_mod.describe(scene.world, self.warn)
         self.world_light = world_mod.apply(self.scene, self.world_desc, self.warn, {})
+        stylization.apply_world(self.scene, scene.world)
         cam_ob = cam_ob or scene.camera
         if not with_camera:
             pass  # the viewport sets the camera from the 3D view
@@ -164,7 +165,7 @@ class Sync:
         for key, rec in self.lights.items():
             if rec[0] == "area":
                 objects[rec[2][2]] = assets[rec[2][2]] = key[0].split(":")[-1]
-        mats = [""] * (len(self.materials.index))
+        mats = [""] * (max(self.materials.index.values(), default=-1) + 1)  # area lights add materials too
         for k, i in self.materials.index.items():
             mats[i] = k or "None"
         return objects, mats, assets

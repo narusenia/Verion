@@ -14,12 +14,12 @@
 | 5 | 材質変換: Principled BSDF を Base BSDF に変換（色・金属・粗さ・透過・IOR・発光・コート・シーン・アルファ・ノーマルマップ・画像）。非対応ノードは警告して代替値にし、プロシージャルはベイク | REQ-DCC-003 | 一部済（Principled・Diffuse・Glossy・Glass・Emission・Mix、画像・法線マップ・UDIM 対応。非対応は警告。手続き型の材質ベイクは未着手） |
 | 6 | Final 出力: Render Result に Combined と AOV（Lighting AOV・Depth・Normal・Albedo・SampleCount）。進捗とキャンセル、OIDN のデノイズ、EXR のメタデータ（非物理の印） | REQ-DCC-001 / REQ-ACC-001 | 済（Combined と AOV、進捗とキャンセル、OIDN、EXR の非物理の印、レンダ範囲） |
 | 7 | ビューポートレンダ: `view_update` を `Changes` に変換して `update` を呼び、`view_draw` で表示する。Interactive モード（ReSTIR）を使う。描画中も UI を止めない（GIL を放して別スレッド）。First Clean Preview を計測して記録する | REQ-DCC-002 / REQ-VIEW-003 | 実装済・実機確認待ち（`Viewport` のロジックはヘッドレスでテスト済み。3D ビューへの描画 `view_draw` は Blender の GUI での確認が必要。計測は `first-clean-preview.md`） |
-| 8 | Stylization ノード: Blender のノードで Stylization レイヤー（ToonRamp・ShadowPalette など）を編集し、glTF 拡張と同じスキーマの IR に変換する | REQ-DCC-001 / REQ-STY | 未着手 |
+| 8 | Stylization ノード: Blender のノードで Stylization レイヤー（ToonRamp・ShadowPalette など）を編集し、glTF 拡張と同じスキーマの IR に変換する | REQ-DCC-001 / REQ-STY | 済（マテリアルタブの Stylization パネル `stylization.py`: hybridSurface・Toon Ramp・Shadow Palette・Rim・Stylized Specular・Outline・MatCap。glTF 拡張と同じ JSON をネイティブの同じ検証に通す。ワールドタブに仮想の主光源の設定。`test_stylization.py`。ノードエディタのノードではなくパネル（理由は下の「決めてあること」）） |
 | 9 | IES とライトリンク: `.ies` の配光を Spot / Point に使う。ライトごとの対象 Instance の絞り込み（TLAS のマスク）。NEE と MIS を保つ | REQ-CORE-004 / REQ-DCC-001 | 未着手 |
 | 10 | Cryptomatte: Object・Material・Asset の ID（規格どおりのハッシュ）を Render Result と EXR に出す | REQ-DCC-001 | 未着手 |
 | 11 | Shadow Catcher とアルファ合成 | REQ-DCC-001 | 未着手 |
 | 12 | UDIM・タイル化したテクスチャ | REQ-IO-004 | 済（UDIM を 1 枚のアトラスに変換。`test_udim.py`） |
-| 13 | 環境光だけで照明したときの Toon の段: HDRI から支配的な光の方向を求めて仮想の主光源にする（ADR-0020）。上書き（方向・強さ・無効化）、影の光線 1 本、一様な空では出さない。太陽のない HDRI で段が出る検証 | REQ-STY | 方針決定済み（ADR-0020）、実装は未着手 |
+| 13 | 環境光だけで照明したときの Toon の段: HDRI から支配的な光の方向を求めて仮想の主光源にする（ADR-0020）。上書き（方向・強さ・無効化）、影の光線 1 本、一様な空では出さない。太陽のない HDRI で段が出る検証 | REQ-STY | 済（ADR-0020。`pack::virtual_light`、光テーブルの kind 3、slot 3。ビューティは変わらない。上書きは Scene IR と Python と Blender のワールドタブにあり、glTF 拡張への項目の追加は利用者の確認待ち） |
 | 14 | DCC 間の一貫性: 同じシーンを Blender 経由と glTF 経由で描いて閾値内で一致する。Cycles との比較は参考値として記録する | REQ-QA | 未着手 |
 | 15 | 配布: アドオン zip（macOS Apple silicon・Windows x64）。ネイティブライブラリと OIDN の CPU 版・ライセンス文書を同梱（ADR-0018）。GPU 版 OIDN を足す導線（GUI） | REQ-INFRA-003 | 未着手 |
 | 16 | Windows（Vulkan）での確認: Blender 5.x と 4.5 LTS で、項目 4〜7 の画像が Metal と一致する | REQ-GPU-007 | 未着手（Windows 機の作業。`docs/handoff/` に手順を残す） |
@@ -32,6 +32,7 @@
 - ライトの W は Cycles の換算に合わせる。手続き型の空は HDRI へベイクする。環境光だけの Toon の段は HDRI から仮想の主光源を求める（ADR-0019、ADR-0020）
 - OIDN は CPU 版だけを同梱し、GPU 版は利用者が足す（ADR-0018）
 - 開発機の Blender は 4.5.15 LTS（Python 3.11、numpy 1.26）と 5.2.3 LTS（Python 3.13、numpy 2.3）。numpy の主な版が違うので、`numpy` クレートは両方の ABI で動くことを項目 2 で確かめる
+- Stylization の編集はノードではなく Material / World のプロパティパネルにする。Cycles のシェーダーツリーに入るカスタムノードは Blender の版ごとの API 差と保守が重く、ランタイムの保存形式も不安定になる。パネルは 4.5 LTS と 5.x で同じコードで動き、検証はネイティブ側の 1 か所に集まる
 - 新しい依存は PyO3・maturin・`numpy` クレートまで（利用者が許可）。それ以外は追加のたびに確認する
 
 ## 要確認（利用者）
