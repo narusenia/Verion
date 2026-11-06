@@ -38,6 +38,17 @@ Apple M4 Pro、512×384、参照 4096 spp、基準は Reference の 128 spp の�
 - 高 spp では偏りと相関の下限が見える（1024 spp の PSNR: cornell_box は 47.7 dB で通常は 58.0 dB、many_lights は 38.0 dB で通常は 39.1 dB）。ReSTIR は低 spp で素早くきれいな絵を出すための機能で、最終品質は Reference で出す
 - メモリは 1 画素 320 B（Reservoir 2 フレームと作業領域）。1024×768 で 252 MB
 
+NVIDIA GeForce RTX 3080（Vulkan）、512×384、参照 16384 spp（`scripts/eval_restir.sh` の既定。Metal の表は 4096 spp）、同じ基準。Windows 機での測定で、GPU の時間は 1 桁ミリ秒の差になるため、Metal の表より揺れが大きい:
+
+| シーン | Reference s | DI のみ | DI + GI |
+|---|---|---|---|
+| many_lights | 0.053 | 0.074 秒（0.72 倍） | 0.021 秒（2.58 倍） |
+| many_lights_dark | 0.032 | 0.025 秒（1.27 倍） | 0.030 秒（1.04 倍） |
+| cornell_box | 0.047 | 0.071 秒（0.66 倍） | 0.030 秒（1.58 倍） |
+| showcase | 0.036 | 0.044 秒（0.81 倍） | 0.060 秒（0.59 倍） |
+
+- 傾向は Metal と同じ（DI は直接光が支配的なシーンだけ、GI は間接光が支配的な室内だけ効き、Emitter のないシーンでは費用だけが乗る）。GI の倍率は Metal より小さい（many_lights で 4.90 倍に対し 2.58 倍）。理由は調べていない
+
 ## ReSTIR PT について
 
 M5 では入れない。理由は、判断に必要な測定がまだ揃っていないことと、先に決めると後で作り直しになることにある（実装の大きさは理由にしない）:
