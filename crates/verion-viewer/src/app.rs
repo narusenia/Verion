@@ -212,6 +212,7 @@ pub struct App {
     adaptive_threshold: f32,
     /// ReSTIR DI (REQ-ACC-002): faster to a clean image with many emitters; biased, so not physical.
     restir: bool,
+    restir_gi: bool,
     /// Pixels that still take samples, counted after each accumulate.
     active: usize,
     /// Denoise the finished (or paused) accumulation with OIDN (ADR-0013).
@@ -332,6 +333,7 @@ impl App {
             adaptive: false,
             adaptive_threshold: Adaptive::default().threshold,
             restir: false,
+            restir_gi: false,
             active: (w * h) as usize,
             denoise: false,
             denoiser: None,
@@ -994,9 +996,18 @@ impl App {
             self.renderer.set_adaptive(self.adaptive_setting());
             self.restart();
         }
-        if widgets::checkbox(ui, &mut self.restir, "ReSTIR DI (many emitters)") {
+        let mut restir_changed =
+            widgets::checkbox(ui, &mut self.restir, "ReSTIR DI (many emitters)");
+        ui.add_enabled_ui(self.restir, |ui| {
+            restir_changed |=
+                widgets::checkbox(ui, &mut self.restir_gi, "ReSTIR GI (indirect light)");
+        });
+        if restir_changed {
             self.renderer
-                .set_restir(self.restir.then(verion_gpu::Restir::default));
+                .set_restir(self.restir.then(|| verion_gpu::Restir {
+                    gi: self.restir_gi,
+                    ..verion_gpu::Restir::default()
+                }));
             self.restart();
         }
         ui.label(

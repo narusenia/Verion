@@ -11,8 +11,8 @@ use clap::Parser;
 enum Mode {
     /// Physical path tracing only (REQ-CORE-006).
     Reference,
-    /// Path tracing with ReSTIR DI: a faster route to a clean image in scenes with many emitters.
-    /// Not physical (the reuse is biased); no Stylization Pass (ADR-0016).
+    /// Path tracing with ReSTIR DI and GI: a faster route to a clean image. Not physical (the
+    /// reuse is biased); no Stylization Pass (ADR-0016).
     Interactive,
     /// Stylization Pass on the primary hit (REQ-STY-007). Not physical; needs the lighting AOVs,
     /// so it costs the extra GPU memory of `--lighting-aovs`.
@@ -157,9 +157,10 @@ struct Args {
     #[arg(long)]
     restir: bool,
     /// ReSTIR GI on top of DI: the first bounce's indirect light is reused between frames and
-    /// neighbouring pixels. Beauty only (skipped under the lighting split). Implies --restir
-    #[arg(long)]
-    restir_gi: bool,
+    /// neighbouring pixels. Beauty only (skipped under the lighting split). Implies --restir;
+    /// on by default in `--mode interactive`, where `--restir-gi=false` turns it off
+    #[arg(long, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
+    restir_gi: Option<bool>,
     /// Light samples drawn per pixel and frame before ReSTIR's reuse
     #[arg(long, default_value_t = 4)]
     restir_candidates: u32,
@@ -258,7 +259,9 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
         return Err("width, height and spp must be at least 1".into());
     }
     let grade = args.color_grade()?;
-    let restir = args.restir || args.restir_gi || args.mode == Mode::Interactive;
+    let interactive = args.mode == Mode::Interactive;
+    let restir_gi = args.restir_gi.unwrap_or(interactive);
+    let restir = args.restir || restir_gi || interactive;
     if restir && args.mode.physical() {
         return Err("--restir is not allowed in reference mode (its reuse is biased)".into());
     }
@@ -298,7 +301,7 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
     renderer.set_stage_timing(args.stage_timing);
     renderer.set_restir(restir.then_some(Restir {
         di: true,
-        gi: args.restir_gi,
+        gi: restir_gi,
         candidates: args.restir_candidates,
         history: args.restir_history,
     }));
@@ -469,7 +472,7 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
             }),
             denoiser: args.denoise.then_some("oidn"),
             adaptive_threshold: args.adaptive,
-            restir: restir.then_some(if args.restir_gi { "di+gi" } else { "di" }),
+            restir: restir.then_some(if restir_gi { "di+gi" } else { "di" }),
         },
     };
     let t = Instant::now();
