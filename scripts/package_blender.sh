@@ -25,8 +25,8 @@ cp plugins/blender/verion_blender/*.py "$stage/"
 awk -v platform="$platform" -v wheel="$wheel" '
   /^\[permissions\]/ { printf "platforms = [\"%s\"]\nwheels = [\"./wheels/%s\"]\n\n", platform, wheel }
   { print }' plugins/blender/verion_blender/blender_manifest.toml > "$stage/blender_manifest.toml"
-"$blender" --command extension validate "$stage"
-"$blender" --command extension build --source-dir "$stage" --output-dir "$out"
+"$blender" --factory-startup --command extension validate "$stage"
+"$blender" --factory-startup --command extension build --source-dir "$stage" --output-dir "$out"
 ls "$out"/*.zip
 
 # Smoke test: install the zip into an empty Blender profile and render with it. The profile is a temporary

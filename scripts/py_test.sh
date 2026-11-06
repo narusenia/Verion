@@ -5,8 +5,9 @@
 # `blender-only` skips the plain Python.
 set -eu
 out=target/py
+root=$(pwd -W 2>/dev/null || pwd)  # native path: Windows Blender cannot read /e/...
 sh scripts/py_build.sh
-export PYTHONPATH="$PWD/$out"
+export PYTHONPATH="$root/$out"
 tests=crates/verion-py/tests
 if [ "${1:-}" != blender-only ]; then
   echo "== plain Python"
@@ -14,8 +15,8 @@ if [ "${1:-}" != blender-only ]; then
 fi
 cat > "$out/run_tests.py" <<PY
 import sys, unittest
-sys.path.insert(0, "$PWD/$out")
-r = unittest.TextTestRunner().run(unittest.defaultTestLoader.discover("$PWD/$tests", "test_*.py"))
+sys.path.insert(0, "$root/$out")
+r = unittest.TextTestRunner().run(unittest.defaultTestLoader.discover("$root/$tests", "test_*.py"))
 sys.exit(not r.wasSuccessful())
 PY
 list=$(mktemp)
