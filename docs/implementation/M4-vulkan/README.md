@@ -37,7 +37,7 @@
 - Wavefront は Dispatch ごとに全体メモリバリア（compute と間接引数の読み出しと転送）を入れる。キューは深さの偶奇で 2 本を入れ替え、`wf_select` は深さ 0 の入力キューへ書く
 - メモリ割り当ては `gpu-allocator`（MIT / Apache-2.0、`deny` 通過）。1 バッファ 1 割り当てだと割り当て数の上限とページの無駄が出て、メッシュの多いシーンで困るため
 - `scripts/shaders.sh check` は SPIR-V をバイト比較しない。slangc の出力は同じ機械なら決定的だが、macOS と Windows で定数の並びが違う。SPIR-V の古さは Slang ソースのチェックサム（`sources.cksum`、改行を無視）で見て、MSL はこれまでどおりバイト比較する
-- ホスト側のシーン整形（頂点・材質・ライト・環境マップ・パラメータ・読み戻し）は `verion-gpu`（`pack`・`readback`・`wavefront`）に出し、Metal と Vulkan が同じバイト列を使う。Metal 側の置き換えは Mac で未検証（CI の macOS で確かめる）
+- ホスト側のシーン整形（頂点・材質・ライト・環境マップ・パラメータ・読み戻し）は `verion-gpu`（`pack`・`readback`・`wavefront`）に出し、Metal と Vulkan が同じバイト列を使う。Metal 側の置き換えは CI の macOS（`mise run check`）でコンパイル・clippy・テストが通ることを確認した。Metal の画像が変わっていないことの実機確認は Mac で行う
 
 ## 未決
 
@@ -58,7 +58,7 @@
 - Octane の利用環境（保留）: まだ課金していない。利用者が C4D / Blender + Octane の環境を用意してから、上の条件で比較を始める
 - Verion のライセンス判断（ADR-0004 は「M4 前後、NVIDIA SDK 等の条件確認後」）。M4 では NVIDIA SDK を使っていない（OIDN の CUDA モジュールは OIDN の DLL に含まれる）ので、判断の時期だけが残る
 - OIDN の DLL の配布方法（Windows 向けに同梱するか、利用者に置いてもらうか）
-- Mac での確認: Metal の置き換え（`verion-gpu` への切り替え）が CI の macOS で通ること、Metal の参照画像セットの作成（項目 9）
+- Mac での確認: Metal の参照画像セットの作成（項目 9）と、置き換え前後で Metal の画像が変わっていないことの確認
 
 ## 完了条件
 
