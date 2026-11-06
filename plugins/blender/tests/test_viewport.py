@@ -122,6 +122,37 @@ class ViewportTests(unittest.TestCase):
         finally:
             vp.close()
 
+    def test_camera_move_renders_small_then_settles_to_full_size(self):
+        from verion_blender import native, viewport
+        from verion_blender.viewport import View, Viewport
+
+        cam = make_scene()
+        sc = bpy.context.scene
+        dg = bpy.context.evaluated_depsgraph_get()
+        vp = Viewport(native.load())
+        old, viewport.SETTLE_S = viewport.SETTLE_S, 0.05
+        try:
+            vp.update(dg, View(cam.matrix_world, perspective(), 96, 96), sc.verion)
+            self.assertTrue(wait_clean(vp))
+            vp.set_view(View(cam.matrix_world, perspective(0.6), 96, 96), sc.verion)
+            self.assertTrue(vp.moving)
+            vp.stats.pop("clean_s", None)
+            self.assertTrue(wait_clean(vp))
+            self.assertEqual(vp.image[2].shape[:2], (24, 24))
+            self.assertFalse(vp.resized(View(cam.matrix_world, perspective(0.6), 96, 96), sc.verion))
+            time.sleep(0.1)
+            self.assertTrue(vp.settle(sc.verion))
+            self.assertFalse(vp.moving)
+            self.assertTrue(wait_clean(vp))
+            self.assertEqual(vp.image[2].shape[:2], (96, 96))
+            # The option off: a move changes the camera only.
+            sc.verion.viewport_fast_move = False
+            vp.set_view(View(cam.matrix_world, perspective(0.9), 96, 96), sc.verion)
+            self.assertFalse(vp.moving)
+        finally:
+            viewport.SETTLE_S = old
+            vp.close()
+
     def test_orthographic_view_is_a_far_perspective(self):
         from verion_blender.viewport import View
 

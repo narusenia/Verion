@@ -17,6 +17,11 @@ class VerionSceneSettings(bpy.types.PropertyGroup):
         items=[("1.0", "100%", ""), ("0.5", "50%", ""), ("0.25", "25%", "")],
         default="1.0",
     )
+    viewport_fast_move: BoolProperty(
+        name="Low Resolution While Moving",
+        description="Render the viewport at a quarter of the resolution while the camera moves, then at full resolution",
+        default=True,
+    )
     clean_samples: IntProperty(
         name="Clean Preview Samples",
         description="Samples after which a viewport frame counts as a clean preview (reported in the status bar)",

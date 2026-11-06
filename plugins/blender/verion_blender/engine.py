@@ -92,6 +92,7 @@ class VerionRenderEngine(bpy.types.RenderEngine):
         if vp.resized(view, scene.verion):
             vp.update(depsgraph, view, scene.verion)  # view_update is not always called on a resize
         vp.set_view(view, scene.verion)
+        vp.settle(scene.verion)
         if vp.poll() is not None or self.draw_data is None:
             self.draw_data = _upload(vp.image)
         self.update_stats("Verion", vp.status())
@@ -101,7 +102,7 @@ class VerionRenderEngine(bpy.types.RenderEngine):
             _draw(self.draw_data, context.region)
             self.unbind_display_space_shader()
             gpu.state.blend_set("NONE")
-        if vp.job is not None and not vp.job.done():
+        if vp.job is not None and (vp.moving or not vp.job.done()):
             self.tag_redraw()  # more frames are coming
 
     # -- final render -----------------------------------------------------------------------------

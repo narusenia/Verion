@@ -59,6 +59,7 @@ class VERION_PT_viewport(VerionPanel, bpy.types.Panel):
         col = self.layout.column()
         col.prop(s, "viewport_samples")
         col.prop(s, "viewport_scale")
+        col.prop(s, "viewport_fast_move")
         col.prop(s, "viewport_restir")
         col.prop(s, "clean_samples")
 

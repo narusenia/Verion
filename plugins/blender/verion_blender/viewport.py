@@ -14,6 +14,10 @@ from .sync import Sync
 
 # How far a perspective camera stands back to stand in for an orthographic view, in view extents.
 ORTHO_DISTANCE = 2000.0
+# While the camera moves the job renders at this fraction of the size; it returns to full size
+# after the view has been still for SETTLE_S seconds.
+MOVE_SCALE = 0.25
+SETTLE_S = 0.3
 
 
 class View:
@@ -70,7 +74,9 @@ class Viewport:
         self.engine = None
         self.job = None
         self.key = None
-        self.size = None
+        self.size = None        # the full render size; the job renders smaller while the camera moves
+        self.moving = False
+        self.last_move = 0.0
         self.view = None
         self.image = None       # latest (version, samples, rgba array)
         self.stats = {}
@@ -97,11 +103,12 @@ class Viewport:
         self.engine = self.native.Engine(scene)
         self._start(settings, w, h)
 
-    def _start(self, settings, w, h):
-        cfg = settings.native_settings(w, h, final=False)
-        self.job = self.engine.start(cfg, interactive=True)
+    def _start(self, settings, w, h, scale=1.0):
+        cfg = settings.native_settings(max(1, int(w * scale)), max(1, int(h * scale)), final=False)
+        self.job = self.engine.start(cfg, interactive=True)  # replaces a running job
         self.key = settings_key(settings)
         self.size = (w, h)
+        self.moving = scale < 1.0
 
     def _apply_view(self, view):
         t, fov, shift = view.camera()
@@ -126,6 +133,16 @@ class Viewport:
         """`view_draw` saw the user move the view: only the camera changes."""
         if self.engine is not None and self._view_changed(view):
             self._apply_view(view)
+            self.last_move = time.monotonic()
+            if settings.viewport_fast_move and not self.moving:
+                self._start(settings, *self.size, scale=MOVE_SCALE)
+
+    def settle(self, settings):
+        """True when the view has been still long enough: the job is restarted at full size."""
+        if self.moving and time.monotonic() - self.last_move > SETTLE_S:
+            self._start(settings, *self.size)
+            return True
+        return False
 
     def resized(self, view, settings):
         """True when the region no longer matches the size the job renders at."""
