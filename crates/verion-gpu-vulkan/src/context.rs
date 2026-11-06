@@ -3,7 +3,7 @@
 //! execution reordering and the timestamp clock are optional.
 
 use std::{
-    ffi::{CStr, c_char},
+    ffi::{CStr, c_char, c_void},
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -16,12 +16,31 @@ use verion_gpu::MemoryUsage;
 
 use crate::Error;
 
-/// Which shader-execution-reordering extension the device offers (`VK_EXT_` is the cross-vendor one).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SerSupport {
-    Ext,
-    Nv,
+/// `VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT`, which ash 0.38 (Vulkan 1.3.281) predates.
+#[repr(C)]
+struct ReorderFeatures {
+    s_type: vk::StructureType,
+    p_next: *mut c_void,
+    ray_tracing_invocation_reorder: vk::Bool32,
 }
+
+impl ReorderFeatures {
+    const STRUCTURE_TYPE: i32 = 1_000_581_000;
+
+    fn new(on: bool) -> Self {
+        Self {
+            s_type: vk::StructureType::from_raw(Self::STRUCTURE_TYPE),
+            p_next: std::ptr::null_mut(),
+            ray_tracing_invocation_reorder: vk::Bool32::from(on),
+        }
+    }
+}
+
+// SAFETY: `repr(C)` with the `sType` / `pNext` header Vulkan expects.
+unsafe impl vk::ExtendsPhysicalDeviceFeatures2 for ReorderFeatures {}
+unsafe impl vk::ExtendsDeviceCreateInfo for ReorderFeatures {}
+
+const REORDER_EXTENSION: &CStr = c"VK_EXT_ray_tracing_invocation_reorder";
 
 /// What the chosen device can do, for the metrics and for choosing code paths.
 #[derive(Clone, Debug)]
@@ -33,9 +52,11 @@ pub struct DeviceInfo {
     pub timestamp_period_ns: Option<f64>,
     /// Valid low bits of a timestamp (the rest read as zero).
     pub timestamp_bits: u32,
-    pub ser: Option<SerSupport>,
-    /// `VK_KHR_ray_tracing_pipeline`, which the SER megakernel needs.
-    pub ray_tracing_pipeline: bool,
+    /// Shader execution reordering is enabled: `VK_EXT_ray_tracing_invocation_reorder` and the
+    /// ray tracing pipeline it runs in. Without it the backend runs everything as compute.
+    pub ser: bool,
+    pub(crate) shader_group_handle_size: u32,
+    pub(crate) shader_group_base_alignment: u32,
     pub(crate) scratch_alignment: u64,
     pub(crate) storage_alignment: u64,
     pub(crate) memory_budget_ext: bool,
@@ -46,6 +67,7 @@ pub(crate) struct Inner {
     pub allocator: Mutex<Option<Allocator>>,
     pub device: ash::Device,
     pub accel: khr::acceleration_structure::Device,
+    pub ray_tracing: Option<khr::ray_tracing_pipeline::Device>,
     pub queue: Mutex<vk::Queue>,
     pub pool: Mutex<vk::CommandPool>,
     pub info: DeviceInfo,
@@ -161,10 +183,14 @@ impl VulkanContext {
                 let mut accel = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default();
                 let mut query = vk::PhysicalDeviceRayQueryFeaturesKHR::default();
                 let mut v12 = vk::PhysicalDeviceVulkan12Features::default();
+                let mut rt = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default();
+                let mut reorder = ReorderFeatures::new(false);
                 let mut f2 = vk::PhysicalDeviceFeatures2::default()
                     .push_next(&mut accel)
                     .push_next(&mut query)
-                    .push_next(&mut v12);
+                    .push_next(&mut v12)
+                    .push_next(&mut rt)
+                    .push_next(&mut reorder);
                 instance.get_physical_device_features2(physical, &mut f2);
                 if props.api_version < vk::API_VERSION_1_2 {
                     missing.push("Vulkan 1.2");
@@ -195,7 +221,10 @@ impl VulkanContext {
                     .map_or(0, |f| f.timestamp_valid_bits);
 
                 let mut as_props = vk::PhysicalDeviceAccelerationStructurePropertiesKHR::default();
-                let mut p2 = vk::PhysicalDeviceProperties2::default().push_next(&mut as_props);
+                let mut rt_props = vk::PhysicalDeviceRayTracingPipelinePropertiesKHR::default();
+                let mut p2 = vk::PhysicalDeviceProperties2::default()
+                    .push_next(&mut as_props)
+                    .push_next(&mut rt_props);
                 instance.get_physical_device_properties2(physical, &mut p2);
 
                 let mem = instance.get_physical_device_memory_properties(physical);
@@ -205,18 +234,18 @@ impl VulkanContext {
                     .map(|h| h.size)
                     .sum();
 
-                let ser = if has(&exts, c"VK_EXT_ray_tracing_invocation_reorder") {
-                    Some(SerSupport::Ext)
-                } else if has(&exts, c"VK_NV_ray_tracing_invocation_reorder") {
-                    Some(SerSupport::Nv)
-                } else {
-                    None
-                };
+                let ser = has(&exts, REORDER_EXTENSION)
+                    && has(&exts, khr::ray_tracing_pipeline::NAME)
+                    && reorder.ray_tracing_invocation_reorder != vk::FALSE
+                    && rt.ray_tracing_pipeline != vk::FALSE;
                 let budget = has(&exts, c"VK_EXT_memory_budget");
                 let mut extensions: Vec<&'static CStr> =
                     REQUIRED_EXTENSIONS.iter().map(|&(n, _)| n).collect();
                 if budget {
                     extensions.push(c"VK_EXT_memory_budget");
+                }
+                if ser {
+                    extensions.extend([khr::ray_tracing_pipeline::NAME, REORDER_EXTENSION]);
                 }
                 out.push(Candidate {
                     physical,
@@ -234,7 +263,8 @@ impl VulkanContext {
                             && props.limits.timestamp_period > 0.0)
                             .then_some(f64::from(props.limits.timestamp_period)),
                         ser,
-                        ray_tracing_pipeline: has(&exts, khr::ray_tracing_pipeline::NAME),
+                        shader_group_handle_size: rt_props.shader_group_handle_size,
+                        shader_group_base_alignment: rt_props.shader_group_base_alignment,
                         scratch_alignment: u64::from(
                             as_props
                                 .min_acceleration_structure_scratch_offset_alignment
@@ -271,13 +301,19 @@ impl VulkanContext {
             .acceleration_structure(true);
         let mut query = vk::PhysicalDeviceRayQueryFeaturesKHR::default().ray_query(true);
         let mut v12 = vk::PhysicalDeviceVulkan12Features::default().buffer_device_address(true);
+        let mut rt =
+            vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default().ray_tracing_pipeline(true);
+        let mut reorder = ReorderFeatures::new(true);
         let names: Vec<*const c_char> = best.extensions.iter().map(|n| n.as_ptr()).collect();
-        let create = vk::DeviceCreateInfo::default()
+        let mut create = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_info)
             .enabled_extension_names(&names)
             .push_next(&mut accel)
             .push_next(&mut query)
             .push_next(&mut v12);
+        if best.info.ser {
+            create = create.push_next(&mut rt).push_next(&mut reorder);
+        }
         // SAFETY: the create info and what it points to live through the calls; the device is used
         // only through this context.
         unsafe {
@@ -301,6 +337,10 @@ impl VulkanContext {
             Ok(Inner {
                 allocator: Mutex::new(Some(allocator)),
                 accel: khr::acceleration_structure::Device::new(instance, &device),
+                ray_tracing: best
+                    .info
+                    .ser
+                    .then(|| khr::ray_tracing_pipeline::Device::new(instance, &device)),
                 device,
                 queue: Mutex::new(queue),
                 pool: Mutex::new(pool),

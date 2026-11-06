@@ -20,7 +20,7 @@ pub struct Pipelines {
 impl Pipelines {
     pub fn new(ctx: &VulkanContext) -> Result<Self, Error> {
         let make = |name: &str| {
-            Pipeline::new(ctx, name, crate::shaders::spirv(name), Some(PARAMS_BINDING))
+            Pipeline::compute(ctx, name, crate::shaders::spirv(name), Some(PARAMS_BINDING))
         };
         Ok(Self {
             select: make("wf_select")?,

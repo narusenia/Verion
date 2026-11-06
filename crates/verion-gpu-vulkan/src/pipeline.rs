@@ -2,6 +2,7 @@
 //! descriptor sets that bind buffers to them.
 
 use ash::vk;
+use gpu_allocator::MemoryLocation;
 
 use crate::{
     Error, VulkanContext,
@@ -14,6 +15,13 @@ use crate::{
 /// at once (Metal re-sends the block with `setBytes`).
 pub const PARAMS_BINDING: u32 = 6;
 
+/// The shader binding table of a ray generation pipeline: only a ray generation record, since the
+/// hit objects of shader execution reordering never invoke hit or miss shaders.
+pub struct Sbt {
+    _buffer: Buffer,
+    pub raygen: vk::StridedDeviceAddressRegionKHR,
+}
+
 pub struct Pipeline {
     ctx: VulkanContext,
     pub bindings: Vec<Binding>,
@@ -21,26 +29,58 @@ pub struct Pipeline {
     set_layout: vk::DescriptorSetLayout,
     pub layout: vk::PipelineLayout,
     pub raw: vk::Pipeline,
+    /// Set for ray generation pipelines (`trace_rays`); compute pipelines use `dispatch`.
+    pub sbt: Option<Sbt>,
+}
+
+fn align_up(v: u64, a: u64) -> u64 {
+    v.div_ceil(a) * a
 }
 
 impl Pipeline {
-    /// `dynamic` names the binding read through a dynamic offset, if any.
-    pub fn new(
+    /// A compute pipeline. `dynamic` names the binding read through a dynamic offset, if any.
+    pub fn compute(
         ctx: &VulkanContext,
         name: &str,
         spv: &[u8],
         dynamic: Option<u32>,
     ) -> Result<Self, Error> {
+        Self::build(ctx, name, spv, dynamic, false)
+    }
+
+    /// A ray tracing pipeline with the shader as its only (ray generation) stage. Needs a device
+    /// with `DeviceInfo::ser`.
+    pub fn ray_gen(
+        ctx: &VulkanContext,
+        name: &str,
+        spv: &[u8],
+        dynamic: Option<u32>,
+    ) -> Result<Self, Error> {
+        Self::build(ctx, name, spv, dynamic, true)
+    }
+
+    fn build(
+        ctx: &VulkanContext,
+        name: &str,
+        spv: &[u8],
+        dynamic: Option<u32>,
+        ray_gen: bool,
+    ) -> Result<Self, Error> {
         let bindings = reflect::bindings(spv).map_err(|e| Error::Shader(format!("{name}: {e}")))?;
         let words = reflect::words(spv);
         let d = &ctx.0.device;
+        let stage_kind = if ray_gen {
+            vk::ShaderStageFlags::RAYGEN_KHR
+        } else {
+            vk::ShaderStageFlags::COMPUTE
+        };
         let layout_bindings: Vec<_> = bindings
             .iter()
             .map(|b| {
                 vk::DescriptorSetLayoutBinding::default()
                     .binding(b.binding)
                     .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                    .stage_flags(stage_kind)
                     .descriptor_type(descriptor_type(*b, dynamic))
             })
             .collect();
@@ -57,40 +97,119 @@ impl Pipeline {
                     None,
                 )
                 .inspect_err(|_| d.destroy_descriptor_set_layout(set_layout, None))?;
+            let fail = |e: Error| {
+                d.destroy_pipeline_layout(layout, None);
+                d.destroy_descriptor_set_layout(set_layout, None);
+                e
+            };
             let module = d
                 .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&words), None)
-                .inspect_err(|_| {
-                    d.destroy_pipeline_layout(layout, None);
-                    d.destroy_descriptor_set_layout(set_layout, None);
-                })?;
+                .map_err(|e| fail(e.into()))?;
             let stage = vk::PipelineShaderStageCreateInfo::default()
-                .stage(vk::ShaderStageFlags::COMPUTE)
+                .stage(stage_kind)
                 .module(module)
                 .name(c"main");
-            let made = d.create_compute_pipelines(
-                vk::PipelineCache::null(),
-                &[vk::ComputePipelineCreateInfo::default()
-                    .stage(stage)
-                    .layout(layout)],
-                None,
-            );
+            let made = if ray_gen {
+                Self::create_ray_gen(ctx, stage, layout)
+            } else {
+                d.create_compute_pipelines(
+                    vk::PipelineCache::null(),
+                    &[vk::ComputePipelineCreateInfo::default()
+                        .stage(stage)
+                        .layout(layout)],
+                    None,
+                )
+                .map(|p| (p[0], None))
+                .map_err(|(_, e)| Error::Shader(format!("{name}: {e}")))
+            };
             d.destroy_shader_module(module, None);
-            match made {
-                Ok(p) => Ok(Self {
-                    ctx: ctx.clone(),
-                    bindings,
-                    dynamic,
-                    set_layout,
-                    layout,
-                    raw: p[0],
-                }),
-                Err((_, e)) => {
-                    d.destroy_pipeline_layout(layout, None);
-                    d.destroy_descriptor_set_layout(set_layout, None);
-                    Err(Error::Shader(format!("{name}: {e}")))
+            let (raw, sbt) = made.map_err(fail)?;
+            Ok(Self {
+                ctx: ctx.clone(),
+                bindings,
+                dynamic,
+                set_layout,
+                layout,
+                raw,
+                sbt,
+            })
+        }
+    }
+
+    fn create_ray_gen(
+        ctx: &VulkanContext,
+        stage: vk::PipelineShaderStageCreateInfo<'_>,
+        layout: vk::PipelineLayout,
+    ) -> Result<(vk::Pipeline, Option<Sbt>), Error> {
+        let rt = ctx
+            .0
+            .ray_tracing
+            .as_ref()
+            .ok_or(Error::Resource("ray tracing pipeline (device has no SER)"))?;
+        let unused = vk::SHADER_UNUSED_KHR;
+        let group = [vk::RayTracingShaderGroupCreateInfoKHR::default()
+            .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
+            .general_shader(0)
+            .closest_hit_shader(unused)
+            .any_hit_shader(unused)
+            .intersection_shader(unused)];
+        let stages = [stage];
+        // SAFETY: the create info and what it points to live through the calls; the pipeline is
+        // destroyed in `drop`.
+        unsafe {
+            let raw = rt
+                .create_ray_tracing_pipelines(
+                    vk::DeferredOperationKHR::null(),
+                    vk::PipelineCache::null(),
+                    &[vk::RayTracingPipelineCreateInfoKHR::default()
+                        .stages(&stages)
+                        .groups(&group)
+                        .max_pipeline_ray_recursion_depth(1)
+                        .layout(layout)],
+                    None,
+                )
+                .map_err(|(_, e)| Error::Vulkan(e))?[0];
+            let info = &ctx.0.info;
+            let handle = rt.get_ray_tracing_shader_group_handles(
+                raw,
+                0,
+                1,
+                info.shader_group_handle_size as usize,
+            );
+            let sbt = handle
+                .map_err(Error::from)
+                .and_then(|handle| Self::sbt(ctx, &handle));
+            match sbt {
+                Ok(sbt) => Ok((raw, Some(sbt))),
+                Err(e) => {
+                    ctx.0.device.destroy_pipeline(raw, None);
+                    Err(e)
                 }
             }
         }
+    }
+
+    fn sbt(ctx: &VulkanContext, handle: &[u8]) -> Result<Sbt, Error> {
+        let align = u64::from(ctx.0.info.shader_group_base_alignment);
+        let stride = align_up(handle.len() as u64, align);
+        let mut buffer = Buffer::new(
+            ctx,
+            stride + align,
+            vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR,
+            MemoryLocation::CpuToGpu,
+            "shader binding table",
+        )?;
+        let base = buffer.address();
+        let at = align_up(base, align) - base;
+        buffer.mapped()[at as usize..at as usize + handle.len()].copy_from_slice(handle);
+        Ok(Sbt {
+            raygen: vk::StridedDeviceAddressRegionKHR {
+                device_address: base + at,
+                stride,
+                size: stride,
+            },
+            _buffer: buffer,
+        })
     }
 }
 

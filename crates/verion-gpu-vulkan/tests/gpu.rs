@@ -127,3 +127,41 @@ fn a_scene_without_instances_is_an_error_not_a_crash() {
     let ctx = VulkanContext::new().unwrap();
     assert!(Renderer::new(&ctx, &Scene::new()).is_err());
 }
+
+#[test]
+#[ignore = "needs a Vulkan ray tracing GPU"]
+fn reordering_megakernel_renders_the_same_image() {
+    let ctx = VulkanContext::new().unwrap();
+    if !ctx.info().ser {
+        println!("no shader execution reordering on this device: skipped");
+        return;
+    }
+    let mut r = renderer(&ctx);
+    let plain = render(&mut r, Integrator::Megakernel, None);
+    assert!(r.set_reorder(true));
+    let reordered = render(&mut r, Integrator::Megakernel, None);
+    let mean = |acc: &dyn Fn() -> Vec<[f32; 3]>| {
+        let img = acc();
+        (0..3)
+            .map(|c| img.iter().map(|p| f64::from(p[c])).sum::<f64>() / img.len() as f64)
+            .collect::<Vec<_>>()
+    };
+    let (a, b) = (mean(&|| plain.mean()), mean(&|| reordered.mean()));
+    for c in 0..3 {
+        assert!(
+            a[c] > 0.0 && (b[c] / a[c] - 1.0).abs() < 0.01,
+            "channel {c}: {a:?} vs {b:?}"
+        );
+    }
+    // Both lighting splits exist, so Stylized works with it too.
+    assert!(reordered.lighting().is_some());
+}
+
+#[test]
+#[ignore = "needs a Vulkan ray tracing GPU"]
+fn reordering_is_refused_when_unsupported_and_off_by_default() {
+    let ctx = VulkanContext::new().unwrap();
+    let mut r = renderer(&ctx);
+    assert!(r.set_reorder(false));
+    assert_eq!(r.set_reorder(true), ctx.info().ser);
+}

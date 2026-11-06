@@ -10,7 +10,7 @@ mod reflect;
 mod renderer;
 mod shaders;
 
-pub use context::{DeviceInfo, SerSupport, VulkanContext};
+pub use context::{DeviceInfo, VulkanContext};
 pub use renderer::{Accumulation, Renderer};
 pub use shaders::SHADERS;
 pub use verion_gpu::{Adaptive, Aovs, Integrator, LightingAovs, MemoryUsage};

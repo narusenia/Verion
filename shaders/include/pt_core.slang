@@ -503,6 +503,10 @@ float reflectivePdf(Surface s, float3 woL, float3 wiL)
     return q;
 }
 
+#ifdef VERION_SER
+struct SerPayload { uint unused; };
+#endif
+
 bool occluded(float3 o, float3 d, float tmax)
 {
     RayDesc ray;
@@ -510,10 +514,18 @@ bool occluded(float3 o, float3 d, float tmax)
     ray.Direction = d;
     ray.TMin = 0.0;
     ray.TMax = tmax;
+#ifdef VERION_SER
+    // The ray tracing pipeline's shaders trace through HitObjects only: a ray query inside the
+    // ray generation shader hangs the RTX 3080 driver (616.92) once the launch is large enough.
+    SerPayload payload;
+    payload.unused = 0;
+    return HitObject::TraceRay(scene, RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xFF, 0, 0, 0, ray, payload).IsHit();
+#else
     RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
     q.TraceRayInline(scene, 0, 0xFF, ray);
     while (q.Proceed()) { }
     return q.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+#endif
 }
 
 // Everything one path carries between bounces.
@@ -579,6 +591,47 @@ PathState generatePathFor(uint px, uint py, uint sample)
     return s;
 }
 
+#ifdef VERION_SER
+// Shader execution reordering (Vulkan, M4 item 10): the closest hit goes through a HitObject, then the
+// threads regroup by the material they hit, so the shading that follows runs coherently. The hit
+// data is the same, so the image does not change. Only the ray-tracing-pipeline entry
+// (pathtrace_ser.slang) defines VERION_SER.
+// Distance along the ray to the plane of the hit triangle. shortcut: slangc 2026.21 has no
+// HitObject.GetRayTCurrent for SPIR-V, so t is recomputed from the instance and primitive; it can differ
+// from the hardware's t in the last bits. Use the accessor once slangc offers it.
+float hitDistance(uint inst, uint prim, float3 org, float3 dir)
+{
+    uint base = 16 * inst;
+    uint tri = instances[base + 1] + 3 * prim;
+    uint vo = instances[base];
+    float3 p0 = transformPoint(base + 4, vertexPos(indices[tri] + vo));
+    float3 p1 = transformPoint(base + 4, vertexPos(indices[tri + 1] + vo));
+    float3 p2 = transformPoint(base + 4, vertexPos(indices[tri + 2] + vo));
+    float3 n = cross(p1 - p0, p2 - p0);
+    float d = dot(dir, n);
+    return dot(p0 - org, n) / (abs(d) < 1.0e-30 ? 1.0e-30 : d);
+}
+
+Hit traceClosest(float3 org, float3 dir)
+{
+    RayDesc ray;
+    ray.Origin = org;
+    ray.Direction = dir;
+    ray.TMin = 0.0;
+    ray.TMax = 1.0e30;
+    SerPayload payload;
+    payload.unused = 0;
+    HitObject ho = HitObject::TraceRay(scene, RAY_FLAG_FORCE_OPAQUE, 0xFF, 0, 0, 0, ray, payload);
+    Hit h;
+    h.hit = ho.IsHit();
+    h.inst = h.hit ? ho.GetInstanceIndex() : 0;
+    h.prim = h.hit ? ho.GetPrimitiveIndex() : 0;
+    h.t = h.hit ? hitDistance(h.inst, h.prim, org, dir) : 0.0;
+    // The low 8 bits of material + 1 (0 = miss) are the hint: more materials than that share groups.
+    ReorderThread(ho, h.hit ? instances[16 * h.inst + 2] + 1 : 0, 8);
+    return h;
+}
+#else
 Hit traceClosest(float3 org, float3 dir)
 {
     RayDesc ray;
@@ -596,6 +649,7 @@ Hit traceClosest(float3 org, float3 dir)
     h.t = h.hit ? q.CommittedRayT() : 0.0;
     return h;
 }
+#endif
 
 // One bounce at `depth`: the miss or the hit's emission, light sampling and the next direction.
 // Returns false when the path ends here.

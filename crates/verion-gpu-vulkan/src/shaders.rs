@@ -1,11 +1,16 @@
 //! The SPIR-V that `scripts/shaders.sh` compiles from the same Slang sources as the Metal MSL;
 //! bindings are descriptor set 0 with the same numbers as the Metal buffer indices.
 
-/// SPIR-V of each compute shader, entry point `main`, by shader name.
-pub const SHADERS: [(&str, &[u8]); 7] = [
+/// SPIR-V of each shader, entry point `main`, by shader name. All are compute shaders except
+/// `pathtrace_ser`, a ray generation shader (Vulkan only, shader execution reordering).
+pub const SHADERS: [(&str, &[u8]); 8] = [
     ("aov", include_bytes!("../shaders/aov.spv")),
     ("normals", include_bytes!("../shaders/normals.spv")),
     ("pathtrace", include_bytes!("../shaders/pathtrace.spv")),
+    (
+        "pathtrace_ser",
+        include_bytes!("../shaders/pathtrace_ser.spv"),
+    ),
     ("wf_args", include_bytes!("../shaders/wf_args.spv")),
     ("wf_extend", include_bytes!("../shaders/wf_extend.spv")),
     ("wf_select", include_bytes!("../shaders/wf_select.spv")),

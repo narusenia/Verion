@@ -30,6 +30,12 @@ pub trait RayTracingBackend: Sized {
     fn integrator(&self) -> Integrator;
     /// Wavefront only: time the extend and shade stages apart (`Accumulation::stage_seconds`).
     fn set_stage_timing(&mut self, on: bool);
+    /// Shader execution reordering for the megakernel (ADR-0014): regroups threads by the material
+    /// they hit. Returns whether it is on; a backend or device without it returns `false` and keeps
+    /// running without it. The image does not change. Off by default.
+    fn set_reorder(&mut self, on: bool) -> bool {
+        !on
+    }
     /// Per-pixel adaptive sampling for accumulations started afterwards (REQ-ACC-007).
     fn set_adaptive(&mut self, adaptive: Option<Adaptive>);
 

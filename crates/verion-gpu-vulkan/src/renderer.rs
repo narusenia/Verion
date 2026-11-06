@@ -71,6 +71,10 @@ pub struct Renderer {
     /// Wavefront only: time extend and shade separately.
     stage_timing: bool,
     adaptive: Option<Adaptive>,
+    /// Shader execution reordering for the megakernel (`set_reorder`).
+    reorder: bool,
+    /// The reordering megakernel, a ray tracing pipeline compiled on first use.
+    ser: OnceCell<Result<Pipeline, Error>>,
     /// Compiled on first use, so megakernel-only users skip the compile.
     wavefront: OnceCell<Result<wavefront::Pipelines, Error>>,
 }
@@ -98,7 +102,7 @@ impl Renderer {
         up.flush()?;
         let blases = accel::build_blases(ctx, &positions, &indices, &packed.meshes)?;
         let tlas = accel::build_tlas(ctx, &blases, &packed.tlas)?;
-        let pipe = |name, dynamic| Pipeline::new(ctx, name, spirv(name), dynamic);
+        let pipe = |name, dynamic| Pipeline::compute(ctx, name, spirv(name), dynamic);
         Ok(Self {
             ctx: ctx.clone(),
             tlas,
@@ -127,6 +131,8 @@ impl Renderer {
             integrator: Integrator::default(),
             stage_timing: false,
             adaptive: None,
+            reorder: false,
+            ser: OnceCell::new(),
             wavefront: OnceCell::new(),
         })
     }
@@ -354,6 +360,12 @@ impl RayTracingBackend for Renderer {
         self.stage_timing = on;
     }
 
+    fn set_reorder(&mut self, on: bool) -> bool {
+        let supported = !on || self.ctx.info().ser;
+        self.reorder = on && supported;
+        supported
+    }
+
     fn set_adaptive(&mut self, adaptive: Option<Adaptive>) {
         self.adaptive = adaptive;
     }
@@ -478,6 +490,20 @@ impl RayTracingBackend for Renderer {
 
         let desc = Descriptors::new(&self.ctx, 8)?;
         let path = self.path_resources(acc, &params);
+        // Reordering applies to the megakernel only; the wavefront already groups its work by stage.
+        let ser_pipe = if self.reorder && !wavefront {
+            let made = self.ser.get_or_init(|| {
+                Pipeline::ray_gen(
+                    &self.ctx,
+                    "pathtrace_ser",
+                    spirv("pathtrace_ser"),
+                    Some(PARAMS_BINDING),
+                )
+            });
+            Some(made.as_ref().map_err(Clone::clone)?)
+        } else {
+            None
+        };
         let mut mega_set = vk::DescriptorSet::null();
         // Per queue parity, then per stage (args, extend, shade); the select set is apart.
         let mut wf_sets = [[vk::DescriptorSet::null(); 3]; 2];
@@ -504,7 +530,7 @@ impl RayTracingBackend for Renderer {
             // wf_select fills the depth-0 queue, which depth 0 then reads as its input.
             select_set = desc.set(&p.select, &wf_resources(&path, w, 0, &w.queues[0]))?;
         } else {
-            mega_set = desc.set(&self.pathtrace, &path)?;
+            mega_set = desc.set(ser_pipe.unwrap_or(&self.pathtrace), &path)?;
         }
 
         let pipe_and_set = |s: &Step| -> (&Pipeline, vk::DescriptorSet) {
@@ -514,7 +540,7 @@ impl RayTracingBackend for Renderer {
                 (Some(Stage::Args), Some(p)) => (&p.args, wf_sets[parity][0]),
                 (Some(Stage::Extend), Some(p)) => (&p.extend, wf_sets[parity][1]),
                 (Some(Stage::Shade), Some(p)) => (&p.shade, wf_sets[parity][2]),
-                _ => (&self.pathtrace, mega_set),
+                _ => (ser_pipe.unwrap_or(&self.pathtrace), mega_set),
             }
         };
 
@@ -536,6 +562,12 @@ impl RayTracingBackend for Renderer {
         };
         let wall = Instant::now();
         let (w, h) = (acc.width, acc.height);
+        // Naming the ray tracing stage is only valid when the extension is enabled.
+        let rt_stage = if ser_pipe.is_some() {
+            vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR
+        } else {
+            vk::PipelineStageFlags::empty()
+        };
         let ran = self.ctx.submit(|d, cmd| {
             let stamp = |stage, q| {
                 if let Some(pool) = pool {
@@ -557,16 +589,35 @@ impl RayTracingBackend for Renderer {
                     if timed {
                         stamp(vk::PipelineStageFlags::TOP_OF_PIPE, 2 * i as u32);
                     }
-                    d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::COMPUTE, pipe.raw);
+                    let point = if pipe.sbt.is_some() {
+                        vk::PipelineBindPoint::RAY_TRACING_KHR
+                    } else {
+                        vk::PipelineBindPoint::COMPUTE
+                    };
+                    d.cmd_bind_pipeline(cmd, point, pipe.raw);
                     d.cmd_bind_descriptor_sets(
                         cmd,
-                        vk::PipelineBindPoint::COMPUTE,
+                        point,
                         pipe.layout,
                         0,
                         &[set],
                         &[(s.block as u64 * stride) as u32],
                     );
                     match (s.stage, acc.wavefront.as_ref()) {
+                        (None, _) if pipe.sbt.is_some() => {
+                            let none = vk::StridedDeviceAddressRegionKHR::default();
+                            let rt = self.ctx.0.ray_tracing.as_ref().unwrap();
+                            rt.cmd_trace_rays(
+                                cmd,
+                                &pipe.sbt.as_ref().unwrap().raygen,
+                                &none,
+                                &none,
+                                &none,
+                                w,
+                                h,
+                                1,
+                            );
+                        }
                         (None | Some(Stage::Select), _) => {
                             d.cmd_dispatch(cmd, groups(w, 8), groups(h, 8), 1)
                         }
@@ -583,10 +634,11 @@ impl RayTracingBackend for Renderer {
                     // the indirect arguments. The transfer bit covers the readbacks after it.
                     d.cmd_pipeline_barrier(
                         cmd,
-                        vk::PipelineStageFlags::COMPUTE_SHADER,
+                        vk::PipelineStageFlags::COMPUTE_SHADER | rt_stage,
                         vk::PipelineStageFlags::COMPUTE_SHADER
                             | vk::PipelineStageFlags::DRAW_INDIRECT
-                            | vk::PipelineStageFlags::TRANSFER,
+                            | vk::PipelineStageFlags::TRANSFER
+                            | rt_stage,
                         vk::DependencyFlags::empty(),
                         &[vk::MemoryBarrier::default()
                             .src_access_mask(vk::AccessFlags::SHADER_WRITE)

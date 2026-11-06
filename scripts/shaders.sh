@@ -21,8 +21,14 @@ fi
 
 for src in shaders/*.slang; do
   name=$(basename "$src" .slang)
-  slangc "$src" -target metal -entry "$name" -stage compute -o "$metal_dest/$name.metal"
-  slangc "$src" -target spirv -profile spirv_1_5 -capability spvRayQueryKHR -entry "$name" -stage compute -o "$vulkan_dest/$name.spv"
+  case $name in
+    # Ray generation shaders with shader execution reordering: Vulkan only (ADR-0014).
+    *_ser)
+      slangc "$src" -target spirv -profile spirv_1_5 -capability spvRayQueryKHR -capability spvShaderInvocationReorderEXT -entry "$name" -stage raygeneration -o "$vulkan_dest/$name.spv" ;;
+    *)
+      slangc "$src" -target metal -entry "$name" -stage compute -o "$metal_dest/$name.metal"
+      slangc "$src" -target spirv -profile spirv_1_5 -capability spvRayQueryKHR -entry "$name" -stage compute -o "$vulkan_dest/$name.spv" ;;
+  esac
 done
 
 if [ "$mode" = check ]; then
