@@ -61,7 +61,7 @@
 
 ### 受入条件
 
-- [ ] Camera・Material・Light・Transform の変更に追従する
+- [x] Camera・Material・Light・Transform の変更に追従する（Viewer は `update` を呼ぶ。計測は M5 計画書）
 
 ### 依存要件
 

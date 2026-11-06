@@ -17,7 +17,7 @@
 | 8 | ReSTIR DI の Vulkan 版（同じ Slang を使う） | REQ-ACC-002 / REQ-GPU-006 | 一部（バインディング 19 と Wavefront の 20〜25、Reservoir のバッファ、1 Dispatch 1 サンプル、設定の切替エラーを実装済み。型検査と clippy は Mac で通した。テストは `tests/restir.rs` に移植済みで、実機での実行は Windows 機） |
 | 9 | 多光源の評価シーンと、同画質到達時間の実測（`scripts/eval_restir.sh`） | REQ-ACC-002 / REQ-PERF-001 | 済（`scenes/many_lights*.gltf`。結果は下の表と ADR-0016） |
 | 10 | ReSTIR GI（1 回目の間接光） | REQ-ACC-002 | 済（ADR-0016。つなぎ替えと Jacobian、可視性の確認。テスト: 通常の画像へ収束、両積分器で一致、鋭い面は無変化。間接光が支配的な室内で同誤差まで 3〜5 倍） |
-| 11 | ReSTIR PT の扱いの決定 | REQ-ACC-002 | 決定済（ADR-0016: M5 では入れず、M7 の NRC の測定と並べて判断。REQ-ACC-002 の書き換えは利用者の確認待ち） |
+| 11 | ReSTIR PT の扱いの決定 | REQ-ACC-002 | 決定済（ADR-0016: M5 では入れず、M7 の NRC の測定と並べて判断。REQ-ACC-002 の書き換えは確認済みで反映した） |
 | 12 | metrics に Reservoir のメモリ、出力メタデータに ReSTIR の有効・非物理の印 | REQ-GPU-004 / REQ-CORE | 済（`restir_bytes`、EXR の `verion/restir`。Reservoir だけの時間は、シェードの中で処理されるため分離できず `gpu_s` に含まれる） |
 
 ## 差分更新の計測（2026-11-06、Apple M4 Pro、`update_bench`、512×384 の 4 spp）
@@ -57,7 +57,7 @@
 
 ## 要確認（利用者）
 
-- Octane との同画質到達時間の比較（環境は保留中）
+- Octane との同画質到達時間の比較: Blender 連携後に、Blender 用の無料版 Octane で同種のシーンを組んで比べる。条件（同画質の定義、バウンス数、デノイザ無し、規約の確認）は REQ-ACC-002 とこの README に従う。RTX 3080 機で行う
 - RTX 3080 機での Vulkan の移植と実機確認（`update`、ReSTIR のバインディング。Mac では Vulkan のクレートをビルドできない。手順は `docs/handoff/2026-11-06-m5-windows.md`）
 - Metal の画像が ReSTIR 無効時に変わっていないことは、既存の Metal テスト 48 件とベンチ（`mise run bench` が基準内）で確認済み
 
