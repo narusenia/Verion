@@ -1,7 +1,7 @@
 import bpy
 import numpy as np
 
-from . import native
+from . import compat, native
 from .sync import Sync
 
 
@@ -89,35 +89,74 @@ class VerionRenderEngine(bpy.types.RenderEngine):
                 self.update_stats("", f"Verion: {done}/{total} samples")
                 latest = job.latest()
                 if latest is not None:
-                    self._show(latest[2], layer)
+                    self._show(latest[2], layer, scene)
             result = job.result()
         except RuntimeError as e:
             self.report({"ERROR"}, str(e))
             return
         finally:
             engine.close()
-        self._write(result, layer, width, height)
+        self._write(result, layer, scene, width, height)
         self.update_progress(1.0)
 
-    def _show(self, rgba, layer):
+    @staticmethod
+    def _region(scene, width, height):
+        """(x0, y0, x1, y1) of the render border from the bottom left, or the whole frame."""
+        rd = scene.render
+        if not rd.use_border:
+            return 0, 0, width, height
+        x0, y0 = int(rd.border_min_x * width), int(rd.border_min_y * height)
+        x1, y1 = max(int(rd.border_max_x * width), x0 + 1), max(int(rd.border_max_y * height), y0 + 1)
+        return x0, y0, x1, y1
+
+    def _show(self, rgba, layer, scene):
         """Progress image: the Combined pass only."""
-        h, w = rgba.shape[:2]
-        res = self.begin_result(0, 0, w, h, layer=layer.name)
-        res.layers[0].passes["Combined"].rect.foreach_set(np.ascontiguousarray(rgba[::-1]).ravel())
+        height, width = rgba.shape[:2]
+        x0, y0, x1, y1 = self._region(scene, width, height)
+        crop = rgba[height - y1 : height - y0, x0:x1]
+        res = self.begin_result(0, 0, x1 - x0, y1 - y0, layer=layer.name)
+        res.layers[0].passes["Combined"].rect.foreach_set(np.ascontiguousarray(crop[::-1]).ravel())
         self.end_result(res, highlight=True)
 
-    def _write(self, result, layer, width, height):
-        res = self.begin_result(0, 0, width, height, layer=layer.name)
+    def _write(self, result, layer, scene, width, height):
+        x0, y0, x1, y1 = self._region(scene, width, height)
+        # Blender places the border region itself: tile coordinates start at its corner.
+        res = self.begin_result(0, 0, x1 - x0, y1 - y0, layer=layer.name)
         passes = res.layers[0].passes
-
-        def put(name, arr):
-            # Blender stores the bottom row first.
-            passes[name].rect.foreach_set(np.ascontiguousarray(arr[::-1], dtype=np.float32).ravel())
-
-        c = result["combined"]
-        put("Combined", np.concatenate([c, np.ones(c.shape[:2] + (1,), np.float32)], axis=2))
-        for name, _chan, n, key, flag in PASSES:
-            if name in passes and key in result:
-                a = result[key]
-                put(name, a.astype(np.float32) if a.ndim == 3 else a.astype(np.float32)[..., None] if n == 1 else a)
+        # Row 0 of our arrays is the top of the image; Blender's is the bottom.
+        top = height - y1
+        for name, (_n, arr) in pass_arrays(result, set(passes.keys())).items():
+            crop = arr[top : top + (y1 - y0), x0:x1]
+            passes[name].rect.foreach_set(np.ascontiguousarray(crop[::-1], dtype=np.float32).ravel())
         self.end_result(res)
+        # The stamp fields reach the saved image (EXR header) only when added to the finished result.
+        final = self.get_result()
+        for key, value in stamp_fields(scene.verion, result["info"]).items():
+            compat.stamp_field(final, scene, key, value)
+
+
+def pass_arrays(result, available):
+    """{Blender pass name: (channels, array (H, W, channels))} for the passes in `available`."""
+    c = result["combined"]
+    out = {"Combined": (4, np.concatenate([c, np.ones(c.shape[:2] + (1,), np.float32)], axis=2))}
+    for name, _chan, n, key, _flag in PASSES:
+        if name in available and key in result:
+            a = np.asarray(result[key], dtype=np.float32)
+            out[name] = (n, a if a.ndim == 3 else a[..., None])
+    return {k: v for k, v in out.items() if k in available}
+
+
+def stamp_fields(settings, info):
+    """Metadata stored in the saved image (EXR header): non-physical output is marked (ADR-0008)."""
+    f = {
+        "Verion Physical": "true" if info["physical"] else "false",
+        "Verion Mode": settings.mode.lower(),
+        "Verion Samples": str(info["samples"]),
+    }
+    if settings.adaptive:
+        f["Verion Adaptive Threshold"] = str(settings.adaptive_threshold)
+    if settings.restir or settings.mode == "INTERACTIVE":
+        f["Verion ReSTIR"] = "di+gi" if settings.restir_gi or settings.mode == "INTERACTIVE" else "di"
+    if settings.denoise:
+        f["Verion Denoiser"] = "oidn"
+    return f

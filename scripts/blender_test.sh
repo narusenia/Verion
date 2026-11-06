@@ -12,7 +12,7 @@ for b in "$HOME"/Applications/Blender/stable/*/Blender.app/Contents/MacOS/Blende
     case $t in */*) ;; *) t=plugins/blender/tests/$t ;; esac
     out=$("$b" -b --factory-startup --python-exit-code 1 --python "$t" 2>&1) && r=ok || { r=FAILED; status=1; }
     echo "$(basename "$t"): $r"
-    [ "$r" = ok ] || echo "$out" | grep -E "^(FAIL|ERROR)|Error|Traceback|assert" | head -20
+    [ "$r" = ok ] || echo "$out" | grep -a -E "^(FAIL|ERROR)|Error|Traceback|assert" | head -20
   done
 done
 exit $status

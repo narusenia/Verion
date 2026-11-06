@@ -29,3 +29,11 @@ def panels_to_enable():
 def eevee_engine_ids():
     """The id of Blender's real-time engine, for the engine picker (renamed in 5.0)."""
     return {"BLENDER_EEVEE", "BLENDER_EEVEE_NEXT"}
+
+
+def stamp_field(result, scene, key, value):
+    """RenderResult.stamp_data_add_field(field, value); older versions also took the scene first."""
+    try:
+        result.stamp_data_add_field(key, value)
+    except TypeError:
+        result.stamp_data_add_field(scene, key, value)
