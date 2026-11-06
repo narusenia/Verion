@@ -1,19 +1,31 @@
 //! Times scene edits: a full rebuild against the differential `update` (REQ-ACC-003), and the
 //! time from an edit to a first preview of `SPP` samples (First Clean Preview, REQ-DCC-002).
 //! `cargo run --release -p verion-gpu-metal --example update_bench -- scene.gltf [spp]`
+#[cfg(target_os = "macos")]
 use std::time::Instant;
 
+#[cfg(target_os = "macos")]
 use verion_gpu::RayTracingBackend as _;
+#[cfg(target_os = "macos")]
 use verion_gpu_metal::{MetalContext, Renderer};
+#[cfg(target_os = "macos")]
 use verion_render_io::load_gltf;
+#[cfg(target_os = "macos")]
 use verion_scene::Scene;
 
+#[cfg(target_os = "macos")]
 fn secs(f: impl FnOnce()) -> f64 {
     let t = Instant::now();
     f();
     t.elapsed().as_secs_f64()
 }
 
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("update_bench requires macOS (Metal)");
+}
+
+#[cfg(target_os = "macos")]
 fn main() {
     let mut args = std::env::args().skip(1);
     let path = args.next().expect("scene.gltf");
