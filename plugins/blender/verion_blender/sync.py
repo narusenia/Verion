@@ -79,7 +79,6 @@ class Sync:
                 uv = np.empty(len(me.loops) * 2, np.float32)
                 me.uv_layers.active.data.foreach_get("uv", uv)
                 uvs = uv.reshape(-1, 2)[tl]
-                uvs = np.stack([uvs[:, 0], 1.0 - uvs[:, 1]], axis=1)  # images are stored top row first
             parts = []
             for s in np.unique(slot):
                 sel = np.repeat(slot == s, 3)
