@@ -142,8 +142,8 @@ RTX 3080（Windows）で動く 2 つ目のバックエンド。SER は拡張を�
 
 ### 受入条件
 
-- [ ] 画素差分が閾値内（閾値は初回実測で決める）
-- [ ] Stylization AOV も一致する
+- [x] 画素差分が閾値内。閾値は `exr_diff` のチャンネル平均 0.1%、4×4 ブロック平均 0.5%（初回実測は M4 の Metal と RTX 3080 の Vulkan、4096 spp、5 枚の最悪値がチャンネル平均 0.05%・ブロック 0.34%。ビット一致は求めない）
+- [x] Stylization AOV も一致する（Stylized の出力 `toon_stylized`・`showcase_stylized` で比べ、同じ閾値内）
 
 ### 依存要件
 
