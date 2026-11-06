@@ -18,10 +18,9 @@ def pixels(image):
         px = np.concatenate([px, np.zeros((h, w, 1), np.float32)], axis=2)
     if px.shape[2] == 3:
         px = np.concatenate([px, np.ones((h, w, 1), np.float32)], axis=2)
-    return np.ascontiguousarray(px[::-1])  # Blender stores the bottom row first
-
-
-def to_linear(image, px):
-    """`pixels` returns what Blender decodes for the image's color space: scene-linear for sRGB
-    images and raw values for Non-Color, which is what the IR wants for color and data textures."""
+    px = np.ascontiguousarray(px[::-1])  # Blender stores the bottom row first
+    if image.colorspace_settings.name == "sRGB":
+        # `pixels` holds the stored (encoded) values; the IR wants linear light. Non-Color data
+        # (normal maps, roughness) and linear images are used as they are.
+        px[..., :3] = convert.srgb_to_linear(px[..., :3])
     return px
