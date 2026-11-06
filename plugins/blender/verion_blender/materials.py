@@ -9,7 +9,7 @@ import os
 import bpy
 import numpy as np
 
-from . import bake_material, images, stylization
+from . import bake_material, images, stylization, surface
 
 DEFAULT = dict(base_color=[0.8, 0.8, 0.8], metallic=0.0, roughness=0.5)
 # Transparent BSDF: a surface that stops no ray. `_clear` marks it for `blend_clear`.
@@ -62,6 +62,8 @@ class Converter:
     def params(self, material):
         p = self.surface_params(material)
         p.pop("_clear", None)
+        if material is not None:
+            surface.apply(material, p)
         st = stylization.material_style(material, self.image_index, self.warn) if material is not None else None
         if st is not None:
             p["stylization"], p["stylization_images"] = st

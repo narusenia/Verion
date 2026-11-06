@@ -57,6 +57,7 @@ def settings_key(settings):
         getattr(settings, k) for k in (
             "mode", "viewport_samples", "viewport_restir", "integrator", "multiscatter", "restir",
             "restir_gi", "restir_candidates", "restir_history", "clean_samples", "viewport_scale",
+            "viewport_denoise", "denoise_device", "denoise_stage",
         )
     )
 
@@ -125,6 +126,10 @@ class Viewport:
         """`view_draw` saw the user move the view: only the camera changes."""
         if self.engine is not None and self._view_changed(view):
             self._apply_view(view)
+
+    def resized(self, view, settings):
+        """True when the region no longer matches the size the job renders at."""
+        return self.size is not None and self.size != self._render_size(settings, view)
 
     def _view_changed(self, view):
         v = self.view

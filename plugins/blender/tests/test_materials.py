@@ -117,6 +117,17 @@ class MaterialTests(unittest.TestCase):
         r = self.check("cube with uv texture", cube)
         self.assertGreater(r["VERION"].std(), 0.02)
 
+    def test_dispersion_is_a_material_property(self):
+        from verion_blender import materials
+
+        lit_scene()
+        ob = common.add_sphere()
+        mat = ob.data.materials[0]
+        conv = materials.Converter(None, lambda m: None)
+        self.assertNotIn("dispersion", conv.params(mat))
+        mat.verion_surface.dispersion = 0.4
+        self.assertAlmostEqual(conv.params(mat)["dispersion"], 0.4, places=5)
+
     def test_procedural_inputs_are_baked(self):
         import bmesh
 

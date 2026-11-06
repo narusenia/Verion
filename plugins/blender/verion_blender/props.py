@@ -50,6 +50,11 @@ class VerionSceneSettings(bpy.types.PropertyGroup):
     restir_history: IntProperty(name="History", default=4, min=1)
 
     denoise: BoolProperty(name="Denoise", description="Intel Open Image Denoise (not physical)", default=False)
+    viewport_denoise: BoolProperty(
+        name="Viewport Denoise",
+        description="Denoise the viewport image with Open Image Denoise (not physical). Uses the device chosen below",
+        default=False,
+    )
     denoise_device: EnumProperty(
         name="Device",
         items=[
@@ -84,7 +89,7 @@ class VerionSceneSettings(bpy.types.PropertyGroup):
             d["adaptive"] = {"threshold": self.adaptive_threshold, "min_spp": self.adaptive_min_samples}
         if self.restir and mode != "REFERENCE":
             d["restir"] = {"gi": self.restir_gi, "candidates": self.restir_candidates, "history": self.restir_history}
-        if final and self.denoise:
+        if self.denoise if final else self.viewport_denoise:
             d["denoise"] = {"device": self.denoise_device.lower(), "stage": self.denoise_stage.lower()}
         return d
 

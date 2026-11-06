@@ -106,7 +106,9 @@ class VERION_PT_denoise(VerionPanel, bpy.types.Panel):
     def draw(self, context):
         s = context.scene.verion
         col = self.layout.column()
-        col.active = s.denoise
+        col.prop(s, "viewport_denoise")
+        col = col.column()
+        col.active = s.denoise or s.viewport_denoise
         col.prop(s, "denoise_device")
         if s.mode == "STYLIZED":
             col.prop(s, "denoise_stage")

@@ -76,6 +76,52 @@ class ViewportTests(unittest.TestCase):
         finally:
             vp.close()
 
+    def test_viewport_denoise_smooths_a_noisy_frame(self):
+        from verion_blender import native
+        from verion_blender.viewport import View, Viewport
+
+        def noise(denoise):
+            cam = make_scene()
+            sc = bpy.context.scene
+            sc.verion.viewport_samples = 4
+            sc.verion.clean_samples = 4
+            sc.verion.viewport_denoise = denoise
+            dg = bpy.context.evaluated_depsgraph_get()  # before the view: it updates matrix_world
+            view = View(cam.matrix_world, perspective(), 96, 96)
+            vp = Viewport(native.load())
+            try:
+                vp.update(dg, view, sc.verion)
+                self.assertTrue(wait_clean(vp))
+                vp.job.wait(1.0)
+                vp.poll()
+                img = vp.image[2][..., :3].mean(axis=2)
+            finally:
+                vp.close()
+            # Pixel-to-pixel difference: the noise a denoiser removes.
+            return float(np.abs(np.diff(img, axis=1)).mean())
+
+        raw, smooth = noise(False), noise(True)
+        self.assertLess(smooth, 0.7 * raw, f"{smooth} vs {raw}")
+
+    def test_resize_rebuilds_at_the_new_aspect(self):
+        from verion_blender import native
+        from verion_blender.viewport import View, Viewport
+
+        cam = make_scene()
+        sc = bpy.context.scene
+        dg = bpy.context.evaluated_depsgraph_get()
+        vp = Viewport(native.load())
+        try:
+            vp.update(dg, View(cam.matrix_world, perspective(), 96, 96), sc.verion)
+            wide = View(cam.matrix_world, perspective(aspect=2.0), 192, 96)
+            self.assertTrue(vp.resized(wide, sc.verion))
+            vp.update(dg, wide, sc.verion)
+            self.assertFalse(vp.resized(wide, sc.verion))
+            self.assertTrue(wait_clean(vp))
+            self.assertEqual(vp.image[2].shape, (96, 192, 4))
+        finally:
+            vp.close()
+
     def test_orthographic_view_is_a_far_perspective(self):
         from verion_blender.viewport import View
 
