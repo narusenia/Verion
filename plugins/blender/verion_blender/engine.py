@@ -89,6 +89,8 @@ class VerionRenderEngine(bpy.types.RenderEngine):
             return
         scene = depsgraph.scene
         view = View.from_region(context.region_data, context.region)
+        if vp.resized(view, scene.verion):
+            vp.update(depsgraph, view, scene.verion)  # view_update is not always called on a resize
         vp.set_view(view, scene.verion)
         if vp.poll() is not None or self.draw_data is None:
             self.draw_data = _upload(vp.image)
@@ -259,13 +261,22 @@ def _upload(image):
 
 
 def _draw(texture, region):
-    """Draws the texture over the whole region (it is stretched when rendered at a lower resolution)."""
+    """Draws the texture over the region (stretched when rendered at a lower resolution).
+
+    A frame of another aspect (the region was just resized) is fitted, never distorted."""
     shader = gpu.shader.from_builtin("IMAGE")
     coords = ((0, 0), (1, 0), (1, 1), (0, 1))
     batch = batch_for_shader(shader, "TRI_FAN", {"pos": coords, "texCoord": coords})
+    w, h = float(region.width), float(region.height)
+    if abs((texture.width / texture.height) / (w / h) - 1.0) > 0.02:
+        k = min(w / texture.width, h / texture.height)
+        sw, sh = texture.width * k, texture.height * k
+        ox, oy = (w - sw) / 2, (h - sh) / 2
+    else:
+        sw, sh, ox, oy = w, h, 0.0, 0.0
     with gpu.matrix.push_pop():
-        gpu.matrix.translate((0, 0))
-        gpu.matrix.scale((region.width, region.height))
+        gpu.matrix.translate((ox, oy))
+        gpu.matrix.scale((sw, sh))
         shader.bind()
         shader.uniform_sampler("image", texture)
         batch.draw(shader)
