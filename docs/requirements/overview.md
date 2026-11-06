@@ -119,7 +119,7 @@ Verion は、Blender / Cinema 4D / Maya などの DCC から使える GPU レン
 
 | 項目 | 決める時期 |
 |------|-----------|
-| Verion のライセンス、オープンコアの境界 | M4 前後（NVIDIA SDK 等の条件確認後） |
+| Verion のライセンス、オープンコアの境界 | 最初の外部配布の前（ADR-0004、ADR-0018） |
 | Stylization 用 glTF 拡張のスキーマ詳細 | M2 着手時（仕様書で確定） |
 | Viewer の GUI 技術 | M2 着手時 |
 | ~~Metal 向けデノイザーの選定（OIDN / MetalFX）~~ | 決定済み（ADR-0013） |
