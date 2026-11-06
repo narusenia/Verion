@@ -22,8 +22,21 @@ def panels_to_enable():
         p = stack.pop()
         stack.extend(p.__subclasses__())
         engines = getattr(p, "COMPAT_ENGINES", None)
-        if engines is not None and "BLENDER_RENDER" in engines and p.__name__ not in exclude:
+        if engines is None or p.__name__ in exclude:
+            continue
+        if "BLENDER_RENDER" in engines or p.__name__ in NODE_PANELS:
             yield p
+
+
+# The node-socket panels of the Material and World tabs (Surface, Volume, slots). They list only the
+# engines that draw them, not the legacy id, so a custom engine has to be added by name.
+NODE_PANELS = {
+    "EEVEE_MATERIAL_PT_context_material",
+    "EEVEE_MATERIAL_PT_surface",
+    "EEVEE_MATERIAL_PT_volume",
+    "EEVEE_MATERIAL_PT_settings",
+    "EEVEE_WORLD_PT_surface",
+}
 
 
 def eevee_engine_ids():
