@@ -1,6 +1,7 @@
 //! `exr_diff reference.exr test.exr [more.exr ...]`: compares the beauty of each test image with the
 //! reference using the REQ-QA-001 gates of `scripts/mitsuba_cornell.py` (worst channel mean within 1%,
 //! worst 4x4 block mean within 2%) plus the relative mean absolute error and PSNR, which are reported only.
+//! `EXR_DIFF_CHANNEL` and `EXR_DIFF_BLOCK` (fractions) replace the two gates; `scripts/backend_diff.sh` sets them for REQ-GPU-007.
 //! Prints `PASS` / `FAIL` per image and exits 1 when any fails.
 
 use std::path::Path;
@@ -31,6 +32,10 @@ fn main() {
         eprintln!("usage: exr_diff reference.exr test.exr [more.exr ...]");
         std::process::exit(2);
     }
+    let gate = |name: &str, default: f64| {
+        std::env::var(name).map_or(default, |v| v.parse().expect("gate must be a number"))
+    };
+    let (gate_channel, gate_block) = (gate("EXR_DIFF_CHANNEL", 0.01), gate("EXR_DIFF_BLOCK", 0.02));
     let (w, h, r) = load(&args[0]);
     let mut ok = true;
     for path in &args[1..] {
@@ -75,7 +80,7 @@ fn main() {
         let mse = mean(pairs().map(|d| d * d));
         let peak = r.iter().flatten().fold(0.0f32, |m, &v| m.max(v)) as f64;
         let psnr = 10.0 * (peak * peak / mse).log10();
-        let pass = worst <= 0.01 && worst_block <= 0.02;
+        let pass = worst <= gate_channel && worst_block <= gate_block;
         ok &= pass;
         println!(
             "{path}: channel {:.2}% block {:.2}% mae/mean {mae:.4} psnr {psnr:.1} dB {}",
