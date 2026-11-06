@@ -5,10 +5,7 @@
 # `blender-only` skips the plain Python.
 set -eu
 out=target/py
-rm -rf "$out" target/py-wheel
-maturin build --release -q -m crates/verion-py/Cargo.toml -o target/py-wheel
-mkdir -p "$out"
-unzip -q target/py-wheel/*.whl -d "$out"
+sh scripts/py_build.sh
 export PYTHONPATH="$PWD/$out"
 tests=crates/verion-py/tests
 if [ "${1:-}" != blender-only ]; then

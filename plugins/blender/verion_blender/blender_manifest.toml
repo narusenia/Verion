@@ -1,0 +1,13 @@
+schema_version = "1.0.0"
+
+id = "verion"
+version = "0.0.0"
+name = "Verion"
+tagline = "Art-directable physical GPU renderer"
+maintainer = "NaruseNia"
+type = "add-on"
+
+# Blender 4.5 LTS and later (ADR-0019). The native extension is an abi3 wheel built by
+# scripts/package_blender.sh; platform-specific builds list their platform below.
+blender_version_min = "4.5.0"
+license = ["SPDX:Apache-2.0"]
