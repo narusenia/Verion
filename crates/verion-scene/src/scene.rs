@@ -152,6 +152,27 @@ impl fmt::Display for SceneError {
 
 impl std::error::Error for SceneError {}
 
+/// The virtual main light that Toon bands take from the environment (ADR-0020). It feeds only the
+/// Stylization light slot; the physical lighting is unchanged.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StylizationWorld {
+    pub virtual_light: bool,
+    /// World-space direction toward the light; `None` estimates it from the environment map.
+    pub direction: Option<[f32; 3]>,
+    /// Multiplies the estimated irradiance.
+    pub strength: f32,
+}
+
+impl Default for StylizationWorld {
+    fn default() -> Self {
+        Self {
+            virtual_light: true,
+            direction: None,
+            strength: 1.0,
+        }
+    }
+}
+
 /// Ids come from the scene that issued them; using one on another scene panics.
 #[derive(Clone, Debug, Default)]
 pub struct Scene {
@@ -161,6 +182,7 @@ pub struct Scene {
     instances: Vec<Instance>,
     lights: Vec<Light>,
     camera: Camera,
+    stylization_world: StylizationWorld,
     working_space: ColorSpace,
     revisions: Revisions,
     changes: Changes,
@@ -317,6 +339,16 @@ impl Scene {
         self.revisions.lighting += 1;
         self.changes.lights = true;
         self.lights[id.index()] = light;
+    }
+
+    pub fn stylization_world(&self) -> StylizationWorld {
+        self.stylization_world
+    }
+
+    pub fn set_stylization_world(&mut self, world: StylizationWorld) {
+        self.revisions.lighting += 1;
+        self.changes.lights = true;
+        self.stylization_world = world;
     }
 
     pub fn set_camera(&mut self, camera: Camera) {

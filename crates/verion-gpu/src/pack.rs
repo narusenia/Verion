@@ -12,7 +12,7 @@ use crate::{Adaptive, Restir};
 /// Path length limit. Radiance beyond it is dropped, so closed furnaces read slightly dark.
 pub const MAX_DEPTH: u32 = 8;
 /// Words of the parameter block; must match `params` in `shaders/include/pt_core.slang`.
-pub const PARAM_WORDS: usize = 41;
+pub const PARAM_WORDS: usize = 42;
 pub const MATERIAL_WORDS: usize = 22;
 pub const LIGHT_WORDS: usize = 16;
 /// Words per emissive triangle; must match `shaders/include/pt_core.slang`.
@@ -51,6 +51,8 @@ pub struct SceneInfo {
     pub env_pdf_scale: f32,
     /// Environment lights summed into one uniform sky.
     pub sky: [f32; 3],
+    /// The light table ends with the virtual main light, which owns slot 3 instead of the environment map.
+    pub virtual_light: bool,
 }
 
 /// The camera as the shaders read it, replaceable without touching the rest of the scene.
@@ -452,6 +454,102 @@ pub fn pack_materials(scene: &Scene, textures: bool) -> Result<Materials, String
 pub struct LightTable {
     pub lights: Vec<u32>,
     pub sky: [f32; 3],
+    pub virtual_light: bool,
+}
+
+/// Kind word of the virtual main light in the table: a directional light for the Stylization slot only.
+const KIND_VIRTUAL: u32 = 3;
+
+/// The virtual main light of ADR-0020: the direction toward the brightest part of the environment
+/// map and the irradiance it delivers, or `None` when the map has no dominant direction (a uniform
+/// sky) or the scene turns it off.
+pub fn virtual_light(scene: &Scene) -> Option<([f32; 3], [f32; 3])> {
+    let world = scene.stylization_world();
+    if !world.virtual_light {
+        return None;
+    }
+    let (id, scale) = scene.lights().iter().find_map(|l| match *l {
+        Light::EnvironmentMap { image, scale } => Some((image, scale)),
+        _ => None,
+    })?;
+    let image = scene.images().get(id.index())?;
+    let (w, h) = (image.width() as usize, image.height() as usize);
+    // Radiance, solid angle and direction per texel, matching `envCoords` (+y up, centre faces -z).
+    let texel = |i: usize, j: usize| {
+        let rgb = image.pixels()[j * w + i].map(|v| v * scale);
+        let theta = (j as f32 + 0.5) / h as f32 * std::f32::consts::PI;
+        let phi = ((i as f32 + 0.5) / w as f32 - 0.5) * 2.0 * std::f32::consts::PI;
+        let omega =
+            2.0 * std::f32::consts::PI * std::f32::consts::PI / (w * h) as f32 * theta.sin();
+        let dir = [
+            theta.sin() * phi.sin(),
+            theta.cos(),
+            -theta.sin() * phi.cos(),
+        ];
+        (rgb, omega, dir)
+    };
+    let lums: Vec<f32> = (0..w * h)
+        .map(|k| luminance(image.pixels()[k].map(|v| v * scale)))
+        .collect();
+    let (mut total, mut area) = (0.0f64, 0.0f64);
+    for j in 0..h {
+        for i in 0..w {
+            let omega = f64::from(texel(i, j).1);
+            total += f64::from(lums[j * w + i]) * omega;
+            area += omega;
+        }
+    }
+    let mean = total / area;
+    // The cluster is the brightest 1% of the texels; its energy-weighted mean direction is the light.
+    let mut sorted = lums.clone();
+    let cut = (sorted.len() / 100).max(1);
+    sorted.select_nth_unstable_by(cut - 1, |a, b| b.total_cmp(a));
+    let threshold = sorted[cut - 1];
+    let (mut dir, mut energy, mut solid) = ([0.0f64; 3], 0.0f64, 0.0f64);
+    for j in 0..h {
+        for i in 0..w {
+            let (rgb, omega, d) = texel(i, j);
+            let l = luminance(rgb);
+            // Texels tied with the threshold at or below the mean (a flat map) are no cluster.
+            if l < threshold || f64::from(l) <= mean {
+                continue;
+            }
+            let e = f64::from(l * omega);
+            energy += e;
+            solid += f64::from(omega);
+            for k in 0..3 {
+                dir[k] += e * f64::from(d[k]);
+            }
+        }
+    }
+    if energy <= 0.0 {
+        return None;
+    }
+    let len = dir.iter().map(|c| c * c).sum::<f64>().sqrt() / energy;
+    let cluster_mean = energy / solid;
+    let auto = len >= 0.5 && cluster_mean >= 1.5 * mean;
+    let toward = match world.direction {
+        Some(d) => {
+            let n = d.iter().map(|c| c * c).sum::<f32>().sqrt();
+            (n > 0.0).then(|| d.map(|c| c / n))?
+        }
+        None if auto => dir.map(|c| (c / (len * energy)) as f32),
+        None => return None,
+    };
+    // The whole map's irradiance on a surface facing the light, which is what the environment
+    // slot would have summed up; the cluster alone would leave a soft sky nearly black.
+    let mut e = [0.0f64; 3];
+    for j in 0..h {
+        for i in 0..w {
+            let (rgb, omega, d) = texel(i, j);
+            let cos = f64::from(d[0] * toward[0] + d[1] * toward[1] + d[2] * toward[2]).max(0.0);
+            for k in 0..3 {
+                e[k] += f64::from(rgb[k] * omega) * cos;
+            }
+        }
+    }
+    let e = e.map(|c| c as f32 * world.strength);
+    Some((toward, e))
 }
 
 pub fn pack_lights(scene: &Scene) -> LightTable {
@@ -515,7 +613,24 @@ pub fn pack_lights(scene: &Scene) -> LightTable {
     for (rank, &i) in ranked.iter().enumerate() {
         lights[i * LIGHT_WORDS + 13] = rank.min(2) as u32;
     }
-    LightTable { lights, sky }
+    // The virtual main light comes last and owns slot 3, where the environment map would average out.
+    let virtual_light = virtual_light(scene);
+    if let Some((toward, e)) = virtual_light {
+        let words: [u32; LIGHT_WORDS] = std::array::from_fn(|i| match i {
+            0 => KIND_VIRTUAL,
+            1..=3 => e[i - 1].to_bits(),
+            4 => 1.0f32.to_bits(),
+            5..=7 => (-toward[i - 5]).to_bits(), // the shader reads the direction the light travels
+            13 => 3,
+            _ => 0,
+        });
+        lights.extend(words);
+    }
+    LightTable {
+        lights,
+        sky,
+        virtual_light: virtual_light.is_some(),
+    }
 }
 
 /// The scene-wide constants for the current lights and emitters.
@@ -527,6 +642,7 @@ pub fn scene_info(light_table: &LightTable, emitters: &Emitters, env: &Env) -> S
         env_height: env.height,
         env_pdf_scale: env.pdf_scale,
         sky: light_table.sky,
+        virtual_light: light_table.virtual_light,
     }
 }
 
@@ -676,6 +792,7 @@ pub fn base_params(
     params[26] = info.env_pdf_scale.to_bits();
     // Footprint of one pixel per unit of travelled distance, for texture filtering.
     params[27] = (2.0 * view.camera[2] / height as f32).to_bits();
+    params[41] = info.virtual_light as u32;
     params[39] = view.shift[0].to_bits();
     params[40] = view.shift[1].to_bits();
     params[28] = lighting as u32;
@@ -696,6 +813,56 @@ pub fn base_params(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn env_scene(f: impl Fn(usize, usize) -> f32) -> Scene {
+        let (w, h) = (64usize, 32usize);
+        let pixels = (0..h)
+            .flat_map(|j| (0..w).map(move |i| (i, j)))
+            .map(|(i, j)| [f(i, j); 3])
+            .collect();
+        let mut s = Scene::new();
+        let image = s.add_image(Image::new(w as u32, h as u32, pixels).unwrap());
+        s.add_light(Light::EnvironmentMap { image, scale: 1.0 });
+        s
+    }
+
+    #[test]
+    fn virtual_light_follows_the_brightest_patch() {
+        // A soft light: a 4x4 patch on a dim sky. Texel (1, 9) lies at phi near -pi, theta ~ 0.3 pi.
+        let s = env_scene(|i, j| {
+            if (0..4).contains(&i) && (8..12).contains(&j) {
+                50.0
+            } else {
+                0.1
+            }
+        });
+        let (dir, e) = virtual_light(&s).expect("a soft light is a dominant direction");
+        let phi = ((2.0f32 + 0.5) / 64.0 - 0.5) * 2.0 * std::f32::consts::PI;
+        let theta = (10.0f32) / 32.0 * std::f32::consts::PI;
+        let want = [
+            theta.sin() * phi.sin(),
+            theta.cos(),
+            -theta.sin() * phi.cos(),
+        ];
+        let dot: f32 = dir.iter().zip(want).map(|(a, b)| a * b).sum();
+        assert!(dot > 0.99, "direction {dir:?} vs {want:?}");
+        assert!(e[0] > 0.1 && e[0] == e[1], "irradiance {e:?}");
+        // A uniform sky has none; neither does a scene that turns it off.
+        assert!(virtual_light(&env_scene(|_, _| 1.0)).is_none());
+        let mut off = s.clone();
+        off.set_stylization_world(verion_scene::StylizationWorld {
+            virtual_light: false,
+            ..Default::default()
+        });
+        assert!(virtual_light(&off).is_none());
+        // An override takes the given direction.
+        let mut fixed = s.clone();
+        fixed.set_stylization_world(verion_scene::StylizationWorld {
+            direction: Some([0.0, 0.0, 2.0]),
+            ..Default::default()
+        });
+        assert_eq!(virtual_light(&fixed).unwrap().0, [0.0, 0.0, 1.0]);
+    }
 
     #[test]
     fn plan_follows_the_reuse_table() {
@@ -736,6 +903,7 @@ mod tests {
             env_height: 0,
             env_pdf_scale: 0.0,
             sky: [0.1, 0.2, 0.3],
+            virtual_light: false,
         };
         let view = View::new(&Camera::default());
         let p = base_params(

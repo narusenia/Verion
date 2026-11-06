@@ -23,7 +23,7 @@ StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 apertu
                                     // 30 / 31 wavefront depth and path count, 32 adaptive sampling enable, 33 adaptive threshold
                                     // (float), 34 adaptive minimum samples, 35 megakernel samples per dispatch, 36 ReSTIR DI enable,
                                     // 37 ReSTIR initial candidates per pixel, 38 ReSTIR history cap (samples a reused reservoir counts for),
-                                    // 39 / 40 lens shift x and y (floats, half-image extents)
+                                    // 39 / 40 lens shift x and y (floats, half-image extents), 41 virtual main light present
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
 StructuredBuffer<float> emitters;   // 16 words per emissive world-space triangle: p0, p1, p2, radiance rgb, area, selection pdf, 2 pad
 StructuredBuffer<float> emitCdf;    // cumulative selection probability per emitter triangle, last entry 1
@@ -1126,10 +1126,14 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
             uint o = li * 16;
             float3 col = float3(asfloat(lights[o + 1]), asfloat(lights[o + 2]), asfloat(lights[o + 3])) * asfloat(lights[o + 4]);
             float3 vec = float3(asfloat(lights[o + 5]), asfloat(lights[o + 6]), asfloat(lights[o + 7]));
+            // Kind 3 is the virtual main light (ADR-0020): a directional light that feeds only the first-hit light slot.
+            bool virt = lights[o] == 3;
+            if (virt && !(lightingOn && depth == 0))
+                continue;
             float3 wi;
             float dist;
             float3 li_;
-            if (lights[o] == 1)
+            if (lights[o] == 1 || virt)
             {
                 wi = -normalize(vec);
                 dist = 1.0e30;
@@ -1159,11 +1163,11 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
                     Lobes l = evalLobes(surf, woL, float3(dot(wi, T), dot(wi, B), c));
                     float3 cd = thr * l.diffuse * li_;
                     float3 cs = thr * l.specular * li_;
-                    if (!occ)
+                    if (!occ && !virt)
                         st.parts.addLight(depth, cls, thr * (l.diffuse + l.specular) * li_, cd, cs);
                     if (track)
                     {
-                        float vv = lum(cd + cs);
+                        float vv = virt ? 0.0 : lum(cd + cs);
                         st.visTotal += vv;
                         st.visLit += occ ? 0.0 : vv;
                         addSlot(pixel, lights[o + 13], cd / c, cs / c, wi, occ ? 0.0 : 1.0, occ ? 0.0 : c);
@@ -1310,7 +1314,8 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
                         float vv = lum(cd + cs);
                         st.visTotal += vv;
                         st.visLit += occ ? 0.0 : vv;
-                        addSlot(pixel, 3u, cd / cosi, cs / cosi, wi, occ ? 0.0 : 1.0, occ ? 0.0 : cosi);
+                        if (params[41] == 0) // the virtual main light stands in for the environment's slot
+                            addSlot(pixel, 3u, cd / cosi, cs / cosi, wi, occ ? 0.0 : 1.0, occ ? 0.0 : cosi);
                     }
                 }
             }

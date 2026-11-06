@@ -473,6 +473,27 @@ impl Scene {
         Ok(())
     }
 
+    /// The virtual main light that Toon bands take from the environment map (ADR-0020).
+    /// `direction` points toward the light in world space (Y up); `strength` scales the estimate.
+    #[pyo3(signature = (virtual_light = true, direction = None, strength = 1.0))]
+    fn set_stylization_world(
+        &self,
+        virtual_light: bool,
+        direction: Option<[f32; 3]>,
+        strength: f32,
+    ) -> PyResult<()> {
+        if !strength.is_finite() || strength < 0.0 {
+            return Err(value_err("strength must be finite and not negative"));
+        }
+        self.lock()
+            .set_stylization_world(verion_scene::StylizationWorld {
+                virtual_light,
+                direction,
+                strength,
+            });
+        Ok(())
+    }
+
     /// `transform` is camera-to-world (3x4 or 4x4), looking down -z. `shift` is the lens shift in
     /// half-image extents (`Camera::shift`).
     #[pyo3(signature = (transform_, vertical_fov, focus_distance = 1.0, aperture_radius = 0.0, shift = [0.0; 2]))]

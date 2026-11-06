@@ -460,6 +460,7 @@ impl RayTracingBackend for Renderer {
             self.lights = put(&ctx, &table.lights, STORAGE, "lights")?;
             self.info.light_count = (table.lights.len() / pack::LIGHT_WORDS) as u32;
             self.info.sky = table.sky;
+            self.info.virtual_light = table.virtual_light;
             let key = pack::env_key(scene);
             if key != self.env_key {
                 let env = pack::pack_env(scene).map_err(Error::Scene)?;

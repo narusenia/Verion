@@ -18,6 +18,6 @@ pub use material::{
 pub use mesh::{Mesh, MeshError};
 pub use scene::{
     Camera, Changes, IDENTITY, ImageId, Instance, InstanceId, Light, LightId, MaterialId, MeshId,
-    Revisions, Scene, SceneError, Transform,
+    Revisions, Scene, SceneError, StylizationWorld, Transform,
 };
 pub use shading::{LIGHT_SLOTS, LightComponents, ShadingContext};

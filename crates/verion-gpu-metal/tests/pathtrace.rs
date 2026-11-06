@@ -1527,3 +1527,92 @@ fn light_slots_hold_potential_diffuse_and_response() {
     );
     assert!(lit[0] == 0.0, "lit {}", lit[0]);
 }
+
+#[test]
+fn virtual_main_light_fills_slot_three_and_leaves_the_beauty() {
+    let Some(ctx) = context() else { return };
+    // A soft light on a dim sky, in front of the +z floor (texels 0..4 x 8..12: phi near -pi).
+    let build = |virtual_light: bool| {
+        let mut s = Scene::new();
+        let floor = s.add_mesh(plane(25.0, 0.0));
+        let mat = s.add_material(material([1.0; 3], [0.0; 3]));
+        s.add_instance(Instance {
+            mesh: floor,
+            material: mat,
+            transform: IDENTITY,
+        })
+        .unwrap();
+        let image = s.add_image(hdri(64, 32, |x, y| {
+            if x < 4 && (8..12).contains(&y) {
+                50.0
+            } else {
+                0.1
+            }
+        }));
+        s.add_light(Light::EnvironmentMap { image, scale: 1.0 });
+        s.set_camera(camera_at_z(3.0));
+        s.set_stylization_world(verion_scene::StylizationWorld {
+            virtual_light,
+            ..Default::default()
+        });
+        s
+    };
+    let run = |scene: &Scene| {
+        let r = Renderer::new(&ctx, scene).unwrap();
+        let mut acc = r.new_accumulation(65, 65, true).unwrap();
+        r.accumulate(&mut acc, 256).unwrap();
+        let i = 32 * 65 + 32;
+        let l = acc.lighting().unwrap();
+        (
+            center_pixel(&ctx, scene),
+            l.light_dir[i][3],
+            l.light_lit[i][3],
+            l.light_response[i][3],
+        )
+    };
+    let (beauty_on, dir, lit, resp) = run(&build(true));
+    let (beauty_off, _, _, _) = run(&build(false));
+    assert!(
+        (beauty_on - beauty_off).abs() < 0.03 * beauty_off,
+        "beauty {beauty_on} vs {beauty_off}"
+    );
+    // Slot 3 points at the light: phi = ((2 / 64) - 0.5) * 2 pi, theta = 10 / 32 pi.
+    let (phi, theta) = (
+        (2.0f32 / 64.0 - 0.5) * 2.0 * std::f32::consts::PI,
+        10.0f32 / 32.0 * std::f32::consts::PI,
+    );
+    let want = [
+        theta.sin() * phi.sin(),
+        theta.cos(),
+        -theta.sin() * phi.cos(),
+    ];
+    let n = dir.iter().map(|c| c * c).sum::<f32>().sqrt();
+    let dot: f32 = dir.iter().zip(want).map(|(a, b)| a * b).sum::<f32>() / n;
+    assert!(dot > 0.99, "direction {dir:?} vs {want:?}");
+    assert!(lit > 0.0 && resp > 0.0, "lit {lit}, response {resp}");
+}
+
+#[test]
+fn virtual_main_light_on_the_bundled_hdris() {
+    // What each bundled map gives (uniform: none; the others: a direction), printed for the record.
+    for name in ["uniform", "overcast", "softbox", "sunny", "sunset"] {
+        let path = format!(
+            "{}/../../assets/hdri/{name}.hdr",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let image = verion_render_io::load_hdri(
+            std::path::Path::new(&path),
+            verion_scene::ColorSpace::default(),
+        )
+        .unwrap();
+        let mut s = Scene::new();
+        let id = s.add_image(image);
+        s.add_light(Light::EnvironmentMap {
+            image: id,
+            scale: 1.0,
+        });
+        let v = verion_gpu::pack::virtual_light(&s);
+        eprintln!("{name}: {v:?}");
+        assert_eq!(v.is_none(), name == "uniform", "{name}");
+    }
+}
