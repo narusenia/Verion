@@ -99,6 +99,7 @@ class Sync:
         return slots[min(slot, len(slots) - 1)].material if len(slots) else None
 
     def slot_material(self, ob, slot):
+        self.materials.bake_ob = ob  # procedural inputs bake over the UVs of the first object that uses the material
         return self.materials.material(self.slot_blender_material(ob, slot))
 
     def add_geometry(self, depsgraph, inst):
@@ -119,6 +120,7 @@ class Sync:
 
     def build(self, depsgraph, width, height, cam_ob=None, with_camera=True):
         scene = depsgraph.scene
+        self.materials.bake_size = int(scene.verion.bake_size)
         for inst in depsgraph.object_instances:
             ob = inst.object
             if ob.type in GEOMETRY:

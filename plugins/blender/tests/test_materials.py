@@ -117,6 +117,44 @@ class MaterialTests(unittest.TestCase):
         r = self.check("cube with uv texture", cube)
         self.assertGreater(r["VERION"].std(), 0.02)
 
+    def test_procedural_inputs_are_baked(self):
+        import bmesh
+
+        def cube(with_uv=True):
+            me = bpy.data.meshes.new("cube")
+            bm = bmesh.new()
+            if with_uv:
+                bm.loops.layers.uv.verify()
+            bmesh.ops.create_cube(bm, size=1.6, calc_uvs=with_uv)
+            bm.to_mesh(me)
+            bm.free()
+            ob = bpy.data.objects.new("cube", me)
+            ob.location = (0, 0, 0.9)
+            ob.rotation_euler = (0.3, 0.2, 0.6)
+            bpy.context.scene.collection.objects.link(ob)
+            m = bpy.data.materials.new("m")
+            m.use_nodes = True
+            me.materials.append(m)
+            nt = m.node_tree
+            chk = nt.nodes.new("ShaderNodeTexChecker")
+            chk.inputs["Scale"].default_value = 4.0
+            chk.inputs["Color1"].default_value = (0.9, 0.3, 0.1, 1)
+            chk.inputs["Color2"].default_value = (0.1, 0.3, 0.9, 1)
+            nt.links.new(chk.outputs["Color"], nt.nodes["Principled BSDF"].inputs["Base Color"])
+            rough = nt.nodes.new("ShaderNodeMath")
+            rough.operation = "MULTIPLY"
+            rough.inputs[1].default_value = 0.8
+            nt.links.new(chk.outputs["Fac"], rough.inputs[0])
+            nt.links.new(rough.outputs["Value"], nt.nodes["Principled BSDF"].inputs["Roughness"])
+
+        r = self.check("baked checker", cube, min_corr=0.9)
+        self.assertGreater(r["VERION"].std(), 0.02)
+        # Without UVs there is nothing to bake over: the default values, with a warning, not a failure.
+        lit_scene()
+        cube(with_uv=False)
+        img = common.render("VERION", os.path.join(TMP, "mat.exr"), 64, 48, 8)
+        self.assertTrue(np.isfinite(img).all())
+
 
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])

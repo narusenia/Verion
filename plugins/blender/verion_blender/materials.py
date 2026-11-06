@@ -9,7 +9,7 @@ import os
 import bpy
 import numpy as np
 
-from . import images, stylization
+from . import bake_material, images, stylization
 
 DEFAULT = dict(base_color=[0.8, 0.8, 0.8], metallic=0.0, roughness=0.5)
 # Transparent BSDF: a surface that stops no ray. `_clear` marks it for `blend_clear`.
@@ -34,8 +34,12 @@ class Converter:
     def __init__(self, scene, warn):
         self.scene = scene
         self.warn = warn
+        self.bake_ob = None     # the object whose UVs carry baked textures (set by the caller before `material`)
+        self.bake_size = 1024
+        self._quiet = set()     # socket names being baked: no "not supported" warning for them
         self.index = {}     # material key -> IR material index
         self.images = {}    # (image key, channels) -> IR image index
+        self._baked = {}
 
     def key(self, material):
         return material.name_full if material else None
@@ -136,6 +140,8 @@ class Converter:
 
     def principled(self, node, material):
         i = node.inputs
+        self._baked = self.bake_sockets(node, material)
+        self._quiet = {self._socket_of(node, k).name for k in self._baked}
         get = lambda *names: next((i[n] for n in names if n in i), None)
         v = lambda *names: self.value(get(*names), material) if get(*names) is not None else 0.0
         p = dict(
@@ -170,15 +176,67 @@ class Converter:
                 p["emission_texture"] = et
                 p["emission"] = [float(strength.default_value if strength is not None else 1.0)] * 3
         p.update(self.metallic_roughness(i, p, material))
+        p.update(self.baked_params(node, material, p))
         p.update(self.normal_params(node, material))
         if alpha is not None and not alpha.is_linked and alpha.default_value < 1.0:
             p = blend_clear(p, 1.0 - float(alpha.default_value))
         return p
 
+    # -- baked procedural inputs ---------------------------------------------------------------
+
+    BAKED = {"base_color": ("Base Color",), "roughness": ("Roughness",), "metallic": ("Metallic",),
+             "emission": ("Emission Color", "Emission")}
+
+    def _socket_of(self, node, key):
+        return next(node.inputs[n] for n in self.BAKED[key] if n in node.inputs)
+
+    def bake_sockets(self, node, material):
+        """{key: the baked (H, W, 3) image} for the sockets of `node` fed by something other than an image
+        texture. Empty (with a warning) when there is no object with UVs to bake over or the bake fails."""
+        todo = []
+        for key in self.BAKED:
+            if not any(n in node.inputs for n in self.BAKED[key]):
+                continue
+            sock = self._socket_of(node, key)
+            if sock.is_linked and self.texture_of(sock, material, quiet=True) is None:
+                todo.append((key, node.name, sock.identifier))
+        if not todo:
+            return {}
+        ob = self.bake_ob
+        if ob is None or ob.type != "MESH" or not ob.original.data.uv_layers:
+            self.warn(f"Material '{material.name}': procedural inputs need an object with UVs to be baked; using the default values")
+            return {}
+        try:
+            return bake_material.bake(material, ob, todo, self.bake_size)
+        except RuntimeError as e:
+            self.warn(f"Material '{material.name}': {e}")
+            return {}
+
+    def baked_params(self, node, material, p):
+        """Textures for the baked sockets (a roughness and metallic bake share one packed image)."""
+        out = {}
+        baked = self._baked
+        rgba = lambda a: np.concatenate([a, np.ones(a.shape[:2] + (1,), np.float32)], axis=2)
+        if "base_color" in baked:
+            out["base_color"] = [1.0, 1.0, 1.0]
+            out["base_color_texture"] = self.scene.add_image(rgba(baked["base_color"]))
+        if "emission" in baked:
+            strength = node.inputs["Emission Strength"].default_value if "Emission Strength" in node.inputs else 1.0
+            out["emission"] = [float(strength)] * 3
+            out["emission_texture"] = self.scene.add_image(rgba(baked["emission"]))
+        if "roughness" in baked or "metallic" in baked:
+            size = next(baked[k].shape[0] for k in ("roughness", "metallic") if k in baked)
+            packed = np.ones((size, size, 4), np.float32)
+            for key, ch in (("roughness", 1), ("metallic", 2)):
+                # A channel that was not baked keeps its constant, since the factor becomes 1.
+                packed[..., ch] = baked[key][..., 0] if key in baked else p[key]
+            out.update(roughness=1.0, metallic=1.0, metallic_roughness_texture=self.scene.add_image(packed))
+        return out
+
     # -- sockets --------------------------------------------------------------------------------
 
     def value(self, socket, material):
-        if socket.is_linked:
+        if socket.is_linked and socket.name not in self._quiet:
             self.warn(f"Material '{material.name}': a node connected to '{socket.name}' is not supported; using its default value")
         return float(socket.default_value)
 
@@ -187,7 +245,8 @@ class Converter:
         if socket.is_linked:
             if self.texture_of(socket, material, quiet=True) is not None:
                 return [1.0, 1.0, 1.0]
-            self.warn(f"Material '{material.name}': a node connected to '{socket.name}' is not supported; using its default color")
+            if socket.name not in self._quiet:
+                self.warn(f"Material '{material.name}': a node connected to '{socket.name}' is not supported; using its default color")
         return [float(c) for c in socket.default_value[:3]]
 
     def emission(self, color_socket, strength_socket, material):

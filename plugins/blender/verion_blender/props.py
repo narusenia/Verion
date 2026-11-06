@@ -27,6 +27,12 @@ class VerionSceneSettings(bpy.types.PropertyGroup):
         description="In Reference mode the viewport uses Interactive (ReSTIR); turn off for a physical viewport",
         default=True,
     )
+    bake_size: EnumProperty(
+        name="Bake Size",
+        description="Texture size for procedural material inputs, which are baked with Cycles",
+        items=[("512", "512", ""), ("1024", "1024", ""), ("2048", "2048", ""), ("4096", "4096", "")],
+        default="1024",
+    )
     integrator: EnumProperty(
         name="Integrator",
         items=[("MEGAKERNEL", "Megakernel", "One thread per path"), ("WAVEFRONT", "Wavefront", "One kernel per stage")],

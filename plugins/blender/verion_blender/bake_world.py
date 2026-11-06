@@ -19,11 +19,14 @@ _cache = {}
 
 def signature(world):
     """A hash of everything in the World's node tree that changes the picture."""
+    if world.node_tree is None:
+        return hashlib.sha1(repr(tuple(world.color)).encode()).hexdigest()
+    return tree_signature(world.node_tree)
+
+
+def tree_signature(tree):
+    """A hash of every node setting, input value and link of a node tree."""
     h = hashlib.sha1()
-    tree = world.node_tree
-    if tree is None:
-        h.update(repr(tuple(world.color)).encode())
-        return h.hexdigest()
     for node in sorted(tree.nodes, key=lambda n: n.name):
         h.update(node.bl_idname.encode())
         for p in node.bl_rna.properties:

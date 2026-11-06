@@ -47,6 +47,7 @@ class VERION_PT_sampling(VerionPanel, bpy.types.Panel):
         col.prop(s, "samples")
         col.prop(s, "integrator")
         col.prop(s, "multiscatter")
+        col.prop(s, "bake_size")
 
 
 class VERION_PT_viewport(VerionPanel, bpy.types.Panel):
