@@ -15,6 +15,7 @@ Verion is a GPU renderer written in Rust for Blender / Cinema 4D / Maya. Its cor
 
 - `mise run check` — the canonical verification (fmt + clippy + deny + test). CI and the pre-commit hook run the same tasks.
 - `mise run fmt:fix` — apply formatting
+- `mise run test:gpu` — GPU tests of the Vulkan backend (needs a Vulkan ray tracing GPU; not run in CI)
 - `mise run hooks:install` — install lefthook hooks
 
 ## Rules
