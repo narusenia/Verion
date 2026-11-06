@@ -1,13 +1,19 @@
 #!/bin/sh
 # Renders each benchmarks/*.gltf and the generated scale scene at a fixed size and spp, and compares gpu_s with the baseline recorded
 # for this chip and power source (benchmarks/baseline/<chip>-<ac|battery>.json; battery runs ~25% slower); exits 1 when any scene is more than 10% slower.
-# `bench.sh record` writes the baseline instead. Needs a Metal GPU; not run in CI.
+# `bench.sh record` writes the baseline instead. Needs a GPU (Metal on macOS, Vulkan elsewhere); not run in CI.
 set -eu
 out=target/bench
 runs=5
-chip=$(sysctl -n machdep.cpu.brand_string | tr 'A-Z ' 'a-z-')
 # GPU clocks differ with the power source, so each source has its own baseline.
-pmset -g batt | grep -q "AC Power" && power=ac || power=battery
+if [ "$(uname -s)" = Darwin ]; then
+  chip=$(sysctl -n machdep.cpu.brand_string | tr 'A-Z ' 'a-z-')
+  pmset -g batt | grep -q "AC Power" && power=ac || power=battery
+else
+  # The first Vulkan device. shortcut: a Windows machine counts as on AC (the desktop RTX 3080 has no battery); detect a laptop's power source when one is benchmarked.
+  chip=$(vulkaninfo --summary | awk -F= '/deviceName/ { gsub(/^ +| +$/, "", $2); print $2; exit }' | tr 'A-Z ' 'a-z-')
+  power=ac
+fi
 chip=$chip-$power
 base=benchmarks/baseline/$chip.json
 mkdir -p "$out" benchmarks/baseline

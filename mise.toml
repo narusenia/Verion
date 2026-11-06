@@ -49,19 +49,19 @@ run = "lefthook install"
 
 [tasks.shaders]
 description = "Regenerate the committed MSL and SPIR-V from shaders/*.slang"
-run = "scripts/shaders.sh"
+run = "sh scripts/shaders.sh"
 
 [tasks.crosscheck]
 description = "Mitsuba 3 cross-check of the example scenes (needs a Metal GPU; not run in CI)"
-run = "scripts/crosscheck.sh"
+run = "sh scripts/crosscheck.sh"
 
 [tasks."shaders:check"]
 description = "Fail when the committed MSL or SPIR-V is stale (needs slangc; not run in CI)"
-run = "scripts/shaders.sh check"
+run = "sh scripts/shaders.sh check"
 
 [tasks.bench]
 description = "Benchmark gpu_s against this machine's baseline; `mise run bench record` re-records it (needs a Metal GPU; not run in CI)"
-run = "scripts/bench.sh"
+run = "sh scripts/bench.sh"
 
 # Added when the matching code exists:
 #   deps   - crate dependency rules (REQ-INFRA-001), scripts/check-deps.sh
