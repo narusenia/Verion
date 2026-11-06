@@ -306,3 +306,53 @@ fn gi_leaves_no_stains_behind_dispersive_glass() {
     let worst = worst_block(&resampled, &plain);
     assert!(worst < 0.15, "worst block differs by {worst}");
 }
+
+/// Largest difference of the red-blue balance between the 8x8 block means of two images.
+fn worst_chroma(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
+    let balance = |v: [f32; 3]| (v[0] - v[2]) / (v[0] + v[2]).max(1.0e-4);
+    let mut worst = 0.0f32;
+    for by in 0..8 {
+        for bx in 0..8 {
+            let (mut sa, mut sb) = ([0.0f32; 3], [0.0f32; 3]);
+            for y in 0..8 {
+                for x in 0..8 {
+                    let i = (by * 8 + y) * 64 + bx * 8 + x;
+                    for c in 0..3 {
+                        sa[c] += a[i][c];
+                        sb[c] += b[i][c];
+                    }
+                }
+            }
+            worst = worst.max((balance(sa) - balance(sb)).abs());
+        }
+    }
+    worst
+}
+
+/// The Cornell Box with its glass sphere set to a high index and strong dispersion: reusing the
+/// paths that went through the glass left colored stains on the walls (the first versions of GI
+/// measured 0.50 and 0.26 here; plain path tracing 0.15 and 0.04).
+#[test]
+fn gi_leaves_no_stains_on_the_cornell_box_walls() {
+    let Some(ctx) = context() else { return };
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenes/cornell_box.gltf");
+    let mut scene = verion_render_io::load_gltf_in(&path, verion_scene::ColorSpace::LinearRec709)
+        .unwrap()
+        .scene;
+    let id = scene.material_id(5).unwrap();
+    let mut glass = scene.materials()[5].clone();
+    glass.base.ior = 2.4;
+    glass.base.dispersion = 20.0;
+    scene.set_material(id, glass);
+    let mut r = Renderer::new(&ctx, &scene).unwrap();
+    let reference = render(&r, 4096);
+    r.set_restir(Some(gi()));
+    let img = render(&r, 256);
+    let (block, chroma) = (
+        worst_block(&img, &reference),
+        worst_chroma(&img, &reference),
+    );
+    assert!(block < 0.3, "worst block differs by {block}");
+    assert!(chroma < 0.15, "worst color balance differs by {chroma}");
+}

@@ -152,6 +152,12 @@ fn cube(half: f32) -> Mesh {
 /// A closed room of rough walls lit by 16 small panels and a rough ball, seen from inside:
 /// most of what the camera sees is indirect light.
 fn closed_room(roughness: f32) -> Scene {
+    room_with(roughness, false)
+}
+
+/// `closed_room` with a strongly dispersive glass block in the middle.
+fn room_with(roughness: f32, glass: bool) -> Scene {
+    let glass = glass.then_some((0.35, [-0.7, -0.9, 0.0]));
     let mut s = Scene::new();
     let room = s.add_mesh(cube(1.5));
     let ball = s.add_mesh(cube(0.4));
@@ -189,11 +195,32 @@ fn closed_room(roughness: f32) -> Scene {
         roughness,
         ..BaseBsdf::default()
     }));
-    for (mesh, material) in [(room, walls), (ball, walls), (lamps, glow)] {
+    let mut parts = vec![
+        (room, walls, IDENTITY),
+        (ball, walls, IDENTITY),
+        (lamps, glow, IDENTITY),
+    ];
+    if let Some((size, pos)) = glass {
+        let block = s.add_mesh(cube(size));
+        let dispersive = s.add_material(mat(BaseBsdf {
+            base_color: [1.0; 3],
+            transmission: 1.0,
+            roughness: 0.0,
+            ior: 1.6,
+            dispersion: 8.0,
+            ..BaseBsdf::default()
+        }));
+        let mut at = IDENTITY;
+        at[0][3] = pos[0];
+        at[1][3] = pos[1];
+        at[2][3] = pos[2];
+        parts.push((block, dispersive, at));
+    }
+    for (mesh, material, transform) in parts {
         s.add_instance(Instance {
             mesh,
             material,
-            transform: IDENTITY,
+            transform,
         })
         .unwrap();
     }
@@ -241,4 +268,89 @@ fn gi_leaves_sharp_surfaces_alone() {
     let plain = render(&r, 8);
     r.set_restir(Some(gi()));
     assert_eq!(plain, render(&r, 8));
+}
+
+/// Largest relative difference between the 8x8 block means of two images, per color channel
+/// (the blocks average the sample noise away, a stain stays).
+fn worst_block(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
+    let mut worst = 0.0f32;
+    for by in 0..8 {
+        for bx in 0..8 {
+            for c in 0..3 {
+                let (mut sa, mut sb) = (0.0, 0.0);
+                for y in 0..8 {
+                    for x in 0..8 {
+                        let i = (by * 8 + y) * 64 + bx * 8 + x;
+                        sa += a[i][c];
+                        sb += b[i][c];
+                    }
+                }
+                worst = worst.max((sa - sb).abs() / sb.max(1.0e-3));
+            }
+        }
+    }
+    worst
+}
+
+#[test]
+#[ignore = "needs a Vulkan ray tracing GPU"]
+fn gi_leaves_no_stains_behind_dispersive_glass() {
+    let ctx = VulkanContext::new().unwrap();
+    let mut r = Renderer::new(&ctx, &room_with(0.9, true)).unwrap();
+    let plain = render(&r, 2048);
+    r.set_restir(Some(gi()));
+    let resampled = render(&r, 2048);
+    let worst = worst_block(&resampled, &plain);
+    assert!(worst < 0.15, "worst block differs by {worst}");
+}
+
+/// Largest difference of the red-blue balance between the 8x8 block means of two images.
+fn worst_chroma(a: &[[f32; 3]], b: &[[f32; 3]]) -> f32 {
+    let balance = |v: [f32; 3]| (v[0] - v[2]) / (v[0] + v[2]).max(1.0e-4);
+    let mut worst = 0.0f32;
+    for by in 0..8 {
+        for bx in 0..8 {
+            let (mut sa, mut sb) = ([0.0f32; 3], [0.0f32; 3]);
+            for y in 0..8 {
+                for x in 0..8 {
+                    let i = (by * 8 + y) * 64 + bx * 8 + x;
+                    for c in 0..3 {
+                        sa[c] += a[i][c];
+                        sb[c] += b[i][c];
+                    }
+                }
+            }
+            worst = worst.max((balance(sa) - balance(sb)).abs());
+        }
+    }
+    worst
+}
+
+/// The Cornell Box with its glass sphere set to a high index and strong dispersion: reusing the
+/// paths that went through the glass left colored stains on the walls (the first versions of GI
+/// measured 0.50 and 0.26 here; plain path tracing 0.15 and 0.04).
+#[test]
+#[ignore = "needs a Vulkan ray tracing GPU"]
+fn gi_leaves_no_stains_on_the_cornell_box_walls() {
+    let ctx = VulkanContext::new().unwrap();
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scenes/cornell_box.gltf");
+    let mut scene = verion_render_io::load_gltf_in(&path, verion_scene::ColorSpace::LinearRec709)
+        .unwrap()
+        .scene;
+    let id = scene.material_id(5).unwrap();
+    let mut glass = scene.materials()[5].clone();
+    glass.base.ior = 2.4;
+    glass.base.dispersion = 20.0;
+    scene.set_material(id, glass);
+    let mut r = Renderer::new(&ctx, &scene).unwrap();
+    let reference = render(&r, 4096);
+    r.set_restir(Some(gi()));
+    let img = render(&r, 256);
+    let (block, chroma) = (
+        worst_block(&img, &reference),
+        worst_chroma(&img, &reference),
+    );
+    assert!(block < 0.3, "worst block differs by {block}");
+    assert!(chroma < 0.15, "worst color balance differs by {chroma}");
 }

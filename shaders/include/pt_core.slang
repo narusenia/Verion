@@ -1079,6 +1079,10 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
             }
             ior = max(ior + float(chan - 1) * (ior - 1.0) * 0.025 * dispersion, 1.0);
         }
+        // A glass second hit cannot be reconnected to from another pixel: its outgoing direction follows
+        // from the incoming one. The path stays what it is, a plain sample of this pixel's own.
+        if (depth == 1 && st.gi && transmission > 0.0)
+            restir[restirScratch(pixel) + 22] = asfloat(0u);
         float alpha = max(rough * rough, 1.0e-3);
         float eta = outside ? ior : 1.0 / ior; // relative index n_transmitted / n_incident
 
@@ -1504,7 +1508,13 @@ void finishPath(PathState st, uint pixel)
     float visTotal = st.visTotal;
     float3 radiance = parts.total;
     if (st.gi)
+    {
+        // A path that went through dispersive glass follows one color channel, tripled: as a reused
+        // sample it would tint the neighbours and the next frames, so it is not shared either.
+        if (st.chan >= 0)
+            restir[restirScratch(pixel) + 22] = asfloat(0u);
         radiance = giFinish(radiance, pixel);
+    }
     if (any(isnan(radiance)) || any(isinf(radiance)))
     {
         radiance = float3(0.0); // one bad sample must not poison the running sum
