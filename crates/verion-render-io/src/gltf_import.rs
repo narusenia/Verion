@@ -122,6 +122,8 @@ struct Importer<'a> {
     images: &'a [gltf::image::Data],
     /// (glTF image, sRGB-encoded) -> IR image, so one file used two ways becomes two linear images.
     image_cache: HashMap<(usize, bool), Option<ImageId>>,
+    /// (glTF image, MASK threshold bits or `None` for BLEND) -> the alpha channel as a gray image.
+    alpha_cache: HashMap<(usize, Option<u32>), Option<ImageId>>,
     /// glTF texture index -> glTF image index, for textures the extensions refer to by index.
     texture_sources: Vec<usize>,
     scene: Scene,
@@ -143,6 +145,7 @@ fn convert(
         buffers,
         images,
         image_cache: HashMap::new(),
+        alpha_cache: HashMap::new(),
         texture_sources: doc.textures().map(|t| t.source().index()).collect(),
         scene: {
             let mut scene = Scene::new();
@@ -362,21 +365,35 @@ impl Importer<'_> {
                 ));
             }
         }
-        // Alpha comes from the base color factor only: BLEND is the opacity, MASK is all or nothing
-        // at the cutoff. The alpha of the base color texture is not read.
+        // Alpha: the base color factor times the base color texture's alpha. BLEND is the opacity, MASK is all or
+        // nothing at the cutoff. A texture alpha becomes a gray image in `opacity_texture`.
         let alpha = m.pbr_metallic_roughness().base_color_factor()[3];
-        base.opacity = match m.alpha_mode() {
+        let mode = m.alpha_mode();
+        let threshold = (mode == gltf::material::AlphaMode::Mask).then(|| {
+            let cutoff = m.alpha_cutoff().unwrap_or(0.5);
+            if alpha > 0.0 {
+                cutoff / alpha
+            } else {
+                f32::INFINITY
+            }
+        });
+        let alpha_texture = match (mode, m.pbr_metallic_roughness().base_color_texture()) {
+            (gltf::material::AlphaMode::Opaque, _) | (_, None) => None,
+            (_, Some(info)) => self.alpha_texture(
+                &name,
+                info.tex_coord(),
+                info.texture().source().index(),
+                threshold,
+            ),
+        };
+        base.opacity = match mode {
             gltf::material::AlphaMode::Opaque => 1.0,
             gltf::material::AlphaMode::Blend => alpha,
+            // The texture holds the 0 or 1 already.
+            gltf::material::AlphaMode::Mask if alpha_texture.is_some() => 1.0,
             gltf::material::AlphaMode::Mask => f32::from(alpha >= m.alpha_cutoff().unwrap_or(0.5)),
         };
-        if m.alpha_mode() != gltf::material::AlphaMode::Opaque
-            && m.pbr_metallic_roughness().base_color_texture().is_some()
-        {
-            self.warnings.push(format!(
-                "material {name}: the alpha of the base color texture is not read"
-            ));
-        }
+        base.opacity_texture = alpha_texture;
 
         let mut stylization = Vec::new();
         if let Some(value) = m.extension_value(stylization_ext::NAME) {
@@ -409,6 +426,38 @@ impl Importer<'_> {
         });
         self.materials.insert(m.index(), id);
         Ok(id)
+    }
+
+    /// The alpha channel of a base color image as a gray image (MASK: 0 or 1 at `threshold`); `None` when the
+    /// image has no alpha channel (the factor alone then decides) or cannot be used.
+    fn alpha_texture(
+        &mut self,
+        material: &str,
+        tex_coord: u32,
+        source: usize,
+        threshold: Option<f32>,
+    ) -> Option<ImageId> {
+        if tex_coord != 0 {
+            self.warnings.push(format!(
+                "material {material}: the base color texture uses UV set {tex_coord}; only set 0 is supported, its alpha was ignored"
+            ));
+            return None;
+        }
+        let key = (source, threshold.map(f32::to_bits));
+        if let Some(&cached) = self.alpha_cache.get(&key) {
+            return cached;
+        }
+        let id = match to_alpha_image(&self.images[source], threshold) {
+            Ok(image) => image.map(|image| self.scene.add_image(image)),
+            Err(why) => {
+                self.warnings.push(format!(
+                    "material {material}: the alpha of the base color texture ignored: {why}"
+                ));
+                None
+            }
+        };
+        self.alpha_cache.insert(key, id);
+        id
     }
 
     /// Imports the texture's image as linear data; `None` (with a warning) when it cannot be used.
@@ -551,6 +600,36 @@ fn to_image(data: &gltf::image::Data, srgb: bool, space: ColorSpace) -> Result<I
         })
         .collect();
     Image::new(data.width, data.height, pixels).map_err(|e| e.to_string())
+}
+
+/// The alpha channel of a four-channel image as a gray image, or `None` when it has no alpha channel.
+fn to_alpha_image(
+    data: &gltf::image::Data,
+    threshold: Option<f32>,
+) -> Result<Option<Image>, String> {
+    use gltf::image::Format::*;
+    let bytes = match data.format {
+        R8G8B8A8 => 1,
+        R16G16B16A16 => 2,
+        R32G32B32A32FLOAT => 4,
+        _ => return Ok(None),
+    };
+    let pixels = data
+        .pixels
+        .chunks_exact(4 * bytes)
+        .map(|px| {
+            let at = &px[3 * bytes..];
+            let a = match bytes {
+                1 => f32::from(at[0]) / 255.0,
+                2 => f32::from(u16::from_le_bytes([at[0], at[1]])) / 65535.0,
+                _ => f32::from_le_bytes([at[0], at[1], at[2], at[3]]),
+            };
+            [threshold.map_or(a, |t| f32::from(a >= t)); 3]
+        })
+        .collect();
+    Image::new(data.width, data.height, pixels)
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -737,6 +816,32 @@ mod tests {
             r#""alphaMode": "MASK", "pbrMetallicRoughness""#,
         );
         assert_eq!(opacity(&json), 0.0, "0.25 is under the default cutoff 0.5");
+    }
+
+    #[test]
+    fn texture_alpha_becomes_a_gray_image() {
+        use gltf::image::{Data, Format};
+        let rgba = Data {
+            pixels: vec![255, 0, 0, 255, 0, 255, 0, 128, 0, 0, 255, 0, 9, 9, 9, 200],
+            format: Format::R8G8B8A8,
+            width: 2,
+            height: 2,
+        };
+        let blend = to_alpha_image(&rgba, None).unwrap().unwrap();
+        assert_eq!((blend.width(), blend.height()), (2, 2));
+        let r: Vec<f32> = blend.pixels().iter().map(|p| p[0]).collect();
+        assert_eq!(r, [1.0, 128.0 / 255.0, 0.0, 200.0 / 255.0]);
+        assert!(blend.pixels().iter().all(|p| p[0] == p[1] && p[1] == p[2]));
+        let mask = to_alpha_image(&rgba, Some(0.5)).unwrap().unwrap();
+        let r: Vec<f32> = mask.pixels().iter().map(|p| p[0]).collect();
+        assert_eq!(r, [1.0, 1.0, 0.0, 1.0], "128/255 is just over the cutoff");
+        let rgb = Data {
+            pixels: vec![0; 12],
+            format: Format::R8G8B8,
+            width: 2,
+            height: 2,
+        };
+        assert!(to_alpha_image(&rgb, None).unwrap().is_none());
     }
 
     #[test]
