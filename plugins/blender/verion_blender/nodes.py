@@ -6,15 +6,21 @@ Image nodes for the textures, and a Verion Output. A tree is bound to a material
 (`Material.verion_surface.node_tree`); `materials.Converter` reads it instead of the Blender tree.
 Nothing here is shown to Cycles or EEVEE: they ignore the tree.
 """
+import json
+
 import bpy
 import nodeitems_utils
 from bpy.props import FloatProperty, FloatVectorProperty, PointerProperty
 from nodeitems_utils import NodeCategory, NodeItem
 
+from . import stylization
+
 TREE = "VerionNodeTree"
 SURFACE = "VerionNodeSurface"
 OUTPUT = "VerionNodeOutput"
 IMAGE = "VerionNodeImage"
+STYLE = "VerionNodeStyle_"      # + a key of `stylization.LAYERS`: one Stylization layer, passing the surface through
+HYBRID = STYLE + "hybrid"
 
 
 class VerionNodeTree(bpy.types.NodeTree):
@@ -29,6 +35,23 @@ class VerionNodeTree(bpy.types.NodeTree):
                 m.update_tag()
 
 
+def _pg_signature(pg):
+    """Every property of a property group (ramps, tones and images included), comparable."""
+    out = []
+    for p in pg.bl_rna.properties:
+        if p.identifier == "rna_type":
+            continue
+        v = getattr(pg, p.identifier)
+        if p.type == "POINTER":
+            v = _pg_signature(v) if isinstance(v, bpy.types.PropertyGroup) else (v.name_full if v is not None else None)
+        elif p.type == "COLLECTION":
+            v = tuple(_pg_signature(i) for i in v)
+        elif hasattr(v, "__len__") and not isinstance(v, str):
+            v = tuple(v)
+        out.append((p.identifier, v))
+    return tuple(out)
+
+
 def signature(tree):
     """A comparable summary of everything the converter reads from a tree (values, links, images)."""
     def value(s):
@@ -37,7 +60,8 @@ def signature(tree):
 
     return tuple(
         (n.name, n.bl_idname, n.image.name_full if n.bl_idname == IMAGE and n.image else None,
-         tuple((s.name, value(s), tuple((l.from_node.name, l.from_socket.name) for l in s.links)) for s in n.inputs))
+         tuple((s.name, value(s), tuple((l.from_node.name, l.from_socket.name) for l in s.links)) for s in n.inputs),
+         _pg_signature(n.style) if n.bl_idname.startswith(STYLE) else None)
         for n in sorted(tree.nodes, key=lambda n: n.name)
     )
 
@@ -163,6 +187,63 @@ class VerionNodeImage(_Node, bpy.types.Node):
         layout.template_ID(self, "image", open="image.open")
 
 
+def _from_node(socket):
+    return socket.links[0].from_node if socket.is_linked else None
+
+
+def chain(tree):
+    """(the Surface node or None, the Stylization nodes from the surface to the output) of a tree."""
+    out = next((n for n in tree.nodes if n.bl_idname == OUTPUT), None)
+    node = _from_node(out.inputs["Surface"]) if out is not None else None
+    styles = []
+    while node is not None and node.bl_idname.startswith(STYLE) and node not in styles:
+        styles.append(node)
+        node = _from_node(node.inputs["Surface"])
+    return (node if node is not None and node.bl_idname == SURFACE else None), styles
+
+
+def style_json(tree, image_index, warn):
+    """(the Stylization JSON of the glTF extension, IR image indices) of the tree's Stylization nodes, or
+    None when it has none. Unlisted Hybrid Surface blends are 0 (physical)."""
+    styles = chain(tree)[1]
+    if not styles:
+        return None
+    d = {"hybridSurface": {k: 0.0 for k in stylization.HYBRID}}
+    imgs = []
+    for n in styles:
+        part = n.style.layers(image_index, warn, imgs)
+        if n.bl_idname != HYBRID:
+            part.pop("hybridSurface")
+        d.update(part)
+    return json.dumps(d), imgs
+
+
+def _style_node(key, label, flag):
+    class StyleNode(_Node, bpy.types.Node):
+        bl_idname = STYLE + key
+        bl_label = f"Verion {label}"
+        # The same properties as the Material tab's panel, so the node and the panel share their JSON.
+        style: PointerProperty(type=stylization.VerionStyle)
+
+        def init(self, context):
+            self.inputs.new("VerionSocketSurface", "Surface")
+            self.outputs.new("VerionSocketSurface", "Surface")
+            if flag:
+                setattr(self.style, flag, True)
+            for ramp in (self.style.toon, self.style.spec_ramp):
+                ramp.reset()
+            self.width = 260
+
+        def draw_buttons(self, context, layout):
+            stylization.draw_layer(layout, self.style, key, self)
+
+    StyleNode.__name__ = f"VerionNodeStyle_{key}"
+    return StyleNode
+
+
+STYLE_NODES = tuple(_style_node(k, label, flag) for k, label, flag, *_ in stylization.LAYERS)
+
+
 class VERION_OT_node_tree_new(bpy.types.Operator):
     bl_idname = "verion.node_tree_new"
     bl_label = "New Verion Nodes"
@@ -193,10 +274,11 @@ class _Category(NodeCategory):
 
 CATEGORIES = [
     _Category("VERION_SHADER", "Shader", items=[NodeItem(SURFACE), NodeItem(OUTPUT)]),
+    _Category("VERION_STYLE", "Stylization", items=[NodeItem(c.bl_idname) for c in STYLE_NODES]),
     _Category("VERION_INPUT", "Input", items=[NodeItem(IMAGE)]),
 ]
 
-classes = (VerionNodeTree, VerionSocketSurface, VerionSocketFactor, VerionSocketPositive, VerionSocketIOR, VerionSocketColor, VerionNodeOutput, VerionNodeSurface, VerionNodeImage, VERION_OT_node_tree_new)
+classes = (VerionNodeTree, VerionSocketSurface, VerionSocketFactor, VerionSocketPositive, VerionSocketIOR, VerionSocketColor, VerionNodeOutput, VerionNodeSurface, VerionNodeImage, VERION_OT_node_tree_new, *STYLE_NODES)
 
 
 def register():

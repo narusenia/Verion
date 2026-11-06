@@ -82,7 +82,11 @@ class Converter:
         p.pop("_clear", None)
         if material is not None:
             surface.apply(material, p)
-        st = stylization.material_style(material, self.image_index, self.warn) if material is not None else None
+        tree = material.verion_surface.node_tree if material is not None else None
+        if tree is not None:
+            st = nodes.style_json(tree, self.image_index, self.warn)  # the nodes define the layers, not the panel
+        else:
+            st = stylization.material_style(material, self.image_index, self.warn) if material is not None else None
         if st is not None:
             p["stylization"], p["stylization_images"] = st
         return p
@@ -129,12 +133,11 @@ class Converter:
 
     def verion_tree(self, tree, material):
         """The parameters of a Verion node tree (the Surface node linked to the first Output)."""
-        out = next((n for n in tree.nodes if n.bl_idname == nodes.OUTPUT), None)
-        link = out.inputs["Surface"].links[0] if out is not None and out.inputs["Surface"].is_linked else None
-        if link is None or link.from_node.bl_idname != nodes.SURFACE:
+        surface = nodes.chain(tree)[0]
+        if surface is None:
             self.warn(f"Material '{material.name}': the Verion nodes have no Surface connected to the output; using grey")
             return dict(DEFAULT)
-        i = link.from_node.inputs
+        i = surface.inputs
         self._baked, self._quiet = {}, set()
         v = lambda name: self.value(i[name], material)
         p = dict(metallic=v("Metallic"), roughness=v("Roughness"), transmission=v("Transmission"), ior=v("IOR"),

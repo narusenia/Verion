@@ -83,6 +83,74 @@ class NodeTests(unittest.TestCase):
         self.assertIsNotNone(p.get("base_color_texture"))
         self.assertEqual(warnings, [])
 
+    def converted(self, mat, warnings=None):
+        import json
+
+        from verion_blender import materials, native
+
+        p = materials.Converter(native.load().Scene(), (warnings if warnings is not None else []).append).params(mat)
+        return json.loads(p["stylization"]) if "stylization" in p else None, p
+
+    def chain(self, tree, *keys):
+        """Surface -> the given Stylization nodes -> Output, in order."""
+        surf = next(n for n in tree.nodes if n.bl_idname == "VerionNodeSurface")
+        out = next(n for n in tree.nodes if n.bl_idname == "VerionNodeOutput")
+        prev, nodes = surf, []
+        for k in keys:
+            n = tree.nodes.new("VerionNodeStyle_" + k)
+            tree.links.new(prev.outputs["Surface"], n.inputs["Surface"])
+            prev = n
+            nodes.append(n)
+        tree.links.new(prev.outputs["Surface"], out.inputs["Surface"])
+        return nodes
+
+    def test_style_nodes_make_the_same_json_as_the_panel(self):
+        lit_scene()
+        ob, panel_mat = sphere(name="panel")
+        st = panel_mat.verion_style
+        st.enabled = st.use_toon = st.use_rim = True
+        st.toon.reset()
+        st.diffuse, st.rim_width = 1.0, 0.5
+        _, node_mat = sphere(name="node")
+        toon, rim, hybrid = self.chain(verion_tree(node_mat), "toon", "rim", "hybrid")
+        hybrid.style.diffuse, rim.style.rim_width = 1.0, 0.5
+        self.assertEqual(self.converted(node_mat)[0], self.converted(panel_mat)[0])
+
+    def test_the_tree_replaces_the_panel(self):
+        lit_scene()
+        ob, mat = sphere()
+        mat.verion_style.enabled = mat.verion_style.use_toon = True
+        mat.verion_style.toon.reset()
+        self.assertIn("toonRamp", self.converted(mat)[0])
+        verion_tree(mat)  # no Stylization nodes: the panel is ignored
+        self.assertIsNone(self.converted(mat)[0])
+
+    def test_style_edits_change_the_signature(self):
+        from verion_blender import materials
+
+        lit_scene()
+        ob, mat = sphere()
+        (rim,) = self.chain(verion_tree(mat), "rim")
+        before = materials.Converter.tree_signature(mat)
+        rim.style.rim_width = 0.9
+        self.assertNotEqual(materials.Converter.tree_signature(mat), before)
+        before = materials.Converter.tree_signature(mat)
+        rim.style.toon.reset(5)
+        self.assertNotEqual(materials.Converter.tree_signature(mat), before)
+
+    def test_matcap_node_carries_its_image(self):
+        lit_scene()
+        ob, mat = sphere()
+        (cap,) = self.chain(verion_tree(mat), "matcap")
+        img = bpy.data.images.new("cap", 4, 4)
+        img.pixels = [0.5, 0.5, 0.5, 1.0] * 16
+        cap.style.matcap_texture = img
+        warnings = []
+        d, p = self.converted(mat, warnings)
+        self.assertEqual(d["matcap"]["texture"], {"index": 0})
+        self.assertEqual(len(p["stylization_images"]), 1)
+        self.assertEqual(warnings, [])
+
     def test_editing_the_tree_reaches_the_viewport(self):
         from verion_blender import native
         from verion_blender.viewport import View, Viewport

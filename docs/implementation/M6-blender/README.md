@@ -23,7 +23,7 @@
 | 14 | DCC 間の一貫性: 同じシーンを Blender 経由と glTF 経由で描いて閾値内で一致する。Cycles との比較は参考値として記録する | REQ-QA | 済（`test_consistency.py`: Blender 経由と glTF 経由が画素まで一致。Cycles との比は `consistency.md` に参考値として記録） |
 | 15 | 配布: アドオン zip（macOS Apple silicon・Windows x64）。ネイティブライブラリと OIDN の CPU 版・ライセンス文書を同梱（ADR-0018）。GPU 版 OIDN を足す導線（GUI） | REQ-INFRA-003 | 済（macOS Apple silicon: `scripts/package_blender.sh` が abi3 の wheel を入れた拡張 zip を作り、空の Blender プロファイルへ入れて 4.5 と 5.2 で描画まで確認。Windows x64 は同じスクリプトを Windows 機で実行（項目 16）。OIDN は Blender の同梱を使うので同梱しない（ADR-0018 の追記）。GPU デノイズは Device の選択（Metal・CUDA・HIP）。拡張のライセンス欄は仮置きで、ADR-0004 の決定が外部配布の前に要る） |
 | 16 | Windows（Vulkan）での確認: Blender 5.x と 4.5 LTS で、項目 4〜7 の画像が Metal と一致する | REQ-GPU-007 | 済（Windows 機 RTX 3080・Vulkan で、`mise run check`・`shaders:check`・`test:gpu`、`py_test.sh`、`blender_test.sh`、`package_blender.sh` が Blender 5.2.3 LTS と 4.5.7 LTS の両方で通った。Metal との画像一致は、Mac と Windows の `test_consistency.py` の画像で平均の比 1.0000、ブロック相関 1.00000、最大の画素差 0.001 以下（`consistency.md`）。手順は `docs/handoff/2026-11-06-m6-device-checks.md`） |
-| 17 | Verion 専用のマテリアルノードツリー: レンダラーの材質パラメータをそのままソケットにした Verion Surface、Verion Image、Verion Output。マテリアルに紐付けると、Blender のノードの代わりにこのツリーから変換する | REQ-DCC-003 | 済（別のツリー型 `VerionNodeTree` なので Cycles・EEVEE は見ない。`nodes.py`。同じ値の Principled と画像が一致し、ノードの編集はビューポートに届く。`test_nodes.py`。Mac と Windows の GUI で確認。スタイライズ層のノード化は未着手で、下の「決めてあること」に理由と次の判断） |
+| 17 | Verion 専用のマテリアルノードツリー: レンダラーの材質パラメータをそのままソケットにした Verion Surface、Verion Image、Verion Output、Stylization の各層（Hybrid Surface・Toon Ramp・Shadow Palette・Rim Light・Stylized Specular・Outline Style・MatCap）のノード。マテリアルに紐付けると、Blender のノードの代わりにこのツリーから変換する | REQ-DCC-003 | 済（別のツリー型 `VerionNodeTree` なので Cycles・EEVEE は見ない。`nodes.py`。同じ値の Principled と画像が一致し、ノードの編集はビューポートに届く。`test_nodes.py`。Mac と Windows の GUI で確認。Stylization のノードは Surface を受けて渡し、パネルと同じプロパティ（`VerionStyle`）と同じ JSON を使う。ツリーを紐付けた材質は、パネルではなくノードが層を定める。`test_nodes.py`。Stylization ノードの GUI での確認はこれから） |
 
 ## 決めてあること
 
@@ -33,7 +33,7 @@
 - ライトの W は Cycles の換算に合わせる。手続き型の空は HDRI へベイクする。環境光だけの Toon の段は HDRI から仮想の主光源を求める（ADR-0019、ADR-0020）
 - OIDN は Blender の同梱を使い、アドオンには同梱しない。GPU 版は Device の選択（Metal・CUDA・HIP）で使う。Blender の外（`render-cli`・Viewer）の配布は ADR-0018 の本文どおり（CPU 版を同梱）。ADR-0018 への追記は利用者の確認待ち
 - 開発機の Blender は 4.5.15 LTS（Python 3.11、numpy 1.26）と 5.2.3 LTS（Python 3.13、numpy 2.3）。numpy の主な版が違うので、`numpy` クレートは両方の ABI で動くことを項目 2 で確かめる
-- Stylization の編集はノードではなく Material / World のプロパティパネルにする。Cycles のシェーダーツリーに入るカスタムノードは Blender の版ごとの API 差と保守が重く、ランタイムの保存形式も不安定になる。パネルは 4.5 LTS と 5.x で同じコードで動き、検証はネイティブ側の 1 か所に集まる。後から入れた項目 17 のノードツリーは、Cycles のシェーダーツリーとは別のツリー型で、材質パラメータだけを持つので、この理由には当たらない。スタイライズ層をそのツリーのノードにするかは、パネルと JSON の仕組みとの二重管理を避けるため、どちらを正にするか決めてから着手する。専用ツリーを別アドオン（`verion-nodes`）に切り出すかは、ノード版が育ってから判断する
+- Stylization の編集はノードではなく Material / World のプロパティパネルにする。Cycles のシェーダーツリーに入るカスタムノードは Blender の版ごとの API 差と保守が重く、ランタイムの保存形式も不安定になる。パネルは 4.5 LTS と 5.x で同じコードで動き、検証はネイティブ側の 1 か所に集まる。後から入れた項目 17 のノードツリーは、Cycles のシェーダーツリーとは別のツリー型で、材質パラメータと Stylization の層だけを持つので、この理由には当たらない。ノードとパネルは同じ `VerionStyle` のプロパティと JSON を使い、ツリーを紐付けた材質ではノードを正とする（パネルは隠れる）。専用ツリーを別アドオン（`verion-nodes`）に切り出すかは、ノード版が育ってから判断する
 - 新しい依存は PyO3・maturin・`numpy` クレートまで（利用者が許可）。それ以外は追加のたびに確認する
 
 ## 要確認（利用者）

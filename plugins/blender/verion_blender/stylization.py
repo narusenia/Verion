@@ -20,6 +20,9 @@ def _unit(name, default=0.0, description=""):
     return FloatProperty(name=name, description=description, default=default, min=0.0, max=1.0, subtype="FACTOR")
 
 
+HYBRID = ("diffuse", "specular", "gi", "shadow", "outline", "reflection")
+
+
 class VerionBand(bpy.types.PropertyGroup):
     threshold: _unit("Threshold", description="Where this band starts (the first band's start is ignored)")
     color: _color("Color")
@@ -106,9 +109,14 @@ class VerionStyle(bpy.types.PropertyGroup):
     matcap_albedo: _unit("Albedo")
 
     def to_json(self, image_index, warn):
-        """(JSON text, IR image indices) or None when nothing is enabled."""
-        d = {"hybridSurface": {k: getattr(self, k) for k in ("diffuse", "specular", "gi", "shadow", "outline", "reflection")}}
+        """(JSON text, IR image indices)."""
         imgs = []
+        return json.dumps(self.layers(image_index, warn, imgs)), imgs
+
+    def layers(self, image_index, warn, imgs):
+        """The extension's JSON object of the enabled layers. Image references index into `imgs`, which a
+        caller merging several of these (the Verion nodes) shares between them."""
+        d = {"hybridSurface": {k: getattr(self, k) for k in HYBRID}}
 
         def texture(image, what):
             if image is None:
@@ -149,7 +157,7 @@ class VerionStyle(bpy.types.PropertyGroup):
             t = texture(self.matcap_texture, "MatCap")
             if t is not None:
                 d["matcap"] = {"texture": t, "strength": self.matcap_strength, "albedo": self.matcap_albedo}
-        return json.dumps(d), imgs
+        return d
 
 
 class VerionWorldStyle(bpy.types.PropertyGroup):
@@ -197,10 +205,12 @@ class VERION_OT_band(bpy.types.Operator):
     bl_label = "Edit Band"
     bl_options = {"UNDO"}
     path: bpy.props.StringProperty()   # which ramp: "toon" or "spec_ramp"
+    tree: bpy.props.StringProperty()   # a Verion node's tree and name; empty: the material's panel
+    node: bpy.props.StringProperty()
     action: bpy.props.EnumProperty(items=[("ADD", "Add", ""), ("REMOVE", "Remove", ""), ("RESET", "Reset", "")])
 
     def execute(self, context):
-        st = context.material.verion_style
+        st = bpy.data.node_groups[self.tree].nodes[self.node].style if self.tree else context.material.verion_style
         ramp = getattr(st, self.path)
         if self.action == "ADD":
             n = len(ramp.bands)
@@ -214,11 +224,13 @@ class VERION_OT_band(bpy.types.Operator):
         return {"FINISHED"}
 
 
-def _draw_ramp(layout, ramp, path):
+def _draw_ramp(layout, ramp, path, node=None):
     row = layout.row(align=True)
     for action, icon in (("ADD", "ADD"), ("REMOVE", "REMOVE"), ("RESET", "FILE_REFRESH")):
         op = row.operator("verion.style_band", text="", icon=icon)
         op.path, op.action = path, action
+        if node is not None:
+            op.tree, op.node = node.id_data.name, node.name
     if not ramp.bands:
         layout.label(text="No bands: press Reset", icon="INFO")
     for i, b in enumerate(ramp.bands):
@@ -239,7 +251,8 @@ class StylePanel:
 
     @classmethod
     def poll(cls, context):
-        return context.engine in cls.COMPAT_ENGINES and context.material is not None
+        m = context.material
+        return context.engine in cls.COMPAT_ENGINES and m is not None and m.verion_surface.node_tree is None
 
 
 class VERION_PT_style(StylePanel, bpy.types.Panel):
@@ -282,7 +295,7 @@ def _sub(name, label, flag, props=(), ramp=None, extra=None):
     return Sub
 
 
-def _shadow(col, st):
+def _shadow(col, st, node=None):
     for label, tone in (("Direct", st.shadow_direct), ("Indirect", st.shadow_indirect)):
         box = col.box()
         box.label(text=label)
@@ -291,7 +304,7 @@ def _shadow(col, st):
         box.prop(tone, "value")
 
 
-def _spec(col, st):
+def _spec(col, st, node=None):
     col.prop(st, "spec_shape")
     if st.spec_shape == "ellipse":
         col.prop(st, "spec_stretch")
@@ -303,24 +316,42 @@ def _spec(col, st):
         col.prop(st, p)
     col.prop(st, "spec_use_ramp")
     if st.spec_use_ramp:
-        _draw_ramp(col, st.spec_ramp, "spec_ramp")
+        _draw_ramp(col, st.spec_ramp, "spec_ramp", node)
 
 
-def _matcap(col, st):
+def _matcap(col, st, node=None):
     col.template_ID(st, "matcap_texture", open="image.open")
     col.prop(st, "matcap_strength")
     col.prop(st, "matcap_albedo")
 
 
-SUBPANELS = (
-    _sub("VERION_PT_style_toon", "Toon Ramp", "use_toon", ramp="toon"),
-    _sub("VERION_PT_style_shadow", "Shadow Palette", "use_shadow_palette", extra=_shadow),
-    _sub("VERION_PT_style_rim", "Rim Light", "use_rim",
-         ("rim_color", "rim_width", "rim_feather", "rim_follow_light", "rim_strength")),
-    _sub("VERION_PT_style_spec", "Stylized Specular", "use_specular_shape", extra=_spec),
-    _sub("VERION_PT_style_outline", "Outline Style", "use_outline_style",
-         ("outline_color", "outline_width", "outline_depth", "outline_crease")),
-    _sub("VERION_PT_style_matcap", "MatCap", "use_matcap", extra=_matcap),
+# key, label, enable flag on VerionStyle, plain properties, ramp, extra drawing: the panel sections and the
+# Verion nodes (nodes.py) both come from this table.
+LAYERS = (
+    ("hybrid", "Hybrid Surface", None, HYBRID, None, None),
+    ("toon", "Toon Ramp", "use_toon", (), "toon", None),
+    ("shadow", "Shadow Palette", "use_shadow_palette", (), None, _shadow),
+    ("rim", "Rim Light", "use_rim", ("rim_color", "rim_width", "rim_feather", "rim_follow_light", "rim_strength"), None, None),
+    ("spec", "Stylized Specular", "use_specular_shape", (), None, _spec),
+    ("outline", "Outline Style", "use_outline_style", ("outline_color", "outline_width", "outline_depth", "outline_crease"), None, None),
+    ("matcap", "MatCap", "use_matcap", (), None, _matcap),
+)
+LAYER = {k: (label, flag, props, ramp, extra) for k, label, flag, props, ramp, extra in LAYERS}
+
+
+def draw_layer(col, st, key, node=None):
+    """The properties of one layer (a node draws them in its body)."""
+    _, _, props, ramp, extra = LAYER[key]
+    for p in props:
+        col.prop(st, p)
+    if ramp:
+        _draw_ramp(col, getattr(st, ramp), ramp, node)
+    if extra:
+        extra(col, st, node)
+
+
+SUBPANELS = tuple(
+    _sub(f"VERION_PT_style_{k}", label, flag, props, ramp, extra) for k, label, flag, props, ramp, extra in LAYERS[1:]
 )
 
 
