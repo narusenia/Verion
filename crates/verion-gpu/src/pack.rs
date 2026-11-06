@@ -7,12 +7,12 @@ use std::collections::HashMap;
 
 use verion_scene::{Camera, Image, ImageId, Light, Scene, Transform};
 
-use crate::Adaptive;
+use crate::{Adaptive, Restir};
 
 /// Path length limit. Radiance beyond it is dropped, so closed furnaces read slightly dark.
 pub const MAX_DEPTH: u32 = 8;
 /// Words of the parameter block; must match `params` in `shaders/include/pt_core.slang`.
-pub const PARAM_WORDS: usize = 36;
+pub const PARAM_WORDS: usize = 39;
 pub const MATERIAL_WORDS: usize = 22;
 pub const LIGHT_WORDS: usize = 16;
 /// Words per emissive triangle; must match `shaders/include/pt_core.slang`.
@@ -648,6 +648,7 @@ pub fn base_params(
     lighting: bool,
     multiscatter: bool,
     adaptive: Option<Adaptive>,
+    restir: Option<Restir>,
 ) -> [u32; PARAM_WORDS] {
     let mut params = [0u32; PARAM_WORDS];
     params[0] = width;
@@ -675,6 +676,11 @@ pub fn base_params(
         params[32] = 1;
         params[33] = a.threshold.to_bits();
         params[34] = a.min_spp;
+    }
+    if let Some(r) = restir {
+        params[36] = 1;
+        params[37] = r.candidates;
+        params[38] = r.history;
     }
     params
 }
@@ -731,10 +737,12 @@ mod tests {
             true,
             false,
             Some(Adaptive::default()),
+            Some(Restir::default()),
         );
         assert_eq!((p[0], p[1], p[5], p[23]), (64, 32, 2, 5));
         assert_eq!((p[28], p[29], p[32], p[34]), (1, 0, 1, 16));
         assert_eq!((p[6], p[30], p[31], p[35]), (0, 0, 0, 0));
+        assert_eq!((p[36], p[37], p[38]), (1, 4, 20));
         assert_eq!(f32::from_bits(p[21]), 0.2);
     }
 }

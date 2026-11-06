@@ -14,7 +14,7 @@ use verion_scene::{Camera, Changes, Scene};
 
 use verion_gpu::{
     Accumulation as _, Adaptive, Aovs, Integrator, LightingAovs, MemoryUsage, RayTracingBackend,
-    UpdateReport,
+    Restir, UpdateReport,
     pack::{self, MeshRange, PARAM_WORDS, SceneInfo, View},
     readback,
 };
@@ -108,6 +108,7 @@ pub struct Renderer {
     /// Wavefront only: time extend and shade separately (see `run_wavefront`).
     stage_timing: bool,
     adaptive: Option<Adaptive>,
+    restir: Option<Restir>,
     /// Compiled on first use, so megakernel-only users skip the compile.
     wavefront: OnceCell<Result<wavefront::Pipelines, Error>>,
 }
@@ -184,6 +185,7 @@ impl Renderer {
             integrator: Integrator::default(),
             stage_timing: false,
             adaptive: None,
+            restir: None,
             wavefront: pipelines.3,
         })
     }
@@ -207,6 +209,7 @@ impl Renderer {
             fresh.integrator = self.integrator;
             fresh.stage_timing = self.stage_timing;
             fresh.adaptive = self.adaptive;
+            fresh.restir = self.restir;
             report.blases_built = fresh.blases.len();
             report.tlas_built = true;
             *self = fresh;
@@ -333,6 +336,9 @@ pub struct Accumulation {
     pixel_stats: Option<Obj<dyn MTLBuffer>>,
     /// The adaptive setting the accumulation started with; the stats are only valid under it.
     adaptive: Option<Adaptive>,
+    /// ReSTIR DI only: the reservoirs of this frame and the last. Valid only under the setting the
+    /// accumulation started with.
+    restir: Option<(Obj<dyn MTLBuffer>, Restir)>,
 }
 
 impl Accumulation {
@@ -351,7 +357,7 @@ impl Accumulation {
 }
 
 impl Renderer {
-    /// A command buffer and a compute encoder with the path tracer's bindings 0..18 set.
+    /// A command buffer and a compute encoder with the path tracer's bindings 0..19 set.
     fn open_encoder(&self, acc: &Accumulation) -> Result<(CommandBuffer, Encoder), Error> {
         let cb = self
             .ctx
@@ -366,7 +372,7 @@ impl Renderer {
             enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
         }
         // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional, uvs, texels, texInfo, vnormals, lighting, pixelStats). Dispatches in one encoder run in
+        // indices, instances, materials, lights, params, accum, emitters, emit_cdf, env pixels, marginal, conditional, uvs, texels, texInfo, vnormals, lighting, pixelStats, restir). Dispatches in one encoder run in
         // order, so the `+=` on `accum` never races.
         unsafe {
             enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
@@ -395,12 +401,17 @@ impl Renderer {
                 0,
                 18,
             );
+            enc.setBuffer_offset_atIndex(
+                Some(acc.restir.as_ref().map_or(&self.no_lighting, |r| &r.0)),
+                0,
+                19,
+            );
         }
         Ok((cb, enc))
     }
 
     /// # Safety
-    /// `enc` must have bindings 0..18 of `shaders/pathtrace.slang` set.
+    /// `enc` must have bindings 0..19 of `shaders/pathtrace.slang` set.
     unsafe fn encode_megakernel(
         &self,
         enc: &ProtocolObject<dyn MTLComputeCommandEncoder>,
@@ -411,7 +422,12 @@ impl Renderer {
         let mut k = 0;
         while k < samples {
             params[6] = acc.samples + k;
-            params[35] = (samples - k).min(SAMPLES_PER_DISPATCH);
+            // ReSTIR reads the other pixels' last frame, so each dispatch is one sample.
+            params[35] = (samples - k).min(if acc.restir.is_some() {
+                1
+            } else {
+                SAMPLES_PER_DISPATCH
+            });
             k += params[35];
             // SAFETY: the block outlives the call and Metal copies it.
             unsafe {
@@ -558,6 +574,12 @@ impl RayTracingBackend for Renderer {
     /// `Accumulation::active_pixels` tells how many pixels still take samples.
     fn set_adaptive(&mut self, adaptive: Option<Adaptive>) {
         self.adaptive = adaptive;
+    }
+
+    /// Turns ReSTIR DI on or off for accumulations started afterwards. It needs emissive
+    /// triangles to do anything; without them the image is the plain path tracer's.
+    fn set_restir(&mut self, restir: Option<Restir>) {
+        self.restir = restir;
     }
 
     /// World-space normal of the first hit per pixel, row-major from the top-left; misses are zero.
@@ -716,6 +738,7 @@ impl RayTracingBackend for Renderer {
             acc.lighting.is_some(),
             self.multiscatter,
             self.adaptive,
+            self.restir,
         );
 
         if acc.samples == 0 {
@@ -735,6 +758,27 @@ impl RayTracingBackend for Renderer {
         if acc.adaptive.is_some() != self.adaptive.is_some() {
             return Err(Error::Scene(
                 "adaptive sampling was switched mid-accumulation; start a new accumulation".into(),
+            ));
+        }
+        if acc.samples == 0 {
+            // Two frames of reservoirs; Metal zero-fills them, which marks every pixel unusable.
+            acc.restir = match self.restir {
+                Some(r) => {
+                    let len = acc.width as usize * acc.height as usize * 2 * 16 * size_of::<f32>();
+                    self.ctx.check_fits(len)?;
+                    let buffer = self
+                        .ctx
+                        .device
+                        .newBufferWithLength_options(len, MTLResourceOptions::StorageModeShared)
+                        .ok_or(Error::Resource("reservoir buffer"))?;
+                    Some((buffer, r))
+                }
+                None => None,
+            };
+        }
+        if acc.restir.as_ref().map(|r| r.1) != self.restir {
+            return Err(Error::Scene(
+                "ReSTIR was switched mid-accumulation; start a new accumulation".into(),
             ));
         }
         let wavefront = self.integrator == Integrator::Wavefront;
@@ -806,6 +850,7 @@ impl RayTracingBackend for Renderer {
             stage_seconds: None,
             pixel_stats: None,
             adaptive: None,
+            restir: None,
         })
     }
 }

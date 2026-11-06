@@ -13,47 +13,47 @@ struct KernelContext_0
 };
 
 
-#line 68 "shaders/include/pt_core.slang"
+#line 74 "shaders/include/pt_core.slang"
 float pf_0(uint i_0, KernelContext_0 thread* kernelContext_0)
 {
 
-#line 68
+#line 74
     return (as_type<float>((kernelContext_0->params_0[i_0])));
 }
 
 
-#line 1046
+#line 1269
 bool pixelActive_0(uint p_0, KernelContext_0 thread* kernelContext_1)
 {
     uint _S1 = 3U * p_0;
 
-#line 1048
+#line 1271
     float device* _S2 = kernelContext_1->pixelStats_0+_S1;
 
-#line 1048
+#line 1271
     float n_0 = *_S2;
     if((*_S2) < float(kernelContext_1->params_0[int(34)]))
     {
 
-#line 1050
+#line 1273
         return true;
     }
 
-#line 1051
+#line 1274
     float mean_0 = *(kernelContext_1->pixelStats_0+(_S1 + 1U)) / n_0;
 
     float _S3 = sqrt(max(*(kernelContext_1->pixelStats_0+(_S1 + 2U)) / n_0 - mean_0 * mean_0, 0.0f) * n_0 / (n_0 - 1.0f) / n_0);
 
-#line 1053
+#line 1276
     float _S4 = pf_0(33U, kernelContext_1);
 
-#line 1053
+#line 1276
     return _S3 > (_S4 * max(mean_0, 0.05000000074505806f));
 }
 
 
 #line 7 "shaders/wf_select.slang"
-[[kernel]] void wf_select(uint3 tid_0 [[thread_position_in_grid]], uint device* params_1 [[buffer(6)]], float device* pixelStats_1 [[buffer(18)]], uint device* counts_1 [[buffer(23)]], uint device* queueOut_1 [[buffer(22)]])
+[[kernel]] void wf_select(uint3 tid_0 [[thread_position_in_grid]], uint device* params_1 [[buffer(6)]], float device* pixelStats_1 [[buffer(18)]], uint device* counts_1 [[buffer(24)]], uint device* queueOut_1 [[buffer(23)]])
 {
 
 #line 7

@@ -36,6 +36,9 @@ pub trait RayTracingBackend: Sized {
     fn set_stage_timing(&mut self, on: bool);
     /// Per-pixel adaptive sampling for accumulations started afterwards (REQ-ACC-007).
     fn set_adaptive(&mut self, adaptive: Option<Adaptive>);
+    /// ReSTIR DI for accumulations started afterwards (REQ-ACC-002). `None` is the unbiased path
+    /// tracer; Reference renders must leave it off.
+    fn set_restir(&mut self, restir: Option<Restir>);
 
     /// An empty running sum; `lighting` adds the per-pixel buffers of the lighting split.
     fn new_accumulation(
@@ -109,6 +112,27 @@ impl Default for Adaptive {
         Self {
             threshold: 0.02,
             min_spp: 16,
+        }
+    }
+}
+
+/// ReSTIR DI settings (REQ-ACC-002, ADR-0016): the first hit's emissive-triangle light sample comes
+/// from reservoirs that reuse the previous frame's samples of the pixel and its neighbours. The
+/// reuse is biased near shadow edges, so the image is non-physical. Surfaces that are sharp,
+/// transmissive or seen through a lens use plain light sampling instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Restir {
+    /// Light samples drawn per pixel and frame before the reuse.
+    pub candidates: u32,
+    /// Most samples a reused reservoir counts for; a larger cap reuses more but follows change slower.
+    pub history: u32,
+}
+
+impl Default for Restir {
+    fn default() -> Self {
+        Self {
+            candidates: 4,
+            history: 20,
         }
     }
 }

@@ -130,8 +130,8 @@ impl Renderer {
                     enc.setComputePipelineState(pipe);
                     if pipe == &p.select {
                         // The depth-0 queue is what wf_select writes.
-                        // SAFETY: binding 22 is `queueOut` in wf_state.slang.
-                        unsafe { enc.setBuffer_offset_atIndex(Some(&b.queues[0]), 0, 22) };
+                        // SAFETY: binding 23 is `queueOut` in wf_state.slang.
+                        unsafe { enc.setBuffer_offset_atIndex(Some(&b.queues[0]), 0, 23) };
                         enc.dispatchThreads_threadsPerThreadgroup(
                             MTLSize {
                                 width: w,
@@ -182,17 +182,17 @@ fn size(n: usize) -> MTLSize {
     }
 }
 
-/// Binds the wavefront buffers (`shaders/include/wf_state.slang`, 19..24), the queues of depth `d`
+/// Binds the wavefront buffers (`shaders/include/wf_state.slang`, 20..25), the queues of depth `d`
 /// and the parameter block. Bindings stay with the encoder, so this is redone for each new one.
 fn bind(enc: &Encoder, b: &Buffers, params: &[u32; PARAM_WORDS], d: usize) {
     // SAFETY: the indices match the slang declarations; `params` outlives the call and Metal copies it.
     unsafe {
-        enc.setBuffer_offset_atIndex(Some(&b.state), 0, 19);
-        enc.setBuffer_offset_atIndex(Some(&b.hits), 0, 20);
-        enc.setBuffer_offset_atIndex(Some(&b.queues[d % 2]), 0, 21);
-        enc.setBuffer_offset_atIndex(Some(&b.queues[(d + 1) % 2]), 0, 22);
-        enc.setBuffer_offset_atIndex(Some(&b.counts), 0, 23);
-        enc.setBuffer_offset_atIndex(Some(&b.args), 0, 24);
+        enc.setBuffer_offset_atIndex(Some(&b.state), 0, 20);
+        enc.setBuffer_offset_atIndex(Some(&b.hits), 0, 21);
+        enc.setBuffer_offset_atIndex(Some(&b.queues[d % 2]), 0, 22);
+        enc.setBuffer_offset_atIndex(Some(&b.queues[(d + 1) % 2]), 0, 23);
+        enc.setBuffer_offset_atIndex(Some(&b.counts), 0, 24);
+        enc.setBuffer_offset_atIndex(Some(&b.args), 0, 25);
         enc.setBytes_length_atIndex(
             std::ptr::NonNull::from(params).cast(),
             size_of_val(params),

@@ -22,7 +22,7 @@ uint pathCount_0(KernelContext_0 thread* kernelContext_0)
 
 
 #line 9 "shaders/wf_args.slang"
-[[kernel]] void wf_args(uint3 tid_0 [[thread_position_in_grid]], uint device* params_1 [[buffer(6)]], uint device* counts_1 [[buffer(23)]], uint device* args_1 [[buffer(24)]])
+[[kernel]] void wf_args(uint3 tid_0 [[thread_position_in_grid]], uint device* params_1 [[buffer(6)]], uint device* counts_1 [[buffer(24)]], uint device* args_1 [[buffer(25)]])
 {
 
 #line 9

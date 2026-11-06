@@ -21,7 +21,8 @@ StructuredBuffer<uint> lights;      // 16 words: kind (0 point, 1 directional, 2
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
                                     // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle, 28 lighting AOV enable, 29 multiple-scattering compensation enable,
                                     // 30 / 31 wavefront depth and path count, 32 adaptive sampling enable, 33 adaptive threshold
-                                    // (float), 34 adaptive minimum samples, 35 megakernel samples per dispatch
+                                    // (float), 34 adaptive minimum samples, 35 megakernel samples per dispatch, 36 ReSTIR DI enable,
+                                    // 37 ReSTIR initial candidates per pixel, 38 ReSTIR history cap (samples a reused reservoir counts for)
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
 StructuredBuffer<float> emitters;   // 16 words per emissive world-space triangle: p0, p1, p2, radiance rgb, area, selection pdf, 2 pad
 StructuredBuffer<float> emitCdf;    // cumulative selection probability per emitter triangle, last entry 1
@@ -43,6 +44,11 @@ RWStructuredBuffer<float> lighting; // used only when params[28] != 0; 65 floats
                                     // slot 3 holds emissive triangles and the environment map.
 RWStructuredBuffer<float> pixelStats; // used only when params[32] != 0; 3 floats per pixel: samples taken, sum of
                                       // luminance, sum of squared luminance (adaptive sampling, REQ-ACC-007)
+
+RWStructuredBuffer<float> restir;   // used only when params[36] != 0 (ReSTIR DI, REQ-ACC-002): two halves of 16 floats per
+                                    // pixel, the current frame's and the previous one's, swapped by sample parity. Per pixel:
+                                    // 0 emitter + 1 (bits, 0 = none), 1..3 sample point, 4 contribution weight W, 5 sample count M,
+                                    // 8..10 shading point, 11..13 shading normal, 14 usable as a neighbour (bits, 1 or 0)
 
 static const float PI = 3.14159265358979;
 static const uint LIGHTING_STRIDE = 65;
@@ -527,6 +533,7 @@ struct PathState
     int chan;      // color channel this path follows after its first dispersive hit, -1 until then
     float pathLen; // distance travelled so far, widens the texture-filter cone
     bool misPrev;  // the previous bounce was a reflection that light sampling also covers
+    bool restir;   // the first hit took its emitter sample from ReSTIR, so BSDF hits on emitters add nothing after it
     float qPrev;   // its density
     float visLit;
     float visTotal;
@@ -572,6 +579,7 @@ PathState generatePathFor(uint px, uint py, uint sample)
     s.chan = -1;
     s.pathLen = 0.0;
     s.misPrev = false;
+    s.restir = false;
     s.qPrev = 0.0;
     s.visLit = 0.0;
     s.visTotal = 0.0;
@@ -597,6 +605,178 @@ Hit traceClosest(float3 org, float3 dir)
     return h;
 }
 
+// ReSTIR DI (REQ-ACC-002, ADR-0016). Surfaces rougher than this take emitter samples from
+// reservoirs; sharper ones keep light sampling with BSDF MIS, which resolves their highlights better.
+static const float RESTIR_MIN_ALPHA = 0.15;
+static const int RESTIR_RADIUS = 6;   // pixels, for the neighbours of the previous frame
+static const uint RESTIR_NEIGHBOURS = 2;
+
+uint restirBase(uint pixel, uint which) { return (which * params[0] * params[1] + pixel) * 16; }
+
+// The light arriving from point `x` of emitter `e` at `p` without the BSDF: Le cos(light) / d^2.
+// False when the point is behind the surface or the light faces away.
+bool restirLight(uint e, float3 x, float3 p, float3 n, out float3 wi, out float dist, out float cosi, out float3 g)
+{
+    uint o = e * 16;
+    float3 a = float3(emitters[o], emitters[o + 1], emitters[o + 2]);
+    float3 b = float3(emitters[o + 3], emitters[o + 4], emitters[o + 5]);
+    float3 c = float3(emitters[o + 6], emitters[o + 7], emitters[o + 8]);
+    float3 toL = x - p;
+    float d2 = dot(toL, toL);
+    dist = sqrt(d2);
+    wi = toL / max(dist, 1.0e-6);
+    float cosl = abs(dot(normalize(cross(b - a, c - a)), wi));
+    cosi = dot(n, wi);
+    g = float3(emitters[o + 9], emitters[o + 10], emitters[o + 11]) * (cosl / max(d2, 1.0e-12));
+    return cosi > 0.0 && cosl > 1.0e-5 && d2 > 1.0e-12;
+}
+
+struct RestirPick
+{
+    bool valid;   // a sample was chosen
+    uint e;       // its emitter
+    float3 x;     // its point
+    float W;      // contribution weight: the unshadowed contribution times W estimates the direct light
+    bool occ;     // the chosen sample is hidden from the shading point
+};
+
+// Resamples the emitter light of the first hit: initial candidates by emitted power, then the
+// pixel's reservoir and a few neighbours' from the previous frame. One shadow ray tests the
+// winner, and a hidden winner is stored with weight 0 so shadows do not spread. The reuse takes
+// the previous reservoirs without a visibility test of their own, so it is biased near shadow
+// edges; the image is marked non-physical (ADR-0016).
+RestirPick restirDI(uint pixel, float3 p, float3 n, float pHitT, Surface surf, float3 T, float3 B, float3 woL, inout Rng rng)
+{
+    uint w = params[0];
+    uint cur = params[6] & 1u;
+    uint emitterCount = params[23];
+    float cap = float(max(params[38], 1u));
+    float wsum = 0.0;
+    float mTotal = 0.0;
+    uint selE = 0;
+    float3 selX = float3(0.0);
+    float selPhat = 0.0;
+    for (uint k = 0; k < max(params[37], 1u); k++)
+    {
+        float ue = rng.next();
+        float ua = rng.next();
+        float ub = rng.next();
+        uint lo = 0;
+        uint hi = emitterCount - 1;
+        while (lo < hi)
+        {
+            uint mid = (lo + hi) / 2;
+            if (emitCdf[mid] >= ue)
+                hi = mid;
+            else
+                lo = mid + 1;
+        }
+        uint o = lo * 16;
+        float3 a = float3(emitters[o], emitters[o + 1], emitters[o + 2]);
+        float3 b = float3(emitters[o + 3], emitters[o + 4], emitters[o + 5]);
+        float3 c = float3(emitters[o + 6], emitters[o + 7], emitters[o + 8]);
+        float su = sqrt(ua);
+        float3 x = a * (1.0 - su) + b * (su * (1.0 - ub)) + c * (su * ub);
+        float area = emitters[o + 12];
+        float q = area > 0.0 ? emitters[o + 13] / area : 0.0; // density per unit area
+        float3 wi, g;
+        float dist, cosi;
+        float phat = 0.0;
+        if (q > 0.0 && restirLight(lo, x, p, n, wi, dist, cosi, g))
+            phat = lum(evalReflective(surf, woL, float3(dot(wi, T), dot(wi, B), cosi)) * g);
+        float wgt = phat / max(q, 1.0e-30);
+        mTotal += 1.0;
+        if (phat > 0.0)
+        {
+            wsum += wgt;
+            if (rng.next() * wsum < wgt)
+            {
+                selE = lo + 1;
+                selX = x;
+                selPhat = phat;
+            }
+        }
+    }
+    if (params[6] > 0)
+    {
+        int px = int(pixel % w);
+        int py = int(pixel / w);
+        for (uint k = 0; k < 1 + RESTIR_NEIGHBOURS; k++)
+        {
+            int nx = px;
+            int ny = py;
+            if (k > 0)
+            {
+                nx += int(rng.next() * float(2 * RESTIR_RADIUS + 1)) - RESTIR_RADIUS;
+                ny += int(rng.next() * float(2 * RESTIR_RADIUS + 1)) - RESTIR_RADIUS;
+                if (nx < 0 || ny < 0 || nx >= int(w) || ny >= int(params[1]))
+                    continue;
+            }
+            uint ro = restirBase(uint(ny) * w + uint(nx), cur ^ 1u);
+            uint ei = asuint(restir[ro]);
+            if (asuint(restir[ro + 14]) == 0 || ei == 0)
+                continue;
+            float3 pn = float3(restir[ro + 11], restir[ro + 12], restir[ro + 13]);
+            float3 pp = float3(restir[ro + 8], restir[ro + 9], restir[ro + 10]);
+            if (dot(pn, n) < 0.9 || length(pp - p) > 0.05 * max(pHitT, 0.01))
+                continue;
+            float3 xc = float3(restir[ro + 1], restir[ro + 2], restir[ro + 3]);
+            float mc = min(restir[ro + 5], cap);
+            float3 wi, g;
+            float dist, cosi;
+            float phat = 0.0;
+            if (restirLight(ei - 1, xc, p, n, wi, dist, cosi, g))
+                phat = lum(evalReflective(surf, woL, float3(dot(wi, T), dot(wi, B), cosi)) * g);
+            float wgt = phat * restir[ro + 4] * mc;
+            mTotal += mc;
+            if (wgt > 0.0)
+            {
+                wsum += wgt;
+                if (rng.next() * wsum < wgt)
+                {
+                    selE = ei;
+                    selX = xc;
+                    selPhat = phat;
+                }
+            }
+        }
+    }
+    RestirPick r;
+    r.valid = selE != 0 && selPhat > 0.0;
+    r.e = selE;
+    r.x = selX;
+    r.W = r.valid ? wsum / (mTotal * selPhat) : 0.0;
+    r.occ = false;
+    if (r.valid)
+    {
+        float3 wi, g;
+        float dist, cosi;
+        restirLight(selE - 1, selX, p, n, wi, dist, cosi, g);
+        r.occ = occluded(p, wi, dist * (1.0 - 1.0e-3));
+    }
+    uint co = restirBase(pixel, cur);
+    restir[co] = asfloat(selE);
+    restir[co + 1] = selX.x;
+    restir[co + 2] = selX.y;
+    restir[co + 3] = selX.z;
+    restir[co + 4] = r.occ ? 0.0 : r.W;
+    restir[co + 5] = mTotal;
+    restir[co + 8] = p.x;
+    restir[co + 9] = p.y;
+    restir[co + 10] = p.z;
+    restir[co + 11] = n.x;
+    restir[co + 12] = n.y;
+    restir[co + 13] = n.z;
+    restir[co + 14] = asfloat(1u);
+    return r;
+}
+
+// A pixel that takes no ReSTIR sample this frame must not look like a neighbour to the next one.
+void restirClear(uint pixel)
+{
+    restir[restirBase(pixel, params[6] & 1u) + 14] = asfloat(0u);
+}
+
 // One bounce at `depth`: the miss or the hit's emission, light sampling and the next direction.
 // Returns false when the path ends here.
 bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
@@ -620,6 +800,8 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
     {
         if (!hq.hit)
         {
+            if (depth == 0 && params[36] != 0)
+                restirClear(pixel);
             // Uniform sky is reached by cosine sampling, so it needs no light sampling.
             st.parts.add(depth, cls, thr * sky);
             if (hasEnv)
@@ -627,7 +809,7 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
                 float wB = 1.0;
                 if (st.misPrev)
                 {
-                    float pl = pEnv * envPdf(dir);
+                    float pl = (st.restir && depth == 1 ? 1.0 : pEnv) * envPdf(dir);
                     float den = st.qPrev * st.qPrev + pl * pl;
                     wB = den > 0.0 ? st.qPrev * st.qPrev / den : 1.0;
                 }
@@ -737,6 +919,8 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
                 float cosl = max(abs(dot(nOut, dir)), 1.0e-4);
                 float pl = (1.0 - pEnv) * emitters[e + 13] * pHitT * pHitT / (emitters[e + 12] * cosl);
                 wB = st.qPrev * st.qPrev / (st.qPrev * st.qPrev + pl * pl);
+                if (st.restir && depth == 1)
+                    wB = 0.0; // the first hit's ReSTIR samples already cover every sampled emitter
             }
             st.parts.add(depth, cls, thr * le * wB);
         }
@@ -840,10 +1024,49 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
             }
         }
 
+        // ReSTIR DI at the first hit of surfaces it suits: emitters come from reservoirs, the
+        // environment map is always light sampled, and BSDF hits on emitters add nothing after it.
+        bool reDI = false;
+        if (depth == 0 && params[36] != 0)
+        {
+            reDI = emitterCount > 0 && pf(3) == 0.0 && transmission == 0.0 && surf.alpha >= RESTIR_MIN_ALPHA
+                && (surf.coat == 0.0 || surf.coatAlpha >= RESTIR_MIN_ALPHA);
+            st.restir = reDI;
+            if (!reDI)
+                restirClear(pixel);
+        }
+        if (reDI)
+        {
+            RestirPick pick = restirDI(pixel, p, n, pHitT, surf, T, B, woL, rng);
+            if (pick.valid)
+            {
+                float3 wi, g;
+                float dist, cosi;
+                restirLight(pick.e - 1, pick.x, p, n, wi, dist, cosi, g);
+                bool track = lightingOn;
+                if (!pick.occ || track)
+                {
+                    Lobes l = evalLobes(surf, woL, float3(dot(wi, T), dot(wi, B), cosi));
+                    float3 cd = thr * l.diffuse * g * pick.W;
+                    float3 cs = thr * l.specular * g * pick.W;
+                    if (!pick.occ)
+                        st.parts.addLight(depth, cls, cd + cs, cd, cs);
+                    if (track)
+                    {
+                        float vv = lum(cd + cs);
+                        st.visTotal += vv;
+                        st.visLit += pick.occ ? 0.0 : vv;
+                        addSlot(pixel, 3u, cd / cosi, cs / cosi, wi, pick.occ ? 0.0 : 1.0, pick.occ ? 0.0 : cosi);
+                    }
+                }
+            }
+        }
+
         // Light sampling of emissive triangles, combined with BSDF sampling by the power heuristic.
         float chooseLight = rng.next();
-        bool chooseEnv = hasEnv && chooseLight < pEnv;
-        if (emitterCount > 0 && !chooseEnv)
+        float pEnvHere = reDI ? (hasEnv ? 1.0 : 0.0) : pEnv;
+        bool chooseEnv = hasEnv && chooseLight < pEnvHere;
+        if (emitterCount > 0 && !chooseEnv && !reDI)
         {
             float ue = rng.next();
             float ua = rng.next();
@@ -913,7 +1136,7 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
                 bool track = lightingOn && depth == 0;
                 if (!occ || track)
                 {
-                    float pl = pEnv * pdfE;
+                    float pl = pEnvHere * pdfE;
                     float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
                     float qb = reflectivePdf(surf, woL, wiL);
                     float wl = pl * pl / (pl * pl + qb * qb);
