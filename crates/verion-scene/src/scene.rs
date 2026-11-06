@@ -202,6 +202,7 @@ pub struct Scene {
     lights: Vec<Light>,
     light_extras: Vec<LightExtra>,
     instance_masks: Vec<u32>,
+    emit_masks: Vec<u32>,
     camera: Camera,
     stylization_world: StylizationWorld,
     transparent_background: bool,
@@ -372,6 +373,9 @@ impl Scene {
     }
 
     pub fn set_light_extra(&mut self, id: LightId, extra: LightExtra) {
+        if self.light_extra(id) == extra {
+            return;
+        }
         if self.light_extras.len() <= id.index() {
             self.light_extras
                 .resize(id.index() + 1, LightExtra::default());
@@ -387,12 +391,33 @@ impl Scene {
     }
 
     pub fn set_instance_light_mask(&mut self, id: InstanceId, mask: u32) {
+        if self.instance_light_mask(id.index()) == mask {
+            return;
+        }
         if self.instance_masks.len() <= id.index() {
             self.instance_masks.resize(id.index() + 1, !0);
         }
         self.revisions.lighting += 1;
         self.changes.lights = true;
         self.instance_masks[id.index()] = mask;
+    }
+
+    /// The light-link bits an emissive instance (an area light) emits as; all ones by default.
+    pub fn instance_emit_mask(&self, index: usize) -> u32 {
+        self.emit_masks.get(index).copied().unwrap_or(!0)
+    }
+
+    /// Sets the light group of an emissive instance. Emitter records carry it, so a change rebuilds.
+    pub fn set_instance_emit_mask(&mut self, id: InstanceId, mask: u32) {
+        if self.instance_emit_mask(id.index()) == mask {
+            return;
+        }
+        if self.emit_masks.len() <= id.index() {
+            self.emit_masks.resize(id.index() + 1, !0);
+        }
+        self.revisions.lighting += 1;
+        self.changes.geometry = true;
+        self.emit_masks[id.index()] = mask;
     }
 
     pub fn stylization_world(&self) -> StylizationWorld {

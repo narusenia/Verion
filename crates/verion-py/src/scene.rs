@@ -436,6 +436,16 @@ impl Scene {
         Ok(())
     }
 
+    /// The light group an emissive instance (an area light) emits as; see `set_instance_light_mask`.
+    fn set_instance_emit_mask(&self, index: usize, mask: u32) -> PyResult<()> {
+        let mut s = self.lock();
+        let id = s
+            .instance_id(index)
+            .ok_or_else(|| PyIndexError::new_err(format!("no instance {index}")))?;
+        s.set_instance_emit_mask(id, mask);
+        Ok(())
+    }
+
     /// Light linking and an IES profile for light `index`. `link_mask` is the light's group bits;
     /// `ies` is the text of an LM-63 file (point and spot lights) with `frame`, the light's world
     /// frame as three rows x, y, z (vertical angle 0 along -z, horizontal angle 0 along +x). The

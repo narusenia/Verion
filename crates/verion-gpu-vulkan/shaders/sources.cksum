@@ -7,6 +7,6 @@ shaders/wf_select.slang 3332485939 496
 shaders/wf_shade.slang 1734737300 871
 shaders/include/dielectric_albedo.slang 3517935046 42810
 shaders/include/ggx_albedo.slang 2532298999 10504
-shaders/include/pt_core.slang 4269522930 69013
+shaders/include/pt_core.slang 1693509556 70007
 shaders/include/sheen_albedo.slang 232368318 2765
-shaders/include/wf_state.slang 930236722 4054
+shaders/include/wf_state.slang 2095008147 4130

@@ -76,6 +76,24 @@ class LightExtrasTests(unittest.TestCase):
             print(f"linking {engine}: left {left:.3f} right {right:.3f}")
             self.assertGreater(left, 5 * right + 0.01, engine)
 
+    def test_light_linking_area_light(self):
+        def build():
+            for i, x in enumerate((-2.0, 2.0)):
+                common.add_sphere(location=(x, 0, 1), radius=0.8, color=(0.8, 0.8, 0.8), name=f"ball{i}")
+            lamp = common.add_light("AREA", location=(0, -2, 5), energy=1500.0)
+            lamp.data.size = 1.0
+            col = bpy.data.collections.new("receivers")
+            bpy.context.scene.collection.children.link(col)
+            col.objects.link(bpy.data.objects["ball0"])
+            lamp.light_linking.receiver_collection = col
+
+        r = both(build)
+        for engine, img in r.items():
+            h, w = img.shape[:2]
+            left, right = img[h // 3 : 2 * h // 3, w // 6 : w // 3].mean(), img[h // 3 : 2 * h // 3, 2 * w // 3 : 5 * w // 6].mean()
+            print(f"area linking {engine}: left {left:.3f} right {right:.3f}")
+            self.assertGreater(left, 5 * right + 0.01, engine)
+
 
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])

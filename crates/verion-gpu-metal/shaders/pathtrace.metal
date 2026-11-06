@@ -82,8 +82,8 @@ struct KernelContext_0
     float device* uvs_0;
     uint device* texInfo_0;
     float device* texels_0;
-    float device* emitters_0;
     uint device* lights_0;
+    float device* emitters_0;
     float device* lighting_0;
     float device* emitCdf_0;
     float device* envMarginal_0;
@@ -101,32 +101,32 @@ float pf_0(uint i_0, KernelContext_0 thread* kernelContext_0)
 }
 
 
-#line 1511
+#line 1523
 bool pixelActive_0(uint p_0, KernelContext_0 thread* kernelContext_1)
 {
     uint _S1 = 3U * p_0;
 
-#line 1513
+#line 1525
     float device* _S2 = kernelContext_1->pixelStats_0+_S1;
 
-#line 1513
+#line 1525
     float n_0 = *_S2;
     if((*_S2) < float(kernelContext_1->params_0[int(34)]))
     {
 
-#line 1515
+#line 1527
         return true;
     }
 
-#line 1516
+#line 1528
     float mean_0 = *(kernelContext_1->pixelStats_0+(_S1 + 1U)) / n_0;
 
     float _S3 = sqrt(max(*(kernelContext_1->pixelStats_0+(_S1 + 2U)) / n_0 - mean_0 * mean_0, 0.0f) * n_0 / (n_0 - 1.0f) / n_0);
 
-#line 1518
+#line 1530
     float _S4 = pf_0(33U, kernelContext_1);
 
-#line 1518
+#line 1530
     return _S3 > (_S4 * max(mean_0, 0.05000000074505806f));
 }
 
@@ -156,7 +156,7 @@ float Rng_next_0(Rng_0 thread* this_0)
 }
 
 
-#line 482
+#line 487
 struct Parts_0
 {
     float3 total_0;
@@ -168,7 +168,7 @@ struct Parts_0
 };
 
 
-#line 583
+#line 588
 struct PathState_0
 {
     float3 org_0;
@@ -182,13 +182,14 @@ struct PathState_0
     bool gi_0;
     bool restir_1;
     float qPrev_0;
+    uint prevInst_0;
     float visLit_0;
     float visTotal_0;
     Parts_0 parts_0;
 };
 
 
-#line 611
+#line 617
 PathState_0 generatePathFor_0(uint px_0, uint py_0, uint sample_0, KernelContext_0 thread* kernelContext_2)
 {
     uint w_1 = kernelContext_2->params_0[int(0)];
@@ -197,101 +198,101 @@ PathState_0 generatePathFor_0(uint px_0, uint py_0, uint sample_0, KernelContext
     thread Rng_0 rng_1;
     (&rng_1)->state_0 = pcg_0((py_0 * w_1 + px_0) ^ (pcg_0(sample_0 * 2654435769U + 2135587861U)));
 
-#line 617
+#line 623
     float _S6 = pf_0(2U, kernelContext_2);
 
     float _S7 = float(w_1);
 
-#line 619
+#line 625
     float _S8 = float(h_0);
 
-#line 619
+#line 625
     float aspect_0 = _S7 / _S8;
     float _S9 = float(px_0);
 
-#line 620
+#line 626
     float _S10 = Rng_next_0(&rng_1);
 
-#line 620
+#line 626
     float _S11 = 2.0f * (_S9 + _S10) / _S7 - 1.0f;
 
-#line 620
+#line 626
     float _S12 = pf_0(39U, kernelContext_2);
 
-#line 620
+#line 626
     float u_0 = (_S11 + _S12) * aspect_0 * _S6;
     float _S13 = float(py_0);
 
-#line 621
+#line 627
     float _S14 = Rng_next_0(&rng_1);
 
-#line 621
+#line 627
     float _S15 = 1.0f - 2.0f * (_S13 + _S14) / _S8;
 
-#line 621
+#line 627
     float _S16 = pf_0(40U, kernelContext_2);
     float3 _S17 = float3(u_0, (_S15 + _S16) * _S6, -1.0f);
 
-#line 622
+#line 628
     float _S18 = pf_0(4U, kernelContext_2);
 
-#line 622
+#line 628
     float3 focal_0 = _S17 * float3(_S18) ;
 
-#line 622
+#line 628
     float _S19 = pf_0(3U, kernelContext_2);
     float _S20 = Rng_next_0(&rng_1);
 
-#line 623
+#line 629
     float lensR_0 = _S19 * sqrt(_S20);
     float _S21 = Rng_next_0(&rng_1);
 
-#line 624
+#line 630
     float lensA_0 = 6.2831854820251465f * _S21;
     float _S22 = lensR_0 * cos(lensA_0);
 
-#line 625
+#line 631
     float _S23 = lensR_0 * sin(lensA_0);
     float3 _S24 = normalize(focal_0 - float3(_S22, _S23, 0.0f));
     thread PathState_0 s_1;
 
-#line 627
+#line 633
     uint r_0 = 0U;
     for(;;)
     {
 
-#line 628
+#line 634
         if(r_0 < 3U)
         {
         }
         else
         {
 
-#line 628
+#line 634
             break;
         }
         uint _S25 = 4U * r_0;
 
-#line 630
+#line 636
         uint _S26 = 8U + _S25;
 
-#line 630
+#line 636
         uint _S27 = 9U + _S25;
 
-#line 630
+#line 636
         uint _S28 = 10U + _S25;
 
-#line 630
+#line 636
         (&s_1)->org_0[r_0] = (as_type<float>((kernelContext_2->params_0[_S26]))) * _S22 + (as_type<float>((kernelContext_2->params_0[_S27]))) * _S23 + (as_type<float>((kernelContext_2->params_0[_S28]))) * 0.0f + (as_type<float>((kernelContext_2->params_0[11U + _S25])));
         (&s_1)->dir_0[r_0] = (as_type<float>((kernelContext_2->params_0[_S26]))) * _S24.x + (as_type<float>((kernelContext_2->params_0[_S27]))) * _S24.y + (as_type<float>((kernelContext_2->params_0[_S28]))) * _S24.z;
 
-#line 628
+#line 634
         r_0 = r_0 + 1U;
 
-#line 628
+#line 634
     }
 
-#line 633
+#line 639
     (&s_1)->dir_0 = normalize((&s_1)->dir_0);
     (&s_1)->thr_0 = float3(1.0f) ;
     (&s_1)->rng_0 = (&rng_1)->state_0;
@@ -302,32 +303,33 @@ PathState_0 generatePathFor_0(uint px_0, uint py_0, uint sample_0, KernelContext
     (&s_1)->restir_1 = false;
     (&s_1)->gi_0 = false;
     (&s_1)->qPrev_0 = 0.0f;
+    (&s_1)->prevInst_0 = 0U;
     (&s_1)->visLit_0 = 0.0f;
     (&s_1)->visTotal_0 = 0.0f;
     float3 _S29 = float3(0.0f) ;
 
-#line 645
+#line 652
     (&(&s_1)->parts_0)->total_0 = _S29;
 
-#line 645
+#line 652
     (&(&s_1)->parts_0)->directDiffuse_0 = _S29;
 
-#line 645
+#line 652
     (&(&s_1)->parts_0)->indirectDiffuse_0 = _S29;
 
-#line 645
+#line 652
     (&(&s_1)->parts_0)->specular_0 = _S29;
 
-#line 645
+#line 652
     (&(&s_1)->parts_0)->transmission_0 = _S29;
 
-#line 645
+#line 652
     (&(&s_1)->parts_0)->emission_0 = _S29;
     return s_1;
 }
 
 
-#line 602
+#line 608
 struct Hit_0
 {
     bool hit_0;
@@ -347,7 +349,7 @@ struct RayDesc_0
 };
 
 
-#line 649 "shaders/include/pt_core.slang"
+#line 656 "shaders/include/pt_core.slang"
 Hit_0 traceClosest_0(float3 org_1, float3 dir_1, KernelContext_0 thread* kernelContext_3)
 {
     thread RayDesc_0 ray_0;
@@ -360,101 +362,101 @@ Hit_0 traceClosest_0(float3 org_1, float3 dir_1, KernelContext_0 thread* kernelC
     for(;;)
     {
 
-#line 658
+#line 665
         bool _S30 = ((&q_0)->next());
 
-#line 658
+#line 665
         if(_S30)
         {
         }
         else
         {
 
-#line 658
+#line 665
             break;
         }
 
-#line 658
+#line 665
     }
     thread Hit_0 h_1;
     uint _S31 = (_slang_committed_intersection_type_to_uint((&q_0)->get_committed_intersection_type()));
 
-#line 660
+#line 667
     bool _S32 = _S31 == 1U;
 
-#line 660
+#line 667
     (&h_1)->hit_0 = _S32;
 
-#line 660
+#line 667
     uint _S33;
     if(_S32)
     {
 
-#line 661
+#line 668
         uint _S34 = ((&q_0)->get_committed_instance_id());
 
-#line 661
+#line 668
         _S33 = _S34;
 
-#line 661
+#line 668
     }
     else
     {
 
-#line 661
+#line 668
         _S33 = 0U;
 
-#line 661
+#line 668
     }
 
-#line 661
+#line 668
     (&h_1)->inst_0 = _S33;
     if((&h_1)->hit_0)
     {
 
-#line 662
+#line 669
         uint _S35 = ((&q_0)->get_committed_primitive_id());
 
-#line 662
+#line 669
         _S33 = _S35;
 
-#line 662
+#line 669
     }
     else
     {
 
-#line 662
+#line 669
         _S33 = 0U;
 
-#line 662
+#line 669
     }
 
-#line 662
+#line 669
     (&h_1)->prim_0 = _S33;
 
-#line 662
+#line 669
     float _S36;
     if((&h_1)->hit_0)
     {
 
-#line 663
+#line 670
         float _S37 = ((&q_0)->get_committed_distance());
 
-#line 663
+#line 670
         _S36 = _S37;
 
-#line 663
+#line 670
     }
     else
     {
 
-#line 663
+#line 670
         _S36 = 0.0f;
 
-#line 663
+#line 670
     }
 
-#line 663
+#line 670
     (&h_1)->t_0 = _S36;
     return h_1;
 }
@@ -464,82 +466,82 @@ Hit_0 traceClosest_0(float3 org_1, float3 dir_1, KernelContext_0 thread* kernelC
 constant bool fc_restirCompiled_0 [[function_constant(0)]];
 constant bool restirCompiled_0 = is_function_constant_defined(fc_restirCompiled_0) ? fc_restirCompiled_0 : true;
 
-#line 677
+#line 684
 uint restirBase_0(uint pixel_0, uint which_0)
 {
 
-#line 677
+#line 684
     return pixel_0 * 80U + which_0 * 28U;
 }
 
 
-#line 947
+#line 955
 void restirClear_0(uint pixel_1, KernelContext_0 thread* kernelContext_4)
 {
     uint co_0 = restirBase_0(pixel_1, kernelContext_4->params_0[int(6)] & 1U);
     float _S38 = (as_type<float>((0U)));
 
-#line 950
+#line 958
     *(kernelContext_4->restir_0+(co_0 + 14U)) = _S38;
     *(kernelContext_4->restir_0+(co_0 + 27U)) = _S38;
     return;
 }
 
 
-#line 511
+#line 516
 void Parts_file_0(Parts_0 thread* this_1, uint depth_0, uint cls_1, float3 c_0)
 {
     if(depth_0 == 0U)
     {
 
-#line 514
+#line 519
         this_1->emission_0 = this_1->emission_0 + c_0;
 
-#line 513
+#line 518
     }
     else
     {
 
-#line 515
+#line 520
         if(cls_1 == 0U)
         {
 
-#line 516
+#line 521
             this_1->indirectDiffuse_0 = this_1->indirectDiffuse_0 + c_0;
 
-#line 515
+#line 520
         }
         else
         {
 
-#line 517
+#line 522
             if(cls_1 == 1U)
             {
 
-#line 518
+#line 523
                 this_1->specular_0 = this_1->specular_0 + c_0;
 
-#line 517
+#line 522
             }
             else
             {
                 this_1->transmission_0 = this_1->transmission_0 + c_0;
 
-#line 517
+#line 522
             }
 
-#line 515
+#line 520
         }
 
-#line 513
+#line 518
     }
 
-#line 521
+#line 526
     return;
 }
 
 
-#line 492
+#line 497
 void Parts_add_0(Parts_0 thread* this_2, uint depth_1, uint cls_2, float3 c_1)
 {
     this_2->total_0 = this_2->total_0 + c_1;
@@ -548,7 +550,7 @@ void Parts_add_0(Parts_0 thread* this_2, uint depth_1, uint cls_2, float3 c_1)
 }
 
 
-#line 234
+#line 239
 void envCoords_0(float3 d_0, uint thread* i_1, uint thread* j_0, KernelContext_0 thread* kernelContext_5)
 {
     uint w_2 = kernelContext_5->params_0[int(24)];
@@ -561,7 +563,7 @@ void envCoords_0(float3 d_0, uint thread* i_1, uint thread* j_0, KernelContext_0
 }
 
 
-#line 227
+#line 232
 float3 envTexel_0(uint i_2, uint j_1, KernelContext_0 thread* kernelContext_6)
 {
     uint o_0 = 3U * (j_1 * kernelContext_6->params_0[int(24)] + i_2);
@@ -578,42 +580,42 @@ float lum_0(float3 c_2)
 }
 
 
-#line 253
+#line 258
 float envPdf_0(float3 d_1, KernelContext_0 thread* kernelContext_7)
 {
     thread uint i_3;
 
-#line 255
+#line 260
     thread uint j_2;
 
-#line 255
+#line 260
     envCoords_0(d_1, &i_3, &j_2, kernelContext_7);
 
-#line 255
+#line 260
     float3 _S39 = envTexel_0(i_3, j_2, kernelContext_7);
 
     float _S40 = lum_0(_S39);
 
-#line 257
+#line 262
     float _S41 = pf_0(26U, kernelContext_7);
 
-#line 257
+#line 262
     return _S40 * _S41;
 }
 
 
-#line 244
+#line 249
 float3 envRadiance_0(float3 d_2, KernelContext_0 thread* kernelContext_8)
 {
     thread uint i_4;
 
-#line 246
+#line 251
     thread uint j_3;
 
-#line 246
+#line 251
     envCoords_0(d_2, &i_4, &j_3, kernelContext_8);
 
-#line 246
+#line 251
     float3 _S42 = envTexel_0(i_4, j_3, kernelContext_8);
 
     return _S42;
@@ -666,11 +668,11 @@ float3 transformPoint_0(uint base_0, float3 p_1, KernelContext_0 thread* kernelC
 }
 
 
-#line 678
+#line 685
 uint restirScratch_0(uint pixel_2)
 {
 
-#line 678
+#line 685
     return pixel_2 * 80U + 56U;
 }
 
@@ -717,25 +719,25 @@ float3 transformNormal_0(uint base_1, float3 n_1, KernelContext_0 thread* kernel
 }
 
 
-#line 295
+#line 300
 float3 texelAt_0(uint base_2, uint w_3, uint h_3, int x_1, int y_0, KernelContext_0 thread* kernelContext_13)
 {
     int _S45 = int(w_3);
 
-#line 297
+#line 302
     int _S46 = x_1 % _S45;
 
-#line 297
+#line 302
     int _S47 = (_S46 + _S45) % _S45;
 
-#line 297
+#line 302
     uint xi_0 = uint(_S47);
     int _S48 = int(h_3);
 
-#line 298
+#line 303
     int _S49 = y_0 % _S48;
 
-#line 298
+#line 303
     int _S50 = (_S49 + _S48) % _S48;
     uint o_2 = 3U * (base_2 + uint(_S50) * w_3 + xi_0);
     return float3(kernelContext_13->texels_0[o_2], kernelContext_13->texels_0[o_2 + 1U], kernelContext_13->texels_0[o_2 + 2U]);
@@ -750,24 +752,24 @@ float3 bilinear_0(uint base_3, uint w_4, uint h_4, float2 uv_0, KernelContext_0 
     float tx_0 = fx_0 - float(x0_0);
     float ty_0 = fy_0 - float(y0_0);
 
-#line 310
+#line 315
     float3 _S51 = texelAt_0(base_3, w_4, h_4, x0_0, y0_0, kernelContext_14);
     int _S52 = x0_0 + int(1);
 
-#line 311
+#line 316
     float3 _S53 = texelAt_0(base_3, w_4, h_4, _S52, y0_0, kernelContext_14);
 
-#line 311
+#line 316
     float3 _S54 = float3(tx_0) ;
 
-#line 311
+#line 316
     float3 a_0 = mix(_S51, _S53, _S54);
     int _S55 = y0_0 + int(1);
 
-#line 312
+#line 317
     float3 _S56 = texelAt_0(base_3, w_4, h_4, x0_0, _S55, kernelContext_14);
 
-#line 312
+#line 317
     float3 _S57 = texelAt_0(base_3, w_4, h_4, _S52, _S55, kernelContext_14);
     return mix(a_0, mix(_S56, _S57, _S54), float3(ty_0) );
 }
@@ -784,16 +786,16 @@ float3 sampleTexture_0(uint tex_0, float2 uv_1, float footprint_0, KernelContext
     uint l0_0 = uint(floor(lod_0));
     float t_1 = lod_0 - float(l0_0);
 
-#line 326
+#line 331
     uint lw_0 = w_5;
 
-#line 326
+#line 331
     uint lh_0 = h_5;
 
-#line 326
+#line 331
     uint k_0 = 0U;
 
-#line 326
+#line 331
     uint off_0 = base_4;
 
 
@@ -801,75 +803,93 @@ float3 sampleTexture_0(uint tex_0, float2 uv_1, float footprint_0, KernelContext
     for(;;)
     {
 
-#line 330
+#line 335
         if(k_0 < l0_0)
         {
         }
         else
         {
 
-#line 330
+#line 335
             break;
         }
         uint off_1 = off_0 + lw_0 * lh_0;
         uint _S58 = max(lw_0 / 2U, 1U);
         uint _S59 = max(lh_0 / 2U, 1U);
 
-#line 330
+#line 335
         uint _S60 = k_0 + 1U;
 
-#line 330
+#line 335
         lw_0 = _S58;
 
-#line 330
+#line 335
         lh_0 = _S59;
 
-#line 330
+#line 335
         k_0 = _S60;
 
-#line 330
+#line 335
         off_0 = off_1;
 
-#line 330
+#line 335
     }
 
-#line 330
+#line 335
     float3 _S61 = bilinear_0(off_0, lw_0, lh_0, uv_1, kernelContext_15);
 
-#line 330
+#line 335
     bool _S62;
 
-#line 337
+#line 342
     if((l0_0 + 1U) >= levels_0)
     {
 
-#line 337
+#line 342
         _S62 = true;
 
-#line 337
+#line 342
     }
     else
     {
 
-#line 337
+#line 342
         _S62 = t_1 <= 0.0f;
 
-#line 337
+#line 342
     }
 
-#line 337
+#line 342
     if(_S62)
     {
 
-#line 338
+#line 343
         return _S61;
     }
 
-#line 338
+#line 343
     float3 _S63 = bilinear_0(off_0 + lw_0 * lh_0, max(lw_0 / 2U, 1U), max(lh_0 / 2U, 1U), uv_1, kernelContext_15);
 
 
     return mix(_S61, _S63, float3(t_1) );
+}
+
+
+#line 186
+uint emitMask_0(uint inst_1, KernelContext_0 thread* kernelContext_16)
+{
+
+#line 186
+    return kernelContext_16->lights_0[kernelContext_16->params_0[int(5)] * 16U + 2U * inst_1 + 1U];
+}
+
+
+#line 185
+uint recvMask_0(uint inst_2, KernelContext_0 thread* kernelContext_17)
+{
+
+#line 185
+    return kernelContext_17->lights_0[kernelContext_17->params_0[int(5)] * 16U + 2U * inst_2];
 }
 
 
@@ -930,7 +950,7 @@ float fresnelDielectric_0(float cosi_0, float eta_0)
 }
 
 
-#line 396
+#line 401
 float dielectricAlbedo_0(float cosO_0, float rough_0, float ior_0, bool outside_0)
 {
     float x_2 = saturate(cosO_0) * 15.0f;
@@ -943,42 +963,42 @@ float dielectricAlbedo_0(float cosO_0, float rough_0, float ior_0, bool outside_
     float _S70 = y_1 - float(_S68);
     float fz_0 = z_0 - float(z0_0);
 
-#line 406
+#line 411
     uint k_1;
     if(outside_0)
     {
 
-#line 407
+#line 412
         k_1 = 0U;
 
-#line 407
+#line 412
     }
     else
     {
 
-#line 407
+#line 412
         k_1 = 9U;
 
-#line 407
+#line 412
     }
 
-#line 407
+#line 412
     uint _S71 = k_1 * 16U * 16U;
     thread array<float, int(2)> c_3;
 
-#line 408
+#line 413
     k_1 = 0U;
     for(;;)
     {
 
-#line 409
+#line 414
         if(k_1 < 2U)
         {
         }
         else
         {
 
-#line 409
+#line 414
             break;
         }
         uint o_3 = _S71 + ((z0_0 + k_1) * 16U + _S68) * 16U + _S67;
@@ -986,13 +1006,13 @@ float dielectricAlbedo_0(float cosO_0, float rough_0, float ior_0, bool outside_
         uint _S72 = o_3 + 16U;
         c_3[k_1] = mix(mix(DIEL_ALBEDO_0[o_3], DIEL_ALBEDO_0[o_3 + 1U], _S69), mix(DIEL_ALBEDO_0[_S72], DIEL_ALBEDO_0[_S72 + 1U], _S69), _S70);
 
-#line 409
+#line 414
         k_1 = k_1 + 1U;
 
-#line 409
+#line 414
     }
 
-#line 416
+#line 421
     return mix(c_3[int(0)], c_3[int(1)], fz_0);
 }
 
@@ -1011,32 +1031,32 @@ float sheenAlbedo_0(float cosO_1, float r_2)
 }
 
 
-#line 185
-float iesFactor_0(uint po_0, float3 d_3, KernelContext_0 thread* kernelContext_16)
+#line 190
+float iesFactor_0(uint po_0, float3 d_3, KernelContext_0 thread* kernelContext_18)
 {
 
 
 
-    float th_0 = degrees_0(acos(clamp(- dot(d_3, float3((as_type<float>((kernelContext_16->lights_0[po_0 + 6U]))), (as_type<float>((kernelContext_16->lights_0[po_0 + 7U]))), (as_type<float>((kernelContext_16->lights_0[po_0 + 8U]))))), -1.0f, 1.0f)));
-    float ph_0 = degrees_0(atan2(dot(d_3, float3((as_type<float>((kernelContext_16->lights_0[po_0 + 3U]))), (as_type<float>((kernelContext_16->lights_0[po_0 + 4U]))), (as_type<float>((kernelContext_16->lights_0[po_0 + 5U]))))), dot(d_3, float3((as_type<float>((kernelContext_16->lights_0[po_0]))), (as_type<float>((kernelContext_16->lights_0[po_0 + 1U]))), (as_type<float>((kernelContext_16->lights_0[po_0 + 2U])))))));
+    float th_0 = degrees_0(acos(clamp(- dot(d_3, float3((as_type<float>((kernelContext_18->lights_0[po_0 + 6U]))), (as_type<float>((kernelContext_18->lights_0[po_0 + 7U]))), (as_type<float>((kernelContext_18->lights_0[po_0 + 8U]))))), -1.0f, 1.0f)));
+    float ph_0 = degrees_0(atan2(dot(d_3, float3((as_type<float>((kernelContext_18->lights_0[po_0 + 3U]))), (as_type<float>((kernelContext_18->lights_0[po_0 + 4U]))), (as_type<float>((kernelContext_18->lights_0[po_0 + 5U]))))), dot(d_3, float3((as_type<float>((kernelContext_18->lights_0[po_0]))), (as_type<float>((kernelContext_18->lights_0[po_0 + 1U]))), (as_type<float>((kernelContext_18->lights_0[po_0 + 2U])))))));
 
-#line 191
+#line 196
     float ph_1;
     if(ph_0 < 0.0f)
     {
 
-#line 192
+#line 197
         ph_1 = ph_0 + 360.0f;
 
-#line 192
+#line 197
     }
     else
     {
 
-#line 192
+#line 197
         ph_1 = ph_0;
 
-#line 192
+#line 197
     }
 
     uint _S77 = min(uint(th_0), 179U);
@@ -1046,34 +1066,34 @@ float iesFactor_0(uint po_0, float3 d_3, KernelContext_0 thread* kernelContext_1
     uint t_3 = po_0 + 9U;
     uint _S79 = t_3 + _S78 * 181U + _S77;
     uint _S80 = t_3 + (_S78 + 1U) * 181U + _S77;
-    return mix(mix((as_type<float>((kernelContext_16->lights_0[_S79]))), (as_type<float>((kernelContext_16->lights_0[_S79 + 1U]))), ft_0), mix((as_type<float>((kernelContext_16->lights_0[_S80]))), (as_type<float>((kernelContext_16->lights_0[_S80 + 1U]))), ft_0), ph_1 - float(_S78));
+    return mix(mix((as_type<float>((kernelContext_18->lights_0[_S79]))), (as_type<float>((kernelContext_18->lights_0[_S79 + 1U]))), ft_0), mix((as_type<float>((kernelContext_18->lights_0[_S80]))), (as_type<float>((kernelContext_18->lights_0[_S80 + 1U]))), ft_0), ph_1 - float(_S78));
 }
 
 
-#line 547
-bool occluded_0(float3 o_4, float3 d_4, float tmax_0, KernelContext_0 thread* kernelContext_17)
+#line 552
+bool occluded_0(float3 o_4, float3 d_4, float tmax_0, KernelContext_0 thread* kernelContext_19)
 {
 
-#line 547
+#line 552
     uint layer_0 = 0U;
 
-#line 547
+#line 552
     float3 _S81 = o_4;
 
-#line 547
+#line 552
     float _S82 = tmax_0;
 
     for(;;)
     {
 
-#line 549
+#line 554
         if(layer_0 < 8U)
         {
         }
         else
         {
 
-#line 549
+#line 554
             break;
         }
         thread RayDesc_0 ray_1;
@@ -1082,45 +1102,45 @@ bool occluded_0(float3 o_4, float3 d_4, float tmax_0, KernelContext_0 thread* ke
         (&ray_1)->TMin_0 = 0.0f;
         (&ray_1)->TMax_0 = _S82;
         thread raytracing::intersection_query<raytracing::triangle_data, raytracing::instancing> q_1;
-        (&q_1)->reset({ (ray_1.Origin_0), (ray_1.Direction_0), (ray_1.TMin_0), (ray_1.TMax_0) }, (kernelContext_17->scene_0), (255U), _slang_ray_flags_to_intersection_params((5U)));
+        (&q_1)->reset({ (ray_1.Origin_0), (ray_1.Direction_0), (ray_1.TMin_0), (ray_1.TMax_0) }, (kernelContext_19->scene_0), (255U), _slang_ray_flags_to_intersection_params((5U)));
         for(;;)
         {
 
-#line 558
+#line 563
             bool _S83 = ((&q_1)->next());
 
-#line 558
+#line 563
             if(_S83)
             {
             }
             else
             {
 
-#line 558
+#line 563
                 break;
             }
 
-#line 558
+#line 563
         }
         uint _S84 = (_slang_committed_intersection_type_to_uint((&q_1)->get_committed_intersection_type()));
 
-#line 559
+#line 564
         if(_S84 != 1U)
         {
 
-#line 560
+#line 565
             return false;
         }
 
-#line 561
+#line 566
         uint _S85 = ((&q_1)->get_committed_instance_id());
 
-#line 561
-        float opacity_0 = kernelContext_17->materials_0[kernelContext_17->instances_0[_S85 * 16U + 2U] * 23U + 22U];
+#line 566
+        float opacity_0 = kernelContext_19->materials_0[kernelContext_19->instances_0[_S85 * 16U + 2U] * 23U + 22U];
         if(opacity_0 >= 1.0f)
         {
 
-#line 563
+#line 568
             return true;
         }
         uint h_6 = (((((((as_type<uint>((_S81.x))) * 73856093U) ^ ((as_type<uint>((_S81.y))) * 19349663U)) ^ ((as_type<uint>((_S81.z))) * 83492791U)) ^ ((as_type<uint>((d_4.x))) * 2654435761U)) ^ ((as_type<uint>((d_4.y))) * 40503U)) ^ ((as_type<uint>((d_4.z))) * 2246822519U)) ^ (layer_0 * 3266489917U);
@@ -1132,37 +1152,37 @@ bool occluded_0(float3 o_4, float3 d_4, float tmax_0, KernelContext_0 thread* ke
         if((float((h_8 ^ (h_8 >> 16U)) >> 8U) * 5.9604644775390625e-08f) < opacity_0)
         {
 
-#line 572
+#line 577
             return true;
         }
 
-#line 573
+#line 578
         float _S86 = ((&q_1)->get_committed_distance());
 
-#line 573
+#line 578
         float adv_0 = _S86 + 9.9999997473787516e-05f;
         float3 _S87 = _S81 + d_4 * float3(adv_0) ;
         float _S88 = _S82 - adv_0;
         if(_S88 <= 0.0f)
         {
 
-#line 577
+#line 582
             return false;
         }
 
-#line 549
+#line 554
         layer_0 = layer_0 + 1U;
 
-#line 549
+#line 554
         _S81 = _S87;
 
-#line 549
+#line 554
         _S82 = _S88;
 
-#line 549
+#line 554
     }
 
-#line 579
+#line 584
     return true;
 }
 
@@ -1194,7 +1214,7 @@ float3 schlick_0(float3 f0_0, float c_4)
 }
 
 
-#line 370
+#line 375
 float ggxAlbedo_0(float cosO_2, float alpha_2)
 {
     float x_4 = saturate(cosO_2) * 31.0f;
@@ -1209,7 +1229,7 @@ float ggxAlbedo_0(float cosO_2, float alpha_2)
 }
 
 
-#line 344
+#line 349
 struct Surface_0
 {
     float3 albedo_0;
@@ -1229,22 +1249,22 @@ struct Surface_0
 };
 
 
-#line 387
-float3 multiscatterFactor_0(const Surface_0 thread* s_3, float cosO_3, KernelContext_0 thread* kernelContext_18)
+#line 392
+float3 multiscatterFactor_0(const Surface_0 thread* s_3, float cosO_3, KernelContext_0 thread* kernelContext_20)
 {
-    if(kernelContext_18->params_0[int(29)] == 0U)
+    if(kernelContext_20->params_0[int(29)] == 0U)
     {
 
-#line 390
+#line 395
         return float3(1.0f) ;
     }
 
-#line 391
+#line 396
     return float3(1.0f)  + s_3->albedo_0 * float3((1.0f / max(ggxAlbedo_0(cosO_3, s_3->alpha_3), 0.05000000074505806f) - 1.0f)) ;
 }
 
 
-#line 435
+#line 440
 float sheenCore_0(float woz_0, float wiz_0, float hz_1, float alpha_4)
 {
 
@@ -1254,7 +1274,7 @@ float sheenCore_0(float woz_0, float wiz_0, float hz_1, float alpha_4)
 }
 
 
-#line 362
+#line 367
 struct Lobes_0
 {
     float3 diffuse_0;
@@ -1262,88 +1282,88 @@ struct Lobes_0
 };
 
 
-#line 445
-Lobes_0 evalLobes_0(const Surface_0 thread* s_4, float3 woL_0, float3 wiL_0, KernelContext_0 thread* kernelContext_19)
+#line 450
+Lobes_0 evalLobes_0(const Surface_0 thread* s_4, float3 woL_0, float3 wiL_0, KernelContext_0 thread* kernelContext_21)
 {
     float3 hh_0 = normalize(woL_0 + wiL_0);
     float _S93 = max(dot(woL_0, hh_0), 0.0f);
 
     float _S94 = hh_0.z;
 
-#line 450
+#line 455
     float _S95 = woL_0.z;
 
-#line 450
+#line 455
     float _S96 = wiL_0.z;
 
-#line 450
+#line 455
     float _S97 = 4.0f * _S95;
 
-#line 450
+#line 455
     float core_0 = D_0(_S94, s_4->alpha_3) * G1_0(_S95, s_4->alpha_3) * G1_0(_S96, s_4->alpha_3) / _S97;
 
-#line 450
+#line 455
     float _S98 = s_4->transmission_1;
 
     thread Lobes_0 l_0;
 
-#line 452
+#line 457
     float _S99 = s_4->metallic_0;
 
-#line 452
+#line 457
     float3 _S100 = s_4->albedo_0;
     float3 _S101 = float3(s_4->metallic_0)  * schlick_0(s_4->albedo_0, _S93);
 
-#line 453
-    float3 _S102 = multiscatterFactor_0(s_4, _S95, kernelContext_19);
+#line 458
+    float3 _S102 = multiscatterFactor_0(s_4, _S95, kernelContext_21);
     float _S103 = 1.0f - _S99;
 
-#line 454
+#line 459
     float _S104 = 1.0f - _S98;
 
-#line 453
+#line 458
     (&l_0)->specular_1 = _S101 * _S102 * float3(core_0)  + float3((_S103 * (_S98 * fresnelDielectric_0(_S93, s_4->eta_1) * s_4->tComp_0 + _S104 * fresnelDielectric_0(_S93, s_4->ior_1)) * core_0)) ;
 
     (&l_0)->diffuse_0 = float3((_S103 * _S104 * (1.0f - s_4->fSel_0)))  * _S100 * float3((_S96 / 3.1415927410125732f)) ;
 
-#line 455
+#line 460
     float _S105 = s_4->sheenP_0;
 
     if((s_4->sheenP_0) > 0.0f)
     {
 
-#line 457
+#line 462
         float3 _S106 = float3((1.0f - _S105)) ;
 
         (&l_0)->specular_1 = _S106 * (&l_0)->specular_1 + s_4->sheenColor_0 * float3(sheenCore_0(_S95, _S96, _S94, s_4->sheenAlpha_0)) ;
         (&l_0)->diffuse_0 = (&l_0)->diffuse_0 * _S106;
 
-#line 457
+#line 462
     }
 
-#line 457
+#line 462
     float _S107 = s_4->coat_0;
 
-#line 462
+#line 467
     if((s_4->coat_0) > 0.0f)
     {
 
-#line 462
+#line 467
         float3 _S108 = float3((1.0f - s_4->coatP_0)) ;
 
-#line 468
+#line 473
         (&l_0)->specular_1 = _S108 * (&l_0)->specular_1 + float3((_S107 * fresnelDielectric_0(_S93, 1.5f) * (D_0(_S94, s_4->coatAlpha_0) * G1_0(_S95, s_4->coatAlpha_0) * G1_0(_S96, s_4->coatAlpha_0) / _S97))) ;
         (&l_0)->diffuse_0 = (&l_0)->diffuse_0 * _S108;
 
-#line 462
+#line 467
     }
 
-#line 471
+#line 476
     return l_0;
 }
 
 
-#line 499
+#line 504
 void Parts_addLight_0(Parts_0 thread* this_3, uint depth_2, uint cls_3, float3 c_5, float3 cd_0, float3 cs_0)
 {
     this_3->total_0 = this_3->total_0 + c_5;
@@ -1352,7 +1372,7 @@ void Parts_addLight_0(Parts_0 thread* this_3, uint depth_2, uint cls_3, float3 c
         this_3->directDiffuse_0 = this_3->directDiffuse_0 + cd_0;
         this_3->specular_0 = this_3->specular_0 + cs_0;
 
-#line 502
+#line 507
     }
     else
     {
@@ -1361,263 +1381,263 @@ void Parts_addLight_0(Parts_0 thread* this_3, uint depth_2, uint cls_3, float3 c
 
         Parts_file_0(this_3, depth_2, cls_3, cd_0 + cs_0);
 
-#line 502
+#line 507
     }
 
-#line 509
+#line 514
     return;
 }
 
 
-#line 206
-void addSlot_0(uint pixel_3, uint slot_0, float3 u_1, float3 s_5, float3 wi_0, float lit_0, float r_3, KernelContext_0 thread* kernelContext_20)
+#line 211
+void addSlot_0(uint pixel_3, uint slot_0, float3 u_1, float3 s_5, float3 wi_0, float lit_0, float r_3, KernelContext_0 thread* kernelContext_22)
 {
 
-#line 206
+#line 211
     bool _S109;
 
     if(any(isnan(u_1)))
     {
 
-#line 208
+#line 213
         _S109 = true;
 
-#line 208
+#line 213
     }
     else
     {
 
-#line 208
+#line 213
         _S109 = any(isinf(u_1));
 
-#line 208
+#line 213
     }
 
-#line 208
+#line 213
     if(_S109)
     {
 
-#line 208
+#line 213
         _S109 = true;
 
-#line 208
+#line 213
     }
     else
     {
 
-#line 208
+#line 213
         _S109 = any(isnan(s_5));
 
-#line 208
+#line 213
     }
 
-#line 208
+#line 213
     if(_S109)
     {
 
-#line 208
+#line 213
         _S109 = true;
 
-#line 208
+#line 213
     }
     else
     {
 
-#line 208
+#line 213
         _S109 = any(isinf(s_5));
 
-#line 208
+#line 213
     }
 
-#line 208
+#line 213
     if(_S109)
     {
 
-#line 209
+#line 214
         return;
     }
 
-#line 210
+#line 215
     uint o_5 = 65U * pixel_3 + 17U + 12U * slot_0;
     float w_6 = lum_0(u_1);
     float wd_0 = w_6 + lum_0(s_5);
-    float device* _S110 = kernelContext_20->lighting_0+o_5;
-
-#line 213
-    *_S110 = *_S110 + u_1.x;
-    float device* _S111 = kernelContext_20->lighting_0+(o_5 + 1U);
-
-#line 214
-    *_S111 = *_S111 + u_1.y;
-    float device* _S112 = kernelContext_20->lighting_0+(o_5 + 2U);
-
-#line 215
-    *_S112 = *_S112 + u_1.z;
-    float device* _S113 = kernelContext_20->lighting_0+(o_5 + 3U);
-
-#line 216
-    *_S113 = *_S113 + w_6;
-    float device* _S114 = kernelContext_20->lighting_0+(o_5 + 4U);
-
-#line 217
-    *_S114 = *_S114 + w_6 * r_3;
-    float device* _S115 = kernelContext_20->lighting_0+(o_5 + 5U);
+    float device* _S110 = kernelContext_22->lighting_0+o_5;
 
 #line 218
-    *_S115 = *_S115 + s_5.x;
-    float device* _S116 = kernelContext_20->lighting_0+(o_5 + 6U);
+    *_S110 = *_S110 + u_1.x;
+    float device* _S111 = kernelContext_22->lighting_0+(o_5 + 1U);
 
 #line 219
-    *_S116 = *_S116 + s_5.y;
-    float device* _S117 = kernelContext_20->lighting_0+(o_5 + 7U);
+    *_S111 = *_S111 + u_1.y;
+    float device* _S112 = kernelContext_22->lighting_0+(o_5 + 2U);
 
 #line 220
-    *_S117 = *_S117 + s_5.z;
-    float device* _S118 = kernelContext_20->lighting_0+(o_5 + 8U);
+    *_S112 = *_S112 + u_1.z;
+    float device* _S113 = kernelContext_22->lighting_0+(o_5 + 3U);
 
 #line 221
-    *_S118 = *_S118 + wd_0 * wi_0.x;
-    float device* _S119 = kernelContext_20->lighting_0+(o_5 + 9U);
+    *_S113 = *_S113 + w_6;
+    float device* _S114 = kernelContext_22->lighting_0+(o_5 + 4U);
 
 #line 222
-    *_S119 = *_S119 + wd_0 * wi_0.y;
-    float device* _S120 = kernelContext_20->lighting_0+(o_5 + 10U);
+    *_S114 = *_S114 + w_6 * r_3;
+    float device* _S115 = kernelContext_22->lighting_0+(o_5 + 5U);
 
 #line 223
-    *_S120 = *_S120 + wd_0 * wi_0.z;
-    float device* _S121 = kernelContext_20->lighting_0+(o_5 + 11U);
+    *_S115 = *_S115 + s_5.x;
+    float device* _S116 = kernelContext_22->lighting_0+(o_5 + 6U);
 
 #line 224
+    *_S116 = *_S116 + s_5.y;
+    float device* _S117 = kernelContext_22->lighting_0+(o_5 + 7U);
+
+#line 225
+    *_S117 = *_S117 + s_5.z;
+    float device* _S118 = kernelContext_22->lighting_0+(o_5 + 8U);
+
+#line 226
+    *_S118 = *_S118 + wd_0 * wi_0.x;
+    float device* _S119 = kernelContext_22->lighting_0+(o_5 + 9U);
+
+#line 227
+    *_S119 = *_S119 + wd_0 * wi_0.y;
+    float device* _S120 = kernelContext_22->lighting_0+(o_5 + 10U);
+
+#line 228
+    *_S120 = *_S120 + wd_0 * wi_0.z;
+    float device* _S121 = kernelContext_22->lighting_0+(o_5 + 11U);
+
+#line 229
     *_S121 = *_S121 + wd_0 * lit_0;
     return;
 }
 
 
-#line 849
-void restirGbuffer_0(uint pixel_4, float3 p_2, float3 n_3, KernelContext_0 thread* kernelContext_21)
+#line 857
+void restirGbuffer_0(uint pixel_4, float3 p_2, float3 n_3, KernelContext_0 thread* kernelContext_23)
 {
-    uint co_1 = restirBase_0(pixel_4, kernelContext_21->params_0[int(6)] & 1U);
-    *(kernelContext_21->restir_0+(co_1 + 8U)) = p_2.x;
-    *(kernelContext_21->restir_0+(co_1 + 9U)) = p_2.y;
-    *(kernelContext_21->restir_0+(co_1 + 10U)) = p_2.z;
-    *(kernelContext_21->restir_0+(co_1 + 11U)) = n_3.x;
-    *(kernelContext_21->restir_0+(co_1 + 12U)) = n_3.y;
-    *(kernelContext_21->restir_0+(co_1 + 13U)) = n_3.z;
-    *(kernelContext_21->restir_0+(co_1 + 14U)) = (as_type<float>((1U)));
+    uint co_1 = restirBase_0(pixel_4, kernelContext_23->params_0[int(6)] & 1U);
+    *(kernelContext_23->restir_0+(co_1 + 8U)) = p_2.x;
+    *(kernelContext_23->restir_0+(co_1 + 9U)) = p_2.y;
+    *(kernelContext_23->restir_0+(co_1 + 10U)) = p_2.z;
+    *(kernelContext_23->restir_0+(co_1 + 11U)) = n_3.x;
+    *(kernelContext_23->restir_0+(co_1 + 12U)) = n_3.y;
+    *(kernelContext_23->restir_0+(co_1 + 13U)) = n_3.z;
+    *(kernelContext_23->restir_0+(co_1 + 14U)) = (as_type<float>((1U)));
     return;
 }
 
 
-#line 474
-float3 evalReflective_0(const Surface_0 thread* s_6, float3 woL_1, float3 wiL_1, KernelContext_0 thread* kernelContext_22)
+#line 479
+float3 evalReflective_0(const Surface_0 thread* s_6, float3 woL_1, float3 wiL_1, KernelContext_0 thread* kernelContext_24)
 {
 
-#line 474
-    Lobes_0 _S122 = evalLobes_0(s_6, woL_1, wiL_1, kernelContext_22);
+#line 479
+    Lobes_0 _S122 = evalLobes_0(s_6, woL_1, wiL_1, kernelContext_24);
 
 
     return _S122.specular_1 + _S122.diffuse_0;
 }
 
 
-#line 865
-void restirGIPrepare_0(uint pixel_5, float3 p_3, float3 n_4, float pHitT_0, const Surface_0 thread* surf_0, float3 T_0, float3 B_0, float3 woL_2, Rng_0 thread* rng_2, KernelContext_0 thread* kernelContext_23)
+#line 873
+void restirGIPrepare_0(uint pixel_5, float3 p_3, float3 n_4, float pHitT_0, const Surface_0 thread* surf_0, float3 T_0, float3 B_0, float3 woL_2, Rng_0 thread* rng_2, KernelContext_0 thread* kernelContext_25)
 {
-    uint w_7 = kernelContext_23->params_0[int(0)];
-    uint _S123 = kernelContext_23->params_0[int(6)] & 1U;
-    float _S124 = float(max(kernelContext_23->params_0[int(38)], 1U));
+    uint w_7 = kernelContext_25->params_0[int(0)];
+    uint _S123 = kernelContext_25->params_0[int(6)] & 1U;
+    float _S124 = float(max(kernelContext_25->params_0[int(38)], 1U));
 
 
 
     float3 _S125 = float3(0.0f) ;
 
-#line 873
+#line 881
     float pSel_0;
 
-#line 873
+#line 881
     float mTotal_0;
 
-#line 873
+#line 881
     float wsum_0;
 
-#line 873
+#line 881
     float3 cSel_0;
 
-#line 873
+#line 881
     float3 xSel_0;
 
-#line 873
+#line 881
     float3 nSel_0;
 
-#line 873
+#line 881
     float3 lSel_0;
 
-#line 873
+#line 881
     uint k_2;
 
 
 
-    if(kernelContext_23->params_0[int(6)] > 0U)
+    if(kernelContext_25->params_0[int(6)] > 0U)
     {
         uint _S126 = pixel_5 % w_7;
 
-#line 879
+#line 887
         int nx_0 = int(_S126);
         uint _S127 = pixel_5 / w_7;
 
-#line 880
+#line 888
         int ny_0 = int(_S127);
 
-#line 880
+#line 888
         pSel_0 = 0.0f;
 
-#line 880
+#line 888
         cSel_0 = _S125;
 
-#line 880
+#line 888
         xSel_0 = _S125;
 
-#line 880
+#line 888
         nSel_0 = _S125;
 
-#line 880
+#line 888
         lSel_0 = _S125;
 
-#line 880
+#line 888
         k_2 = 0U;
 
-#line 880
+#line 888
         mTotal_0 = 0.0f;
 
-#line 880
+#line 888
         wsum_0 = 0.0f;
         for(;;)
         {
 
-#line 881
+#line 889
             if(k_2 < 3U)
             {
             }
             else
             {
 
-#line 881
+#line 889
                 break;
             }
 
-#line 881
+#line 889
             bool _S128;
 
-#line 881
+#line 889
             bool _S129;
 
-#line 881
+#line 889
             bool _S130;
 
-#line 881
+#line 889
             int ny_1;
 
-#line 881
+#line 889
             int nx_1;
 
 
@@ -1626,80 +1646,80 @@ void restirGIPrepare_0(uint pixel_5, float3 p_3, float3 n_4, float pHitT_0, cons
             {
                 float _S131 = Rng_next_0(rng_2);
 
-#line 887
+#line 895
                 int nx_2 = nx_0 + (int(_S131 * 13.0f) - int(6));
                 float _S132 = Rng_next_0(rng_2);
 
-#line 888
+#line 896
                 int ny_2 = ny_0 + (int(_S132 * 13.0f) - int(6));
                 if(nx_2 < int(0))
                 {
 
-#line 889
+#line 897
                     _S128 = true;
 
-#line 889
+#line 897
                 }
                 else
                 {
 
-#line 889
+#line 897
                     _S128 = ny_2 < int(0);
 
-#line 889
+#line 897
                 }
 
-#line 889
+#line 897
                 if(_S128)
                 {
 
-#line 889
+#line 897
                     _S129 = true;
 
-#line 889
+#line 897
                 }
                 else
                 {
 
-#line 889
+#line 897
                     _S129 = nx_2 >= int(w_7);
 
-#line 889
+#line 897
                 }
 
-#line 889
+#line 897
                 if(_S129)
                 {
 
-#line 889
+#line 897
                     _S130 = true;
 
-#line 889
+#line 897
                 }
                 else
                 {
 
-#line 889
-                    _S130 = ny_2 >= int(kernelContext_23->params_0[int(1)]);
+#line 897
+                    _S130 = ny_2 >= int(kernelContext_25->params_0[int(1)]);
 
-#line 889
+#line 897
                 }
 
-#line 889
+#line 897
                 if(_S130)
                 {
 
-#line 890
+#line 898
                     k_2 = k_2 + 1U;
 
-#line 881
+#line 889
                     continue;
                 }
 
-#line 881
+#line 889
                 ny_1 = ny_2;
 
-#line 881
+#line 889
                 nx_1 = nx_2;
 
 
@@ -1708,81 +1728,81 @@ void restirGIPrepare_0(uint pixel_5, float3 p_3, float3 n_4, float pHitT_0, cons
             else
             {
 
-#line 885
+#line 893
                 ny_1 = ny_0;
 
-#line 885
+#line 893
                 nx_1 = nx_0;
 
-#line 885
+#line 893
             }
 
-#line 892
+#line 900
             uint ro_0 = restirBase_0(uint(ny_1) * w_7 + uint(nx_1), _S123 ^ 1U);
-            if((as_type<uint>((*(kernelContext_23->restir_0+(ro_0 + 14U))))) == 0U)
+            if((as_type<uint>((*(kernelContext_25->restir_0+(ro_0 + 14U))))) == 0U)
             {
 
-#line 893
+#line 901
                 _S128 = true;
 
-#line 893
+#line 901
             }
             else
             {
 
-#line 893
-                _S128 = (as_type<uint>((*(kernelContext_23->restir_0+(ro_0 + 27U))))) == 0U;
+#line 901
+                _S128 = (as_type<uint>((*(kernelContext_25->restir_0+(ro_0 + 27U))))) == 0U;
 
-#line 893
+#line 901
             }
 
-#line 893
+#line 901
             if(_S128)
             {
 
-#line 894
+#line 902
                 k_2 = k_2 + 1U;
 
-#line 881
+#line 889
                 continue;
             }
 
-#line 895
-            float3 pq_0 = float3(*(kernelContext_23->restir_0+(ro_0 + 8U)), *(kernelContext_23->restir_0+(ro_0 + 9U)), *(kernelContext_23->restir_0+(ro_0 + 10U)));
+#line 903
+            float3 pq_0 = float3(*(kernelContext_25->restir_0+(ro_0 + 8U)), *(kernelContext_25->restir_0+(ro_0 + 9U)), *(kernelContext_25->restir_0+(ro_0 + 10U)));
 
-            if((dot(float3(*(kernelContext_23->restir_0+(ro_0 + 11U)), *(kernelContext_23->restir_0+(ro_0 + 12U)), *(kernelContext_23->restir_0+(ro_0 + 13U))), n_4)) < 0.89999997615814209f)
+            if((dot(float3(*(kernelContext_25->restir_0+(ro_0 + 11U)), *(kernelContext_25->restir_0+(ro_0 + 12U)), *(kernelContext_25->restir_0+(ro_0 + 13U))), n_4)) < 0.89999997615814209f)
             {
 
-#line 897
+#line 905
                 _S129 = true;
 
-#line 897
+#line 905
             }
             else
             {
 
-#line 897
+#line 905
                 _S129 = (length(pq_0 - p_3)) > (0.05000000074505806f * max(pHitT_0, 0.0099999997764825821f));
 
-#line 897
+#line 905
             }
 
-#line 897
+#line 905
             if(_S129)
             {
 
-#line 898
+#line 906
                 k_2 = k_2 + 1U;
 
-#line 881
+#line 889
                 continue;
             }
 
-#line 899
-            float3 x2_0 = float3(*(kernelContext_23->restir_0+(ro_0 + 16U)), *(kernelContext_23->restir_0+(ro_0 + 17U)), *(kernelContext_23->restir_0+(ro_0 + 18U)));
-            float3 n2_0 = float3(*(kernelContext_23->restir_0+(ro_0 + 19U)), *(kernelContext_23->restir_0+(ro_0 + 20U)), *(kernelContext_23->restir_0+(ro_0 + 21U)));
-            float3 l2_0 = float3(*(kernelContext_23->restir_0+(ro_0 + 22U)), *(kernelContext_23->restir_0+(ro_0 + 23U)), *(kernelContext_23->restir_0+(ro_0 + 24U)));
-            float _S133 = min(*(kernelContext_23->restir_0+(ro_0 + 26U)), _S124);
+#line 907
+            float3 x2_0 = float3(*(kernelContext_25->restir_0+(ro_0 + 16U)), *(kernelContext_25->restir_0+(ro_0 + 17U)), *(kernelContext_25->restir_0+(ro_0 + 18U)));
+            float3 n2_0 = float3(*(kernelContext_25->restir_0+(ro_0 + 19U)), *(kernelContext_25->restir_0+(ro_0 + 20U)), *(kernelContext_25->restir_0+(ro_0 + 21U)));
+            float3 l2_0 = float3(*(kernelContext_25->restir_0+(ro_0 + 22U)), *(kernelContext_25->restir_0+(ro_0 + 23U)), *(kernelContext_25->restir_0+(ro_0 + 24U)));
+            float _S133 = min(*(kernelContext_25->restir_0+(ro_0 + 26U)), _S124);
             float mTotal_1 = mTotal_0 + _S133;
             float3 toX_0 = x2_0 - p_3;
             float dR_0 = length(toX_0);
@@ -1794,438 +1814,457 @@ void restirGIPrepare_0(uint pixel_5, float3 p_3, float3 n_4, float pHitT_0, cons
             if(cosT_1 <= 0.0f)
             {
 
-#line 911
+#line 919
                 _S130 = true;
 
-#line 911
+#line 919
             }
             else
             {
 
-#line 911
+#line 919
                 _S130 = dR_0 < 0.0010000000474974513f;
 
-#line 911
+#line 919
             }
 
-#line 911
+#line 919
             bool _S134;
 
-#line 911
+#line 919
             if(_S130)
             {
 
-#line 911
+#line 919
                 _S134 = true;
 
-#line 911
+#line 919
             }
             else
             {
 
-#line 911
+#line 919
                 _S134 = cosR_0 < 0.0010000000474974513f;
 
-#line 911
+#line 919
             }
 
-#line 911
+#line 919
             bool _S135;
 
-#line 911
+#line 919
             if(_S134)
             {
 
-#line 911
+#line 919
                 _S135 = true;
 
-#line 911
+#line 919
             }
             else
             {
 
-#line 911
+#line 919
                 _S135 = cosQ_0 < 0.0010000000474974513f;
 
-#line 911
+#line 919
             }
 
-#line 911
+#line 919
             if(_S135)
             {
 
-#line 911
+#line 919
                 mTotal_0 = mTotal_1;
                 k_2 = k_2 + 1U;
 
-#line 881
+#line 889
                 continue;
             }
 
-#line 913
+#line 921
             float jac_0 = cosR_0 / cosQ_0 * (dQ_0 * dQ_0) / (dR_0 * dR_0);
 
-#line 913
+#line 921
             bool _S136;
             if(jac_0 > 10.0f)
             {
 
-#line 914
+#line 922
                 _S136 = true;
 
-#line 914
+#line 922
             }
             else
             {
 
-#line 914
+#line 922
                 _S136 = jac_0 < 0.10000000149011612f;
 
-#line 914
+#line 922
             }
 
-#line 914
+#line 922
             if(_S136)
             {
 
-#line 914
+#line 922
                 mTotal_0 = mTotal_1;
                 k_2 = k_2 + 1U;
 
-#line 881
+#line 889
                 continue;
             }
 
-#line 881
-            float3 _S137 = evalReflective_0(surf_0, woL_2, float3(dot(wi_1, T_0), dot(wi_1, B_0), cosT_1), kernelContext_23);
+#line 889
+            float3 _S137 = evalReflective_0(surf_0, woL_2, float3(dot(wi_1, T_0), dot(wi_1, B_0), cosT_1), kernelContext_25);
 
-#line 916
+#line 924
             float3 c_6 = _S137 * l2_0;
             float phat_0 = lum_0(c_6);
 
-#line 917
+#line 925
             bool _S138;
             if(phat_0 <= 0.0f)
             {
 
-#line 918
+#line 926
                 _S138 = true;
 
-#line 918
+#line 926
             }
             else
             {
 
-#line 918
-                bool _S139 = occluded_0(p_3, wi_1, dR_0 * 0.99900001287460327f, kernelContext_23);
+#line 926
+                bool _S139 = occluded_0(p_3, wi_1, dR_0 * 0.99900001287460327f, kernelContext_25);
 
-#line 918
+#line 926
                 _S138 = _S139;
 
-#line 918
+#line 926
             }
 
-#line 918
+#line 926
             if(_S138)
             {
 
-#line 918
+#line 926
                 mTotal_0 = mTotal_1;
                 k_2 = k_2 + 1U;
 
-#line 881
+#line 889
                 continue;
             }
 
-#line 920
-            float wgt_0 = phat_0 * *(kernelContext_23->restir_0+(ro_0 + 25U)) * _S133 * jac_0;
+#line 928
+            float wgt_0 = phat_0 * *(kernelContext_25->restir_0+(ro_0 + 25U)) * _S133 * jac_0;
             float wsum_1 = wsum_0 + wgt_0;
             float _S140 = Rng_next_0(rng_2);
 
-#line 922
+#line 930
             float pSel_1;
 
-#line 922
+#line 930
             float3 cSel_1;
 
-#line 922
+#line 930
             float3 xSel_1;
 
-#line 922
+#line 930
             float3 nSel_1;
 
-#line 922
+#line 930
             float3 lSel_1;
 
-#line 922
+#line 930
             if((_S140 * wsum_1) < wgt_0)
             {
 
-#line 922
+#line 930
                 pSel_1 = phat_0;
 
-#line 922
+#line 930
                 cSel_1 = c_6;
 
-#line 922
+#line 930
                 xSel_1 = x2_0;
 
-#line 922
+#line 930
                 nSel_1 = n2_0;
 
-#line 922
+#line 930
                 lSel_1 = l2_0;
 
-#line 922
+#line 930
             }
             else
             {
 
-#line 922
+#line 930
                 pSel_1 = pSel_0;
 
-#line 922
+#line 930
                 cSel_1 = cSel_0;
 
-#line 922
+#line 930
                 xSel_1 = xSel_0;
 
-#line 922
+#line 930
                 nSel_1 = nSel_0;
 
-#line 922
+#line 930
                 lSel_1 = lSel_0;
 
-#line 922
+#line 930
             }
 
-#line 922
+#line 930
             pSel_0 = pSel_1;
 
-#line 922
+#line 930
             cSel_0 = cSel_1;
 
-#line 922
+#line 930
             xSel_0 = xSel_1;
 
-#line 922
+#line 930
             nSel_0 = nSel_1;
 
-#line 922
+#line 930
             lSel_0 = lSel_1;
 
-#line 922
+#line 930
             mTotal_0 = mTotal_1;
 
-#line 922
+#line 930
             wsum_0 = wsum_1;
 
-#line 881
+#line 889
             k_2 = k_2 + 1U;
 
-#line 881
+#line 889
         }
 
-#line 877
+#line 885
     }
     else
     {
 
-#line 877
+#line 885
         pSel_0 = 0.0f;
 
-#line 877
+#line 885
         cSel_0 = _S125;
 
-#line 877
+#line 885
         xSel_0 = _S125;
 
-#line 877
+#line 885
         nSel_0 = _S125;
 
-#line 877
+#line 885
         lSel_0 = _S125;
 
-#line 877
+#line 885
         wsum_0 = 0.0f;
 
-#line 877
+#line 885
         mTotal_0 = 0.0f;
 
-#line 877
+#line 885
     }
 
-#line 932
+#line 940
     uint so_0 = restirScratch_0(pixel_5);
-    *(kernelContext_23->restir_0+so_0) = wsum_0;
-    *(kernelContext_23->restir_0+(so_0 + 1U)) = mTotal_0;
-    *(kernelContext_23->restir_0+(so_0 + 2U)) = pSel_0;
+    *(kernelContext_25->restir_0+so_0) = wsum_0;
+    *(kernelContext_25->restir_0+(so_0 + 1U)) = mTotal_0;
+    *(kernelContext_25->restir_0+(so_0 + 2U)) = pSel_0;
 
-#line 935
+#line 943
     k_2 = 0U;
     for(;;)
     {
 
-#line 936
+#line 944
         if(k_2 < 3U)
         {
         }
         else
         {
 
-#line 936
+#line 944
             break;
         }
-        *(kernelContext_23->restir_0+(so_0 + 3U + k_2)) = cSel_0[k_2];
-        *(kernelContext_23->restir_0+(so_0 + 6U + k_2)) = xSel_0[k_2];
-        *(kernelContext_23->restir_0+(so_0 + 9U + k_2)) = nSel_0[k_2];
-        *(kernelContext_23->restir_0+(so_0 + 12U + k_2)) = lSel_0[k_2];
+        *(kernelContext_25->restir_0+(so_0 + 3U + k_2)) = cSel_0[k_2];
+        *(kernelContext_25->restir_0+(so_0 + 6U + k_2)) = xSel_0[k_2];
+        *(kernelContext_25->restir_0+(so_0 + 9U + k_2)) = nSel_0[k_2];
+        *(kernelContext_25->restir_0+(so_0 + 12U + k_2)) = lSel_0[k_2];
 
-#line 936
+#line 944
         k_2 = k_2 + 1U;
 
-#line 936
+#line 944
     }
 
-#line 943
-    *(kernelContext_23->restir_0+(so_0 + 22U)) = (as_type<float>((0U)));
+#line 951
+    *(kernelContext_25->restir_0+(so_0 + 22U)) = (as_type<float>((0U)));
     return;
 }
 
 
-#line 683
-bool restirLight_0(uint e_0, float3 x_5, float3 p_4, float3 n_5, float3 thread* wi_2, float thread* dist_0, float thread* cosi_1, float3 thread* g_0, float thread* plsa_0, KernelContext_0 thread* kernelContext_24)
+#line 690
+bool restirLight_0(uint e_0, uint recv_0, float3 x_5, float3 p_4, float3 n_5, float3 thread* wi_2, float thread* dist_0, float thread* cosi_1, float3 thread* g_0, float thread* plsa_0, KernelContext_0 thread* kernelContext_26)
 {
     uint o_6 = e_0 * 16U;
-    float3 a_2 = float3(kernelContext_24->emitters_0[o_6], kernelContext_24->emitters_0[o_6 + 1U], kernelContext_24->emitters_0[o_6 + 2U]);
-    float3 b_1 = float3(kernelContext_24->emitters_0[o_6 + 3U], kernelContext_24->emitters_0[o_6 + 4U], kernelContext_24->emitters_0[o_6 + 5U]);
-    float3 c_7 = float3(kernelContext_24->emitters_0[o_6 + 6U], kernelContext_24->emitters_0[o_6 + 7U], kernelContext_24->emitters_0[o_6 + 8U]);
+    float3 a_2 = float3(kernelContext_26->emitters_0[o_6], kernelContext_26->emitters_0[o_6 + 1U], kernelContext_26->emitters_0[o_6 + 2U]);
+    float3 b_1 = float3(kernelContext_26->emitters_0[o_6 + 3U], kernelContext_26->emitters_0[o_6 + 4U], kernelContext_26->emitters_0[o_6 + 5U]);
+    float3 c_7 = float3(kernelContext_26->emitters_0[o_6 + 6U], kernelContext_26->emitters_0[o_6 + 7U], kernelContext_26->emitters_0[o_6 + 8U]);
     float3 toL_0 = x_5 - p_4;
     float d2_0 = dot(toL_0, toL_0);
     float _S141 = sqrt(d2_0);
 
-#line 691
+#line 698
     *dist_0 = _S141;
     float3 _S142 = toL_0 / float3(max(_S141, 9.99999997475242708e-07f)) ;
 
-#line 692
+#line 699
     *wi_2 = _S142;
     float cosl_0 = abs(dot(normalize(cross(b_1 - a_2, c_7 - a_2)), _S142));
     *cosi_1 = dot(n_5, _S142);
-    *g_0 = float3(kernelContext_24->emitters_0[o_6 + 9U], kernelContext_24->emitters_0[o_6 + 10U], kernelContext_24->emitters_0[o_6 + 11U]) * float3((cosl_0 / max(d2_0, 9.999999960041972e-13f))) ;
+    *g_0 = float3(kernelContext_26->emitters_0[o_6 + 9U], kernelContext_26->emitters_0[o_6 + 10U], kernelContext_26->emitters_0[o_6 + 11U]) * float3((cosl_0 / max(d2_0, 9.999999960041972e-13f))) ;
 
 
-    *plsa_0 = kernelContext_24->emitters_0[o_6 + 13U] * d2_0 / (max(kernelContext_24->emitters_0[o_6 + 12U], 1.00000000317107685e-30f) * max(cosl_0, 9.9999997473787516e-06f));
+    *plsa_0 = kernelContext_26->emitters_0[o_6 + 13U] * d2_0 / (max(kernelContext_26->emitters_0[o_6 + 12U], 1.00000000317107685e-30f) * max(cosl_0, 9.9999997473787516e-06f));
 
-#line 698
+#line 705
     bool _S143;
+
     if((*cosi_1) > 0.0f)
     {
 
-#line 699
+#line 707
         _S143 = cosl_0 > 9.9999997473787516e-06f;
 
-#line 699
+#line 707
     }
     else
     {
 
-#line 699
+#line 707
         _S143 = false;
 
-#line 699
+#line 707
     }
 
-#line 699
+#line 707
     if(_S143)
     {
 
-#line 699
+#line 707
         _S143 = d2_0 > 9.999999960041972e-13f;
 
-#line 699
+#line 707
     }
     else
     {
 
-#line 699
+#line 707
         _S143 = false;
 
-#line 699
+#line 707
     }
 
-#line 699
+#line 707
+    if(_S143)
+    {
+
+#line 707
+        _S143 = ((as_type<uint>((kernelContext_26->emitters_0[o_6 + 14U]))) & recv_0) != 0U;
+
+#line 707
+    }
+    else
+    {
+
+#line 707
+        _S143 = false;
+
+#line 707
+    }
+
+#line 707
     return _S143;
 }
 
 
-#line 526
+#line 531
 float reflectivePdf_0(const Surface_0 thread* s_7, float3 woL_3, float3 wiL_2)
 {
     float3 hh_1 = normalize(woL_3 + wiL_2);
 
     float _S144 = woL_3.z;
 
-#line 530
+#line 535
     float _S145 = hh_1.z;
 
-#line 530
+#line 535
     float _S146 = 4.0f * _S144;
 
     float _S147 = 1.0f - s_7->metallic_0;
 
-#line 532
+#line 537
     float _S148 = 1.0f - s_7->transmission_1;
     float _S149 = wiL_2.z;
     float q_2 = (s_7->metallic_0 + _S147 * (s_7->transmission_1 * fresnelDielectric_0(max(dot(woL_3, hh_1), 0.0f), s_7->eta_1) + _S148 * s_7->fSel_0)) * (G1_0(_S144, s_7->alpha_3) * D_0(_S145, s_7->alpha_3) / _S146) + _S147 * _S148 * (1.0f - s_7->fSel_0) * _S149 / 3.1415927410125732f;
 
-#line 534
+#line 539
     float _S150 = s_7->sheenP_0;
 
-#line 534
+#line 539
     float q_3;
     if((s_7->sheenP_0) > 0.0f)
     {
 
-#line 535
+#line 540
         q_3 = (1.0f - _S150) * q_2 + _S150 * _S149 / 3.1415927410125732f;
 
-#line 535
+#line 540
     }
     else
     {
 
-#line 535
+#line 540
         q_3 = q_2;
 
-#line 535
+#line 540
     }
 
     if((s_7->coat_0) > 0.0f)
     {
 
-#line 537
+#line 542
         q_3 = (1.0f - s_7->coatP_0) * q_3 + s_7->coatP_0 * (G1_0(_S144, s_7->coatAlpha_0) * D_0(_S145, s_7->coatAlpha_0) / _S146);
 
-#line 537
+#line 542
     }
 
-#line 542
+#line 547
     return q_3;
 }
 
 
-#line 703
+#line 711
 float restirMis_0(const Surface_0 thread* surf_1, float3 woL_4, float3 wiL_3, float plsa_1)
 {
 
-#line 703
+#line 711
     float _S151 = reflectivePdf_0(surf_1, woL_4, wiL_3);
 
 
     float _S152 = plsa_1 * plsa_1;
 
-#line 706
+#line 714
     return _S152 / max(_S152 + _S151 * _S151, 1.00000000317107685e-30f);
 }
 
@@ -2239,66 +2278,66 @@ struct RestirPick_0
 };
 
 
-#line 723
-RestirPick_0 restirDI_0(uint pixel_6, float3 p_5, float3 n_6, float pHitT_1, const Surface_0 thread* surf_2, float3 T_1, float3 B_1, float3 woL_5, Rng_0 thread* rng_3, KernelContext_0 thread* kernelContext_25)
+#line 731
+RestirPick_0 restirDI_0(uint pixel_6, uint recv_1, float3 p_5, float3 n_6, float pHitT_1, const Surface_0 thread* surf_2, float3 T_1, float3 B_1, float3 woL_5, Rng_0 thread* rng_3, KernelContext_0 thread* kernelContext_27)
 {
 
-#line 723
+#line 731
     uint lo_0;
 
-#line 723
+#line 731
     float q_4;
 
-#line 723
+#line 731
     float phat_1;
 
-#line 723
+#line 731
     float selPhat_0;
 
-#line 723
+#line 731
     float3 selX_0;
 
-#line 723
+#line 731
     bool _S153;
 
-    uint w_8 = kernelContext_25->params_0[int(0)];
-    uint cur_0 = kernelContext_25->params_0[int(6)] & 1U;
-    uint _S154 = kernelContext_25->params_0[int(23)];
-    float _S155 = float(max(kernelContext_25->params_0[int(38)], 1U));
+    uint w_8 = kernelContext_27->params_0[int(0)];
+    uint cur_0 = kernelContext_27->params_0[int(6)] & 1U;
+    uint _S154 = kernelContext_27->params_0[int(23)];
+    float _S155 = float(max(kernelContext_27->params_0[int(38)], 1U));
 
 
 
     float3 _S156 = float3(0.0f) ;
 
-#line 732
+#line 740
     uint selE_0 = 0U;
 
-#line 732
+#line 740
     float selPhat_1 = 0.0f;
 
-#line 732
+#line 740
     float3 selX_1 = _S156;
 
-#line 732
+#line 740
     uint k_3 = 0U;
 
-#line 732
+#line 740
     float mTotal_2 = 0.0f;
 
-#line 732
+#line 740
     float wsum_2 = 0.0f;
 
     for(;;)
     {
 
-#line 734
-        if(k_3 < (max(kernelContext_25->params_0[int(37)], 1U)))
+#line 742
+        if(k_3 < (max(kernelContext_27->params_0[int(37)], 1U)))
         {
         }
         else
         {
 
-#line 734
+#line 742
             break;
         }
         float _S157 = Rng_next_0(rng_3);
@@ -2307,128 +2346,128 @@ RestirPick_0 restirDI_0(uint pixel_6, float3 p_5, float3 n_6, float pHitT_1, con
 
         uint _S158 = _S154 - 1U;
 
-#line 740
+#line 748
         lo_0 = 0U;
 
-#line 740
+#line 748
         uint hi_0 = _S158;
         for(;;)
         {
 
-#line 741
+#line 749
             if(lo_0 < hi_0)
             {
             }
             else
             {
 
-#line 741
+#line 749
                 break;
             }
             uint mid_0 = (lo_0 + hi_0) / 2U;
-            if(kernelContext_25->emitCdf_0[mid_0] >= _S157)
+            if(kernelContext_27->emitCdf_0[mid_0] >= _S157)
             {
 
-#line 744
+#line 752
                 hi_0 = mid_0;
 
-#line 744
+#line 752
             }
             else
             {
 
-#line 744
+#line 752
                 lo_0 = mid_0 + 1U;
 
-#line 744
+#line 752
             }
 
-#line 741
+#line 749
         }
 
-#line 749
+#line 757
         uint o_7 = lo_0 * 16U;
 
 
 
         float su_0 = sqrt(ua_0);
-        float3 x_7 = float3(kernelContext_25->emitters_0[o_7], kernelContext_25->emitters_0[o_7 + 1U], kernelContext_25->emitters_0[o_7 + 2U]) * float3((1.0f - su_0))  + float3(kernelContext_25->emitters_0[o_7 + 3U], kernelContext_25->emitters_0[o_7 + 4U], kernelContext_25->emitters_0[o_7 + 5U]) * float3((su_0 * (1.0f - ub_0)))  + float3(kernelContext_25->emitters_0[o_7 + 6U], kernelContext_25->emitters_0[o_7 + 7U], kernelContext_25->emitters_0[o_7 + 8U]) * float3((su_0 * ub_0)) ;
-        float area_0 = kernelContext_25->emitters_0[o_7 + 12U];
+        float3 x_7 = float3(kernelContext_27->emitters_0[o_7], kernelContext_27->emitters_0[o_7 + 1U], kernelContext_27->emitters_0[o_7 + 2U]) * float3((1.0f - su_0))  + float3(kernelContext_27->emitters_0[o_7 + 3U], kernelContext_27->emitters_0[o_7 + 4U], kernelContext_27->emitters_0[o_7 + 5U]) * float3((su_0 * (1.0f - ub_0)))  + float3(kernelContext_27->emitters_0[o_7 + 6U], kernelContext_27->emitters_0[o_7 + 7U], kernelContext_27->emitters_0[o_7 + 8U]) * float3((su_0 * ub_0)) ;
+        float area_0 = kernelContext_27->emitters_0[o_7 + 12U];
         if(area_0 > 0.0f)
         {
 
-#line 756
-            q_4 = kernelContext_25->emitters_0[o_7 + 13U] / area_0;
+#line 764
+            q_4 = kernelContext_27->emitters_0[o_7 + 13U] / area_0;
 
-#line 756
+#line 764
         }
         else
         {
 
-#line 756
+#line 764
             q_4 = 0.0f;
 
-#line 756
+#line 764
         }
         thread float3 wi_3;
 
-#line 757
+#line 765
         thread float3 g_1;
         thread float dist_1;
 
-#line 758
+#line 766
         thread float cosi_2;
 
-#line 758
+#line 766
         thread float plsa_2;
 
         if(q_4 > 0.0f)
         {
 
-#line 760
-            bool _S159 = restirLight_0(lo_0, x_7, p_5, n_6, &wi_3, &dist_1, &cosi_2, &g_1, &plsa_2, kernelContext_25);
+#line 768
+            bool _S159 = restirLight_0(lo_0, recv_1, x_7, p_5, n_6, &wi_3, &dist_1, &cosi_2, &g_1, &plsa_2, kernelContext_27);
 
-#line 760
+#line 768
             _S153 = _S159;
 
-#line 760
+#line 768
         }
         else
         {
 
-#line 760
+#line 768
             _S153 = false;
 
-#line 760
+#line 768
         }
 
-#line 760
+#line 768
         if(_S153)
         {
             float3 wiL_4 = float3(dot(wi_3, T_1), dot(wi_3, B_1), cosi_2);
 
-#line 762
-            float3 _S160 = evalReflective_0(surf_2, woL_5, wiL_4, kernelContext_25);
+#line 770
+            float3 _S160 = evalReflective_0(surf_2, woL_5, wiL_4, kernelContext_27);
             float _S161 = lum_0(_S160 * g_1);
 
-#line 763
+#line 771
             float _S162 = restirMis_0(surf_2, woL_5, wiL_4, plsa_2);
 
-#line 763
+#line 771
             phat_1 = _S161 * _S162;
 
-#line 760
+#line 768
         }
         else
         {
 
-#line 760
+#line 768
             phat_1 = 0.0f;
 
-#line 760
+#line 768
         }
 
-#line 765
+#line 773
         float wgt_1 = phat_1 / max(q_4, 1.00000000317107685e-30f);
         float mTotal_3 = mTotal_2 + 1.0f;
         if(phat_1 > 0.0f)
@@ -2436,98 +2475,98 @@ RestirPick_0 restirDI_0(uint pixel_6, float3 p_5, float3 n_6, float pHitT_1, con
             float wsum_3 = wsum_2 + wgt_1;
             float _S163 = Rng_next_0(rng_3);
 
-#line 770
+#line 778
             uint selE_1;
 
-#line 770
+#line 778
             if((_S163 * wsum_3) < wgt_1)
             {
 
-#line 770
+#line 778
                 selE_1 = lo_0 + 1U;
 
-#line 770
+#line 778
                 selPhat_0 = phat_1;
 
-#line 770
+#line 778
                 selX_0 = x_7;
 
-#line 770
+#line 778
             }
             else
             {
 
-#line 770
+#line 778
                 selE_1 = selE_0;
 
-#line 770
+#line 778
                 selPhat_0 = selPhat_1;
 
-#line 770
+#line 778
                 selX_0 = selX_1;
 
-#line 770
+#line 778
             }
 
-#line 770
+#line 778
             selE_0 = selE_1;
 
-#line 770
+#line 778
             selPhat_1 = selPhat_0;
 
-#line 770
+#line 778
             selX_1 = selX_0;
 
-#line 770
+#line 778
             wsum_2 = wsum_3;
 
-#line 767
+#line 775
         }
 
-#line 734
+#line 742
         k_3 = k_3 + 1U;
 
-#line 734
+#line 742
         mTotal_2 = mTotal_3;
 
-#line 734
+#line 742
     }
 
-#line 778
-    if(kernelContext_25->params_0[int(6)] > 0U)
+#line 786
+    if(kernelContext_27->params_0[int(6)] > 0U)
     {
         uint _S164 = pixel_6 % w_8;
 
-#line 780
+#line 788
         int nx_3 = int(_S164);
         uint _S165 = pixel_6 / w_8;
 
-#line 781
+#line 789
         int ny_3 = int(_S165);
 
-#line 781
+#line 789
         k_3 = 0U;
         for(;;)
         {
 
-#line 782
+#line 790
             if(k_3 < 3U)
             {
             }
             else
             {
 
-#line 782
+#line 790
                 break;
             }
 
-#line 782
+#line 790
             bool _S166;
 
-#line 782
+#line 790
             int ny_4;
 
-#line 782
+#line 790
             int nx_4;
 
 
@@ -2536,83 +2575,83 @@ RestirPick_0 restirDI_0(uint pixel_6, float3 p_5, float3 n_6, float pHitT_1, con
             {
                 float _S167 = Rng_next_0(rng_3);
 
-#line 788
+#line 796
                 int nx_5 = nx_3 + (int(_S167 * 13.0f) - int(6));
                 float _S168 = Rng_next_0(rng_3);
 
-#line 789
+#line 797
                 int ny_5 = ny_3 + (int(_S168 * 13.0f) - int(6));
                 if(nx_5 < int(0))
                 {
 
-#line 790
+#line 798
                     _S153 = true;
 
-#line 790
+#line 798
                 }
                 else
                 {
 
-#line 790
+#line 798
                     _S153 = ny_5 < int(0);
 
-#line 790
+#line 798
                 }
 
-#line 790
+#line 798
                 if(_S153)
                 {
 
-#line 790
+#line 798
                     _S166 = true;
 
-#line 790
+#line 798
                 }
                 else
                 {
 
-#line 790
+#line 798
                     _S166 = nx_5 >= int(w_8);
 
-#line 790
+#line 798
                 }
 
-#line 790
+#line 798
                 bool _S169;
 
-#line 790
+#line 798
                 if(_S166)
                 {
 
-#line 790
+#line 798
                     _S169 = true;
 
-#line 790
+#line 798
                 }
                 else
                 {
 
-#line 790
-                    _S169 = ny_5 >= int(kernelContext_25->params_0[int(1)]);
+#line 798
+                    _S169 = ny_5 >= int(kernelContext_27->params_0[int(1)]);
 
-#line 790
+#line 798
                 }
 
-#line 790
+#line 798
                 if(_S169)
                 {
 
-#line 791
+#line 799
                     k_3 = k_3 + 1U;
 
-#line 782
+#line 790
                     continue;
                 }
 
-#line 782
+#line 790
                 ny_4 = ny_5;
 
-#line 782
+#line 790
                 nx_4 = nx_5;
 
 
@@ -2621,418 +2660,418 @@ RestirPick_0 restirDI_0(uint pixel_6, float3 p_5, float3 n_6, float pHitT_1, con
             else
             {
 
-#line 786
+#line 794
                 ny_4 = ny_3;
 
-#line 786
+#line 794
                 nx_4 = nx_3;
 
-#line 786
-            }
-
-#line 793
-            uint ro_1 = restirBase_0(uint(ny_4) * w_8 + uint(nx_4), cur_0 ^ 1U);
-            uint ei_0 = (as_type<uint>((*(kernelContext_25->restir_0+ro_1))));
-            if((as_type<uint>((*(kernelContext_25->restir_0+(ro_1 + 14U))))) == 0U)
-            {
-
-#line 795
-                _S153 = true;
-
-#line 795
-            }
-            else
-            {
-
-#line 795
-                _S153 = ei_0 == 0U;
-
-#line 795
-            }
-
-#line 795
-            if(_S153)
-            {
-
-#line 796
-                k_3 = k_3 + 1U;
-
-#line 782
-                continue;
-            }
-
-#line 798
-            float3 pp_0 = float3(*(kernelContext_25->restir_0+(ro_1 + 8U)), *(kernelContext_25->restir_0+(ro_1 + 9U)), *(kernelContext_25->restir_0+(ro_1 + 10U)));
-            if((dot(float3(*(kernelContext_25->restir_0+(ro_1 + 11U)), *(kernelContext_25->restir_0+(ro_1 + 12U)), *(kernelContext_25->restir_0+(ro_1 + 13U))), n_6)) < 0.89999997615814209f)
-            {
-
-#line 799
-                _S166 = true;
-
-#line 799
-            }
-            else
-            {
-
-#line 799
-                _S166 = (length(pp_0 - p_5)) > (0.05000000074505806f * max(pHitT_1, 0.0099999997764825821f));
-
-#line 799
-            }
-
-#line 799
-            if(_S166)
-            {
-
-#line 800
-                k_3 = k_3 + 1U;
-
-#line 782
-                continue;
+#line 794
             }
 
 #line 801
-            float3 xc_0 = float3(*(kernelContext_25->restir_0+(ro_1 + 1U)), *(kernelContext_25->restir_0+(ro_1 + 2U)), *(kernelContext_25->restir_0+(ro_1 + 3U)));
-            float _S170 = min(*(kernelContext_25->restir_0+(ro_1 + 5U)), _S155);
-            thread float3 wi_4;
+            uint ro_1 = restirBase_0(uint(ny_4) * w_8 + uint(nx_4), cur_0 ^ 1U);
+            uint ei_0 = (as_type<uint>((*(kernelContext_27->restir_0+ro_1))));
+            if((as_type<uint>((*(kernelContext_27->restir_0+(ro_1 + 14U))))) == 0U)
+            {
 
 #line 803
+                _S153 = true;
+
+#line 803
+            }
+            else
+            {
+
+#line 803
+                _S153 = ei_0 == 0U;
+
+#line 803
+            }
+
+#line 803
+            if(_S153)
+            {
+
+#line 804
+                k_3 = k_3 + 1U;
+
+#line 790
+                continue;
+            }
+
+#line 806
+            float3 pp_0 = float3(*(kernelContext_27->restir_0+(ro_1 + 8U)), *(kernelContext_27->restir_0+(ro_1 + 9U)), *(kernelContext_27->restir_0+(ro_1 + 10U)));
+            if((dot(float3(*(kernelContext_27->restir_0+(ro_1 + 11U)), *(kernelContext_27->restir_0+(ro_1 + 12U)), *(kernelContext_27->restir_0+(ro_1 + 13U))), n_6)) < 0.89999997615814209f)
+            {
+
+#line 807
+                _S166 = true;
+
+#line 807
+            }
+            else
+            {
+
+#line 807
+                _S166 = (length(pp_0 - p_5)) > (0.05000000074505806f * max(pHitT_1, 0.0099999997764825821f));
+
+#line 807
+            }
+
+#line 807
+            if(_S166)
+            {
+
+#line 808
+                k_3 = k_3 + 1U;
+
+#line 790
+                continue;
+            }
+
+#line 809
+            float3 xc_0 = float3(*(kernelContext_27->restir_0+(ro_1 + 1U)), *(kernelContext_27->restir_0+(ro_1 + 2U)), *(kernelContext_27->restir_0+(ro_1 + 3U)));
+            float _S170 = min(*(kernelContext_27->restir_0+(ro_1 + 5U)), _S155);
+            thread float3 wi_4;
+
+#line 811
             thread float3 g_2;
             thread float dist_2;
 
-#line 804
+#line 812
             thread float cosi_3;
 
-#line 804
+#line 812
             thread float plsa_3;
 
-#line 804
-            bool _S171 = restirLight_0(ei_0 - 1U, xc_0, p_5, n_6, &wi_4, &dist_2, &cosi_3, &g_2, &plsa_3, kernelContext_25);
+#line 812
+            bool _S171 = restirLight_0(ei_0 - 1U, recv_1, xc_0, p_5, n_6, &wi_4, &dist_2, &cosi_3, &g_2, &plsa_3, kernelContext_27);
 
             if(_S171)
             {
                 float3 wiL_5 = float3(dot(wi_4, T_1), dot(wi_4, B_1), cosi_3);
 
-#line 808
-                float3 _S172 = evalReflective_0(surf_2, woL_5, wiL_5, kernelContext_25);
+#line 816
+                float3 _S172 = evalReflective_0(surf_2, woL_5, wiL_5, kernelContext_27);
                 float _S173 = lum_0(_S172 * g_2);
 
-#line 809
+#line 817
                 float _S174 = restirMis_0(surf_2, woL_5, wiL_5, plsa_3);
 
-#line 809
+#line 817
                 q_4 = _S173 * _S174;
 
-#line 806
+#line 814
             }
             else
             {
 
-#line 806
+#line 814
                 q_4 = 0.0f;
 
-#line 806
+#line 814
             }
 
-#line 811
-            float wgt_2 = q_4 * *(kernelContext_25->restir_0+(ro_1 + 4U)) * _S170;
+#line 819
+            float wgt_2 = q_4 * *(kernelContext_27->restir_0+(ro_1 + 4U)) * _S170;
             float mTotal_4 = mTotal_2 + _S170;
             if(wgt_2 > 0.0f)
             {
                 float wsum_4 = wsum_2 + wgt_2;
                 float _S175 = Rng_next_0(rng_3);
 
-#line 816
+#line 824
                 if((_S175 * wsum_4) < wgt_2)
                 {
 
-#line 816
+#line 824
                     lo_0 = ei_0;
 
-#line 816
+#line 824
                     phat_1 = q_4;
 
-#line 816
+#line 824
                     selX_0 = xc_0;
 
-#line 816
+#line 824
                 }
                 else
                 {
 
-#line 816
+#line 824
                     lo_0 = selE_0;
 
-#line 816
+#line 824
                     phat_1 = selPhat_1;
 
-#line 816
+#line 824
                     selX_0 = selX_1;
 
-#line 816
+#line 824
                 }
 
-#line 816
+#line 824
                 selPhat_0 = wsum_4;
 
-#line 813
+#line 821
             }
             else
             {
 
-#line 813
+#line 821
                 lo_0 = selE_0;
 
-#line 813
+#line 821
                 phat_1 = selPhat_1;
 
-#line 813
+#line 821
                 selX_0 = selX_1;
 
-#line 813
+#line 821
                 selPhat_0 = wsum_2;
 
-#line 813
+#line 821
             }
 
-#line 813
+#line 821
             selE_0 = lo_0;
 
-#line 813
+#line 821
             selPhat_1 = phat_1;
 
-#line 813
+#line 821
             selX_1 = selX_0;
 
-#line 813
+#line 821
             mTotal_2 = mTotal_4;
 
-#line 813
+#line 821
             wsum_2 = selPhat_0;
 
-#line 782
+#line 790
             k_3 = k_3 + 1U;
 
-#line 782
+#line 790
         }
 
-#line 778
+#line 786
     }
 
-#line 825
+#line 833
     thread RestirPick_0 r_4;
     if(selE_0 != 0U)
     {
 
-#line 826
+#line 834
         _S153 = selPhat_1 > 0.0f;
 
-#line 826
+#line 834
     }
     else
     {
 
-#line 826
+#line 834
         _S153 = false;
 
-#line 826
+#line 834
     }
 
-#line 826
+#line 834
     (&r_4)->valid_0 = _S153;
     (&r_4)->e_1 = selE_0;
     (&r_4)->x_6 = selX_1;
     if(_S153)
     {
 
-#line 829
+#line 837
         selPhat_1 = wsum_2 / (mTotal_2 * selPhat_1);
 
-#line 829
+#line 837
     }
     else
     {
 
-#line 829
+#line 837
         selPhat_1 = 0.0f;
 
-#line 829
+#line 837
     }
 
-#line 829
+#line 837
     (&r_4)->W_0 = selPhat_1;
     (&r_4)->occ_0 = false;
     if((&r_4)->valid_0)
     {
         thread float3 wi_5;
 
-#line 833
+#line 841
         thread float3 g_3;
         thread float dist_3;
 
-#line 834
+#line 842
         thread float cosi_4;
 
-#line 834
+#line 842
         thread float plsa_4;
 
-#line 834
-        bool _S176 = restirLight_0(selE_0 - 1U, selX_1, p_5, n_6, &wi_5, &dist_3, &cosi_4, &g_3, &plsa_4, kernelContext_25);
+#line 842
+        bool _S176 = restirLight_0(selE_0 - 1U, recv_1, selX_1, p_5, n_6, &wi_5, &dist_3, &cosi_4, &g_3, &plsa_4, kernelContext_27);
 
-#line 834
-        bool _S177 = occluded_0(p_5, wi_5, dist_3 * 0.99900001287460327f, kernelContext_25);
+#line 842
+        bool _S177 = occluded_0(p_5, wi_5, dist_3 * 0.99900001287460327f, kernelContext_27);
 
         (&r_4)->occ_0 = _S177;
 
-#line 831
+#line 839
     }
 
-#line 838
+#line 846
     uint co_2 = restirBase_0(pixel_6, cur_0);
-    *(kernelContext_25->restir_0+co_2) = (as_type<float>((selE_0)));
-    *(kernelContext_25->restir_0+(co_2 + 1U)) = selX_1.x;
-    *(kernelContext_25->restir_0+(co_2 + 2U)) = selX_1.y;
-    *(kernelContext_25->restir_0+(co_2 + 3U)) = selX_1.z;
-    float device* _S178 = kernelContext_25->restir_0+(co_2 + 4U);
+    *(kernelContext_27->restir_0+co_2) = (as_type<float>((selE_0)));
+    *(kernelContext_27->restir_0+(co_2 + 1U)) = selX_1.x;
+    *(kernelContext_27->restir_0+(co_2 + 2U)) = selX_1.y;
+    *(kernelContext_27->restir_0+(co_2 + 3U)) = selX_1.z;
+    float device* _S178 = kernelContext_27->restir_0+(co_2 + 4U);
 
-#line 843
+#line 851
     if((&r_4)->occ_0)
     {
 
-#line 843
+#line 851
         selPhat_1 = 0.0f;
 
-#line 843
+#line 851
     }
     else
     {
 
-#line 843
+#line 851
         selPhat_1 = (&r_4)->W_0;
 
-#line 843
+#line 851
     }
 
-#line 843
+#line 851
     *_S178 = selPhat_1;
-    *(kernelContext_25->restir_0+(co_2 + 5U)) = mTotal_2;
+    *(kernelContext_27->restir_0+(co_2 + 5U)) = mTotal_2;
     return r_4;
 }
 
 
-#line 260
-float3 envSample_0(float u1_0, float u2_0, float u3_0, float u4_0, float thread* pdf_0, float3 thread* le_0, KernelContext_0 thread* kernelContext_26)
+#line 265
+float3 envSample_0(float u1_0, float u2_0, float u3_0, float u4_0, float thread* pdf_0, float3 thread* le_0, KernelContext_0 thread* kernelContext_28)
 {
 
-#line 260
+#line 265
     uint lo_1;
 
-    uint w_9 = kernelContext_26->params_0[int(24)];
-    uint h_9 = kernelContext_26->params_0[int(25)];
+    uint w_9 = kernelContext_28->params_0[int(24)];
+    uint h_9 = kernelContext_28->params_0[int(25)];
 
     uint _S179 = h_9 - 1U;
 
-#line 265
+#line 270
     uint lo_2 = 0U;
 
-#line 265
+#line 270
     uint hi_1 = _S179;
     for(;;)
     {
 
-#line 266
+#line 271
         if(lo_2 < hi_1)
         {
         }
         else
         {
 
-#line 266
+#line 271
             break;
         }
         uint mid_1 = (lo_2 + hi_1) / 2U;
-        if(kernelContext_26->envMarginal_0[mid_1] >= u1_0)
+        if(kernelContext_28->envMarginal_0[mid_1] >= u1_0)
         {
 
-#line 269
+#line 274
             lo_1 = lo_2;
 
-#line 269
+#line 274
             hi_1 = mid_1;
 
-#line 269
+#line 274
         }
         else
         {
 
-#line 269
+#line 274
             lo_1 = mid_1 + 1U;
 
-#line 269
+#line 274
         }
 
-#line 269
+#line 274
         lo_2 = lo_1;
 
-#line 266
+#line 271
     }
 
-#line 276
+#line 281
     uint _S180 = w_9 - 1U;
 
-#line 276
+#line 281
     lo_1 = 0U;
 
-#line 276
+#line 281
     hi_1 = _S180;
     for(;;)
     {
 
-#line 277
+#line 282
         if(lo_1 < hi_1)
         {
         }
         else
         {
 
-#line 277
+#line 282
             break;
         }
         uint mid_2 = (lo_1 + hi_1) / 2U;
-        if(kernelContext_26->envCond_0[lo_2 * w_9 + mid_2] >= u2_0)
+        if(kernelContext_28->envCond_0[lo_2 * w_9 + mid_2] >= u2_0)
         {
 
-#line 280
+#line 285
             hi_1 = mid_2;
 
-#line 280
+#line 285
         }
         else
         {
 
-#line 280
+#line 285
             lo_1 = mid_2 + 1U;
 
-#line 280
+#line 285
         }
 
-#line 277
+#line 282
     }
 
-#line 286
+#line 291
     float phi_0 = ((float(lo_1) + u3_0) / float(w_9) - 0.5f) * 2.0f * 3.1415927410125732f;
     float theta_0 = (float(lo_2) + u4_0) / float(h_9) * 3.1415927410125732f;
     float st_0 = sin(theta_0);
 
-#line 288
-    float3 _S181 = envTexel_0(lo_1, lo_2, kernelContext_26);
+#line 293
+    float3 _S181 = envTexel_0(lo_1, lo_2, kernelContext_28);
     *le_0 = _S181;
     float _S182 = lum_0(_S181);
 
-#line 290
-    float _S183 = pf_0(26U, kernelContext_26);
+#line 295
+    float _S183 = pf_0(26U, kernelContext_28);
 
-#line 290
+#line 295
     *pdf_0 = _S182 * _S183;
     return float3(st_0 * sin(phi_0), cos(theta_0), - st_0 * cos(phi_0));
 }
@@ -3092,150 +3131,150 @@ float3 cosineLocal_0(float u1_2, float u2_2)
 }
 
 
-#line 956
-bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_3, uint pixel_7, KernelContext_0 thread* kernelContext_27)
+#line 964
+bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_3, uint pixel_7, KernelContext_0 thread* kernelContext_29)
 {
 
-#line 956
+#line 964
     uint k_4;
 
-#line 956
+#line 964
     int chan_1;
 
-#line 956
+#line 964
     bool alive_0;
 
-#line 956
+#line 964
     bool _S187;
 
-#line 956
+#line 964
     float dist_4;
 
-#line 956
+#line 964
     float vv_0;
 
-#line 956
+#line 964
     float us_0;
 
-#line 956
+#line 964
     float _S188;
 
-#line 956
+#line 964
     float _S189;
 
-#line 956
+#line 964
     float3 wi_6;
 
-#line 956
+#line 964
     float3 li_0;
 
-#line 956
+#line 964
     bool _S190;
 
-#line 956
+#line 964
     bool _S191;
 
-#line 956
+#line 964
     bool chooseEnv_0;
 
-#line 956
+#line 964
     bool _S192;
 
-#line 956
+#line 964
     bool track_0;
 
-#line 956
-    float _S193 = pf_0(20U, kernelContext_27);
+#line 964
+    float _S193 = pf_0(20U, kernelContext_29);
 
-#line 956
-    float _S194 = pf_0(21U, kernelContext_27);
+#line 964
+    float _S194 = pf_0(21U, kernelContext_29);
 
-#line 956
-    float _S195 = pf_0(22U, kernelContext_27);
+#line 964
+    float _S195 = pf_0(22U, kernelContext_29);
 
     float3 _S196 = float3(_S193, _S194, _S195);
-    bool _S197 = kernelContext_27->params_0[int(28)] != 0U;
-    uint _S198 = kernelContext_27->params_0[int(5)];
-    uint emitterCount_0 = kernelContext_27->params_0[int(23)];
-    bool hasEnv_0 = kernelContext_27->params_0[int(24)] > 0U;
+    bool _S197 = kernelContext_29->params_0[int(28)] != 0U;
+    uint _S198 = kernelContext_29->params_0[int(5)];
+    uint emitterCount_0 = kernelContext_29->params_0[int(23)];
+    bool hasEnv_0 = kernelContext_29->params_0[int(24)] > 0U;
 
-#line 962
+#line 970
     float _S199;
 
     if(hasEnv_0)
     {
 
-#line 964
+#line 972
         if(emitterCount_0 > 0U)
         {
 
-#line 964
+#line 972
             _S199 = 0.5f;
 
-#line 964
+#line 972
         }
         else
         {
 
-#line 964
+#line 972
             _S199 = 1.0f;
 
-#line 964
+#line 972
         }
 
-#line 964
+#line 972
     }
     else
     {
 
-#line 964
+#line 972
         _S199 = 0.0f;
 
-#line 964
+#line 972
     }
     thread Rng_0 rng_4;
     (&rng_4)->state_0 = st_1->rng_0;
 
-#line 966
+#line 974
     uint cls_4 = st_1->cls_0;
 
-#line 966
+#line 974
     float3 dir_2 = st_1->dir_0;
 
-#line 966
+#line 974
     float3 org_2 = st_1->org_0;
 
-#line 966
+#line 974
     int chan_2 = st_1->chan_0;
 
-#line 966
+#line 974
     uint once_0 = 0U;
 
-#line 966
+#line 974
     float3 thr_1 = st_1->thr_0;
 
-#line 973
+#line 981
     for(;;)
     {
 
-#line 973
+#line 981
         if(once_0 < 1U)
         {
         }
         else
         {
 
-#line 973
+#line 981
             chan_1 = chan_2;
 
-#line 973
+#line 981
             alive_0 = true;
 
-#line 973
+#line 981
             break;
         }
 
-#line 973
+#line 981
         float wB_0;
 
         if(!hq_0->hit_0)
@@ -3243,74 +3282,74 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
             if(restirCompiled_0)
             {
 
-#line 977
+#line 985
                 alive_0 = depth_3 == 0U;
 
-#line 977
+#line 985
             }
             else
             {
 
-#line 977
+#line 985
                 alive_0 = false;
 
-#line 977
+#line 985
             }
 
-#line 977
+#line 985
             if(alive_0)
             {
 
-#line 977
-                alive_0 = kernelContext_27->params_0[int(36)] != 0U;
+#line 985
+                alive_0 = kernelContext_29->params_0[int(36)] != 0U;
 
-#line 977
+#line 985
             }
             else
             {
 
-#line 977
+#line 985
                 alive_0 = false;
 
-#line 977
+#line 985
             }
 
-#line 977
+#line 985
             if(alive_0)
             {
 
-#line 977
-                restirClear_0(pixel_7, kernelContext_27);
+#line 985
+                restirClear_0(pixel_7, kernelContext_29);
 
-#line 977
+#line 985
             }
 
 
             if(depth_3 == 0U)
             {
 
-#line 980
-                alive_0 = kernelContext_27->params_0[int(42)] != 0U;
+#line 988
+                alive_0 = kernelContext_29->params_0[int(42)] != 0U;
 
-#line 980
+#line 988
             }
             else
             {
 
-#line 980
+#line 988
                 alive_0 = false;
 
-#line 980
+#line 988
             }
 
-#line 980
+#line 988
             if(alive_0)
             {
 
-#line 980
+#line 988
                 chan_1 = chan_2;
 
-#line 980
+#line 988
                 alive_0 = false;
 
 
@@ -3326,192 +3365,192 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
                     if(st_1->restir_1)
                     {
 
-#line 992
+#line 1000
                         alive_0 = depth_3 == 1U;
 
-#line 992
+#line 1000
                     }
                     else
                     {
 
-#line 992
+#line 1000
                         alive_0 = false;
 
-#line 992
+#line 1000
                     }
 
-#line 992
+#line 1000
                     if(alive_0)
                     {
 
-#line 992
+#line 1000
                         _S199 = 1.0f;
 
-#line 992
+#line 1000
                     }
 
-#line 992
-                    float _S200 = envPdf_0(dir_2, kernelContext_27);
+#line 1000
+                    float _S200 = envPdf_0(dir_2, kernelContext_29);
 
-#line 992
+#line 1000
                     float pl_0 = _S199 * _S200;
                     float den_0 = st_1->qPrev_0 * st_1->qPrev_0 + pl_0 * pl_0;
                     if(den_0 > 0.0f)
                     {
 
-#line 994
+#line 1002
                         _S199 = st_1->qPrev_0 * st_1->qPrev_0 / den_0;
 
-#line 994
+#line 1002
                     }
                     else
                     {
 
-#line 994
+#line 1002
                         _S199 = 1.0f;
 
-#line 994
+#line 1002
                     }
 
-#line 994
+#line 1002
                     wB_0 = _S199;
 
-#line 990
+#line 998
                 }
                 else
                 {
 
-#line 990
+#line 998
                     wB_0 = 1.0f;
 
-#line 990
+#line 998
                 }
 
-#line 990
-                float3 _S201 = envRadiance_0(dir_2, kernelContext_27);
+#line 998
+                float3 _S201 = envRadiance_0(dir_2, kernelContext_29);
 
-#line 996
+#line 1004
                 Parts_add_0(&st_1->parts_0, depth_3, cls_4, thr_1 * _S201 * float3(wB_0) );
 
-#line 987
+#line 995
             }
 
-#line 987
+#line 995
             chan_1 = chan_2;
 
-#line 987
+#line 995
             alive_0 = false;
 
-#line 998
+#line 1006
             break;
         }
 
-#line 998
+#line 1006
         uint _S202 = hq_0->inst_0;
 
 
-        uint inst_1 = hq_0->inst_0 * 16U;
+        uint inst_3 = hq_0->inst_0 * 16U;
 
-#line 1001
+#line 1009
         uint _S203 = hq_0->prim_0;
-        uint tri_0 = kernelContext_27->instances_0[inst_1 + 1U] + 3U * hq_0->prim_0;
-        uint vo_0 = kernelContext_27->instances_0[inst_1];
-        uint _S204 = inst_1 + 4U;
+        uint tri_0 = kernelContext_29->instances_0[inst_3 + 1U] + 3U * hq_0->prim_0;
+        uint vo_0 = kernelContext_29->instances_0[inst_3];
+        uint _S204 = inst_3 + 4U;
 
-#line 1004
-        float3 _S205 = vertexPos_0(kernelContext_27->indices_0[tri_0] + vo_0, kernelContext_27);
+#line 1012
+        float3 _S205 = vertexPos_0(kernelContext_29->indices_0[tri_0] + vo_0, kernelContext_29);
 
-#line 1004
-        float3 _S206 = transformPoint_0(_S204, _S205, kernelContext_27);
+#line 1012
+        float3 _S206 = transformPoint_0(_S204, _S205, kernelContext_29);
         uint _S207 = tri_0 + 1U;
 
-#line 1005
-        float3 _S208 = vertexPos_0(kernelContext_27->indices_0[_S207] + vo_0, kernelContext_27);
+#line 1013
+        float3 _S208 = vertexPos_0(kernelContext_29->indices_0[_S207] + vo_0, kernelContext_29);
 
-#line 1005
-        float3 _S209 = transformPoint_0(_S204, _S208, kernelContext_27);
+#line 1013
+        float3 _S209 = transformPoint_0(_S204, _S208, kernelContext_29);
         uint _S210 = tri_0 + 2U;
 
-#line 1006
-        float3 _S211 = vertexPos_0(kernelContext_27->indices_0[_S210] + vo_0, kernelContext_27);
+#line 1014
+        float3 _S211 = vertexPos_0(kernelContext_29->indices_0[_S210] + vo_0, kernelContext_29);
 
-#line 1006
-        float3 _S212 = transformPoint_0(_S204, _S211, kernelContext_27);
+#line 1014
+        float3 _S212 = transformPoint_0(_S204, _S211, kernelContext_29);
 
         float3 _S213 = _S209 - _S206;
 
-#line 1008
+#line 1016
         float3 _S214 = _S212 - _S206;
 
-#line 1008
+#line 1016
         float3 _S215 = cross(_S213, _S214);
 
-#line 1008
+#line 1016
         float3 nOut_0 = normalize(_S215);
         float3 wo_1 = - dir_2;
         bool outside_1 = (dot(nOut_0, wo_1)) > 0.0f;
 
-#line 1010
+#line 1018
         float3 ng_0;
         if(outside_1)
         {
 
-#line 1011
+#line 1019
             ng_0 = nOut_0;
 
-#line 1011
+#line 1019
         }
         else
         {
 
-#line 1011
+#line 1019
             ng_0 = - nOut_0;
 
-#line 1011
+#line 1019
         }
 
-#line 1011
+#line 1019
         float _S216 = hq_0->t_0;
 
         st_1->pathLen_0 = st_1->pathLen_0 + hq_0->t_0;
         float3 hit_1 = org_2 + dir_2 * float3(_S216) ;
 
 
-        uint _S217 = inst_1 + 2U;
+        uint _S217 = inst_3 + 2U;
 
-#line 1017
-        float opacity_1 = kernelContext_27->materials_0[kernelContext_27->instances_0[_S217] * 23U + 22U];
+#line 1025
+        float opacity_1 = kernelContext_29->materials_0[kernelContext_29->instances_0[_S217] * 23U + 22U];
         if(opacity_1 < 1.0f)
         {
 
-#line 1018
+#line 1026
             float _S218 = Rng_next_0(&rng_4);
 
-#line 1018
+#line 1026
             alive_0 = _S218 >= opacity_1;
 
-#line 1018
+#line 1026
         }
         else
         {
 
-#line 1018
+#line 1026
             alive_0 = false;
 
-#line 1018
+#line 1026
         }
 
-#line 1018
+#line 1026
         if(alive_0)
         {
 
-#line 1018
+#line 1026
             org_2 = hit_1 + dir_2 * float3(9.9999997473787516e-05f) ;
 
-#line 1018
+#line 1026
             chan_1 = chan_2;
 
-#line 1018
+#line 1026
             alive_0 = true;
 
 
@@ -3521,61 +3560,61 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
         float3 p_6 = hit_1 + ng_0 * float3(9.9999997473787516e-05f) ;
         bool _S219 = depth_3 == 1U;
 
-#line 1025
+#line 1033
         if(_S219)
         {
 
-#line 1025
+#line 1033
             _S187 = st_1->gi_0;
 
-#line 1025
+#line 1033
         }
         else
         {
 
-#line 1025
+#line 1033
             _S187 = false;
 
-#line 1025
+#line 1033
         }
 
-#line 1025
+#line 1033
         if(_S187)
         {
 
-            uint _S220 = restirBase_0(pixel_7, kernelContext_27->params_0[int(6)] & 1U);
+            uint _S220 = restirBase_0(pixel_7, kernelContext_29->params_0[int(6)] & 1U);
 
-#line 1028
+#line 1036
             k_4 = 0U;
             for(;;)
             {
 
-#line 1029
+#line 1037
                 if(k_4 < 3U)
                 {
                 }
                 else
                 {
 
-#line 1029
+#line 1037
                     break;
                 }
-                *(kernelContext_27->restir_0+(_S220 + 16U + k_4)) = hit_1[k_4];
-                *(kernelContext_27->restir_0+(_S220 + 19U + k_4)) = ng_0[k_4];
+                *(kernelContext_29->restir_0+(_S220 + 16U + k_4)) = hit_1[k_4];
+                *(kernelContext_29->restir_0+(_S220 + 19U + k_4)) = ng_0[k_4];
 
-#line 1029
+#line 1037
                 k_4 = k_4 + 1U;
 
-#line 1029
+#line 1037
             }
 
-#line 1034
-            *(kernelContext_27->restir_0+(restirScratch_0(pixel_7) + 22U)) = (as_type<float>((1U)));
+#line 1042
+            *(kernelContext_29->restir_0+(restirScratch_0(pixel_7) + 22U)) = (as_type<float>((1U)));
 
-#line 1025
+#line 1033
         }
 
-#line 1040
+#line 1048
         float3 e3_0 = hit_1 - _S206;
         float d11_0 = dot(_S213, _S213);
         float d12_0 = dot(_S213, _S214);
@@ -3583,10 +3622,10 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
         float _S221 = max(d11_0 * d22_0 - d12_0 * d12_0, 9.99999968265522539e-21f);
         float _S222 = dot(e3_0, _S213);
 
-#line 1045
+#line 1053
         float _S223 = dot(e3_0, _S214);
 
-#line 1045
+#line 1053
         float b1_0 = (d22_0 * _S222 - d12_0 * _S223) / _S221;
         float b2_0 = (d11_0 * _S223 - d12_0 * _S222) / _S221;
 
@@ -3594,205 +3633,205 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
 
         float _S224 = 1.0f - b1_0 - b2_0;
 
-#line 1050
-        float3 _S225 = vertexNormal_0(kernelContext_27->indices_0[tri_0] + vo_0, kernelContext_27);
+#line 1058
+        float3 _S225 = vertexNormal_0(kernelContext_29->indices_0[tri_0] + vo_0, kernelContext_29);
 
-#line 1050
+#line 1058
         float3 _S226 = float3(_S224)  * _S225;
 
-#line 1050
-        float3 _S227 = vertexNormal_0(kernelContext_27->indices_0[_S207] + vo_0, kernelContext_27);
+#line 1058
+        float3 _S227 = vertexNormal_0(kernelContext_29->indices_0[_S207] + vo_0, kernelContext_29);
 
-#line 1050
+#line 1058
         float3 _S228 = _S226 + float3(b1_0)  * _S227;
 
-#line 1050
-        float3 _S229 = vertexNormal_0(kernelContext_27->indices_0[_S210] + vo_0, kernelContext_27);
+#line 1058
+        float3 _S229 = vertexNormal_0(kernelContext_29->indices_0[_S210] + vo_0, kernelContext_29);
 
-#line 1050
+#line 1058
         float3 nsObj_0 = _S228 + float3(b2_0)  * _S229;
 
-#line 1050
+#line 1058
         float3 ns_0;
 
         if((dot(nsObj_0, nsObj_0)) > 9.999999960041972e-13f)
         {
 
-#line 1052
-            float3 _S230 = transformNormal_0(_S204, nsObj_0, kernelContext_27);
+#line 1060
+            float3 _S230 = transformNormal_0(_S204, nsObj_0, kernelContext_29);
 
             float3 ns_1 = normalize(_S230);
             if((dot(ns_1, nOut_0)) < 0.0f)
             {
 
-#line 1055
+#line 1063
                 ns_0 = - ns_1;
 
-#line 1055
+#line 1063
             }
             else
             {
 
-#line 1055
+#line 1063
                 ns_0 = ns_1;
 
-#line 1055
+#line 1063
             }
 
-#line 1052
+#line 1060
         }
         else
         {
 
-#line 1052
+#line 1060
             ns_0 = nOut_0;
 
-#line 1052
+#line 1060
         }
 
-#line 1052
+#line 1060
         float3 _S231;
 
-#line 1058
+#line 1066
         if(outside_1)
         {
 
-#line 1058
+#line 1066
             _S231 = ns_0;
 
-#line 1058
+#line 1066
         }
         else
         {
 
-#line 1058
+#line 1066
             _S231 = - ns_0;
 
-#line 1058
+#line 1066
         }
 
-        uint mi_0 = kernelContext_27->instances_0[_S217] * 23U;
-        float3 albedo_1 = float3(kernelContext_27->materials_0[mi_0], kernelContext_27->materials_0[mi_0 + 1U], kernelContext_27->materials_0[mi_0 + 2U]);
+        uint mi_0 = kernelContext_29->instances_0[_S217] * 23U;
+        float3 albedo_1 = float3(kernelContext_29->materials_0[mi_0], kernelContext_29->materials_0[mi_0 + 1U], kernelContext_29->materials_0[mi_0 + 2U]);
 
-        uint texBase_0 = uint(kernelContext_27->materials_0[mi_0 + 10U]);
-        uint texMR_0 = uint(kernelContext_27->materials_0[mi_0 + 11U]);
-        uint texEm_0 = uint(kernelContext_27->materials_0[mi_0 + 12U]);
-        uint texNm_0 = uint(kernelContext_27->materials_0[mi_0 + 13U]);
+        uint texBase_0 = uint(kernelContext_29->materials_0[mi_0 + 10U]);
+        uint texMR_0 = uint(kernelContext_29->materials_0[mi_0 + 11U]);
+        uint texEm_0 = uint(kernelContext_29->materials_0[mi_0 + 12U]);
+        uint texNm_0 = uint(kernelContext_29->materials_0[mi_0 + 13U]);
         float2 _S232 = float2(1.0f) ;
         float3 _S233 = float3(1.0f) ;
 
-#line 1068
+#line 1076
         float3 albedo_2;
 
-#line 1068
+#line 1076
         float3 texEmission_0;
 
-#line 1068
+#line 1076
         float3 n_7;
 
-#line 1068
+#line 1076
         float3 n_8;
 
-#line 1068
+#line 1076
         bool _S234;
 
-#line 1068
+#line 1076
         float2 texRM_0;
         if((texBase_0 + texMR_0 + texEm_0 + texNm_0) > 0U)
         {
-            float2 uv0_0 = float2(kernelContext_27->uvs_0[2U * (kernelContext_27->indices_0[tri_0] + vo_0)], kernelContext_27->uvs_0[2U * (kernelContext_27->indices_0[tri_0] + vo_0) + 1U]);
+            float2 uv0_0 = float2(kernelContext_29->uvs_0[2U * (kernelContext_29->indices_0[tri_0] + vo_0)], kernelContext_29->uvs_0[2U * (kernelContext_29->indices_0[tri_0] + vo_0) + 1U]);
 
 
-            float2 _S235 = float2(kernelContext_27->uvs_0[2U * (kernelContext_27->indices_0[_S207] + vo_0)], kernelContext_27->uvs_0[2U * (kernelContext_27->indices_0[_S207] + vo_0) + 1U]) - uv0_0;
+            float2 _S235 = float2(kernelContext_29->uvs_0[2U * (kernelContext_29->indices_0[_S207] + vo_0)], kernelContext_29->uvs_0[2U * (kernelContext_29->indices_0[_S207] + vo_0) + 1U]) - uv0_0;
 
-#line 1074
-            float2 _S236 = float2(kernelContext_27->uvs_0[2U * (kernelContext_27->indices_0[_S210] + vo_0)], kernelContext_27->uvs_0[2U * (kernelContext_27->indices_0[_S210] + vo_0) + 1U]) - uv0_0;
+#line 1082
+            float2 _S236 = float2(kernelContext_29->uvs_0[2U * (kernelContext_29->indices_0[_S210] + vo_0)], kernelContext_29->uvs_0[2U * (kernelContext_29->indices_0[_S210] + vo_0) + 1U]) - uv0_0;
 
-#line 1074
+#line 1082
             float2 uv_2 = uv0_0 + float2(b1_0)  * _S235 + float2(b2_0)  * _S236;
 
 
             float _S237 = _S235.x;
 
-#line 1077
+#line 1085
             float _S238 = _S236.y;
 
-#line 1077
+#line 1085
             float _S239 = _S237 * _S238;
 
-#line 1077
+#line 1085
             float _S240 = _S235.y;
 
-#line 1077
+#line 1085
             float _S241 = _S236.x;
 
-#line 1077
+#line 1085
             float uvPerWorld_0 = sqrt(abs(_S239 - _S240 * _S241) / max(length(_S215), 9.99999968265522539e-21f));
             float _S242 = st_1->pathLen_0;
 
-#line 1078
-            float _S243 = pf_0(27U, kernelContext_27);
+#line 1086
+            float _S243 = pf_0(27U, kernelContext_29);
 
-#line 1078
+#line 1086
             float footprint_1 = _S242 * _S243 / max(abs(dot(nOut_0, dir_2)), 0.10000000149011612f) * uvPerWorld_0;
             if(texBase_0 > 0U)
             {
 
-#line 1079
-                float3 _S244 = sampleTexture_0(texBase_0 - 1U, uv_2, footprint_1, kernelContext_27);
+#line 1087
+                float3 _S244 = sampleTexture_0(texBase_0 - 1U, uv_2, footprint_1, kernelContext_29);
 
-#line 1079
+#line 1087
                 albedo_2 = albedo_1 * _S244;
 
-#line 1079
+#line 1087
             }
             else
             {
 
-#line 1079
+#line 1087
                 albedo_2 = albedo_1;
 
-#line 1079
+#line 1087
             }
 
             if(texMR_0 > 0U)
             {
 
-#line 1081
-                float3 _S245 = sampleTexture_0(texMR_0 - 1U, uv_2, footprint_1, kernelContext_27);
+#line 1089
+                float3 _S245 = sampleTexture_0(texMR_0 - 1U, uv_2, footprint_1, kernelContext_29);
 
-#line 1081
+#line 1089
                 texRM_0 = _S245.yz;
 
-#line 1081
+#line 1089
             }
             else
             {
 
-#line 1081
+#line 1089
                 texRM_0 = _S232;
 
-#line 1081
+#line 1089
             }
 
             if(texEm_0 > 0U)
             {
 
-#line 1083
-                float3 _S246 = sampleTexture_0(texEm_0 - 1U, uv_2, footprint_1, kernelContext_27);
+#line 1091
+                float3 _S246 = sampleTexture_0(texEm_0 - 1U, uv_2, footprint_1, kernelContext_29);
 
-#line 1083
+#line 1091
                 texEmission_0 = _S246;
 
-#line 1083
+#line 1091
             }
             else
             {
 
-#line 1083
+#line 1091
                 texEmission_0 = _S233;
 
-#line 1083
+#line 1091
             }
 
             if(texNm_0 > 0U)
@@ -3800,7 +3839,7 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
 
                 float det_0 = _S239 - _S241 * _S240;
 
-#line 1088
+#line 1096
                 float3 _S247 = float3(det_0) ;
                 float3 dPdu_0 = (_S213 * float3(_S238)  - _S214 * float3(_S240) ) / _S247;
                 float3 dPdv_0 = (_S214 * float3(_S237)  - _S213 * float3(_S241) ) / _S247;
@@ -3808,21 +3847,21 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
                 if((abs(det_0)) > 9.99999968265522539e-21f)
                 {
 
-#line 1092
+#line 1100
                     _S234 = (dot(tg_0, tg_0)) > 9.99999968265522539e-21f;
 
-#line 1092
+#line 1100
                 }
                 else
                 {
 
-#line 1092
+#line 1100
                     _S234 = false;
 
-#line 1092
+#line 1100
                 }
 
-#line 1092
+#line 1100
                 if(_S234)
                 {
                     float3 tg_1 = normalize(tg_0);
@@ -3830,475 +3869,523 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
                     if((dot(bt_0, dPdv_0)) > 0.0f)
                     {
 
-#line 1096
+#line 1104
                         n_7 = - bt_0;
 
-#line 1096
+#line 1104
                     }
                     else
                     {
 
-#line 1096
+#line 1104
                         n_7 = bt_0;
 
-#line 1096
+#line 1104
                     }
 
-#line 1096
-                    float3 _S248 = sampleTexture_0(texNm_0 - 1U, uv_2, footprint_1, kernelContext_27);
+#line 1104
+                    float3 _S248 = sampleTexture_0(texNm_0 - 1U, uv_2, footprint_1, kernelContext_29);
 
                     float3 nt_0 = _S248 * float3(2.0f)  - float3(1.0f) ;
                     uint _S249 = mi_0 + 14U;
 
-#line 1099
-                    float3 ns_2 = normalize(float3((nt_0.x * kernelContext_27->materials_0[_S249]))  * tg_1 + float3((nt_0.y * kernelContext_27->materials_0[_S249]))  * n_7 + float3(nt_0.z)  * ns_0);
+#line 1107
+                    float3 ns_2 = normalize(float3((nt_0.x * kernelContext_29->materials_0[_S249]))  * tg_1 + float3((nt_0.y * kernelContext_29->materials_0[_S249]))  * n_7 + float3(nt_0.z)  * ns_0);
                     if(outside_1)
                     {
 
-#line 1100
+#line 1108
                         n_8 = ns_2;
 
-#line 1100
+#line 1108
                     }
                     else
                     {
 
-#line 1100
+#line 1108
                         n_8 = - ns_2;
 
-#line 1100
+#line 1108
                     }
 
-#line 1100
+#line 1108
                     n_7 = n_8;
 
-#line 1092
+#line 1100
                 }
                 else
                 {
 
-#line 1092
+#line 1100
                     n_7 = _S231;
 
-#line 1092
+#line 1100
                 }
 
-#line 1085
+#line 1093
             }
             else
             {
 
-#line 1085
+#line 1093
                 n_7 = _S231;
 
-#line 1085
+#line 1093
             }
 
-#line 1069
+#line 1077
         }
         else
         {
 
-#line 1069
+#line 1077
             n_7 = _S231;
 
-#line 1069
+#line 1077
             texEmission_0 = _S233;
 
-#line 1069
+#line 1077
             texRM_0 = _S232;
 
-#line 1069
+#line 1077
             albedo_2 = albedo_1;
 
-#line 1069
+#line 1077
         }
 
-#line 1106
+#line 1114
         float woN_0 = dot(n_7, wo_1);
         if(woN_0 < 0.05000000074505806f)
         {
 
-#line 1107
+#line 1115
             n_8 = normalize(n_7 + wo_1 * float3((0.05000000074505806f - woN_0)) );
 
-#line 1107
+#line 1115
         }
         else
         {
 
-#line 1107
+#line 1115
             n_8 = n_7;
 
-#line 1107
+#line 1115
         }
 
 
-        float3 le_1 = float3(kernelContext_27->materials_0[mi_0 + 3U], kernelContext_27->materials_0[mi_0 + 4U], kernelContext_27->materials_0[mi_0 + 5U]) * texEmission_0;
+        float3 _S250 = float3(kernelContext_29->materials_0[mi_0 + 3U], kernelContext_29->materials_0[mi_0 + 4U], kernelContext_29->materials_0[mi_0 + 5U]) * texEmission_0;
 
-#line 1110
-        bool _S250;
+        if((st_1->prevInst_0) != 0U)
+        {
+
+#line 1120
+            uint _S251 = emitMask_0(_S202, kernelContext_29);
+
+#line 1120
+            uint _S252 = recvMask_0(st_1->prevInst_0 - 1U, kernelContext_29);
+
+#line 1120
+            _S234 = (_S251 & _S252) == 0U;
+
+#line 1120
+        }
+        else
+        {
+
+#line 1120
+            _S234 = false;
+
+#line 1120
+        }
+
+#line 1120
+        float3 le_1;
+
+#line 1120
+        if(_S234)
+        {
+
+#line 1120
+            le_1 = float3(0.0f) ;
+
+#line 1120
+        }
+        else
+        {
+
+#line 1120
+            le_1 = _S250;
+
+#line 1120
+        }
+
+#line 1120
+        bool _S253;
+
+#line 1120
+        bool _S254;
+
         if(any(le_1 > (float3(0.0f) )))
         {
 
-            uint eb_0 = kernelContext_27->instances_0[inst_1 + 3U];
+            uint eb_0 = kernelContext_29->instances_0[inst_3 + 3U];
             if(st_1->misPrev_0)
             {
 
-#line 1115
-                _S234 = eb_0 != 0U;
+#line 1126
+                _S253 = eb_0 != 0U;
 
-#line 1115
+#line 1126
             }
             else
             {
 
-#line 1115
-                _S234 = false;
+#line 1126
+                _S253 = false;
 
-#line 1115
+#line 1126
             }
 
-#line 1115
-            if(_S234)
+#line 1126
+            if(_S253)
             {
                 uint e_2 = (eb_0 - 1U + _S203) * 16U;
-                float _S251 = max(abs(dot(nOut_0, dir_2)), 9.9999997473787516e-05f);
+                float _S255 = max(abs(dot(nOut_0, dir_2)), 9.9999997473787516e-05f);
                 if(st_1->restir_1)
                 {
 
-#line 1119
-                    _S250 = _S219;
+#line 1130
+                    _S254 = _S219;
 
-#line 1119
+#line 1130
                 }
                 else
                 {
 
-#line 1119
-                    _S250 = false;
+#line 1130
+                    _S254 = false;
 
-#line 1119
+#line 1130
                 }
 
-#line 1119
-                if(_S250)
+#line 1130
+                if(_S254)
                 {
 
-#line 1119
+#line 1130
                     wB_0 = 1.0f;
 
-#line 1119
+#line 1130
                 }
                 else
                 {
 
-#line 1119
+#line 1130
                     wB_0 = 1.0f - _S199;
 
-#line 1119
+#line 1130
                 }
 
-#line 1119
-                float pl_1 = wB_0 * kernelContext_27->emitters_0[e_2 + 13U] * _S216 * _S216 / (kernelContext_27->emitters_0[e_2 + 12U] * _S251);
+#line 1130
+                float pl_1 = wB_0 * kernelContext_29->emitters_0[e_2 + 13U] * _S216 * _S216 / (kernelContext_29->emitters_0[e_2 + 12U] * _S255);
 
-#line 1119
+#line 1130
                 wB_0 = st_1->qPrev_0 * st_1->qPrev_0 / (st_1->qPrev_0 * st_1->qPrev_0 + pl_1 * pl_1);
 
-#line 1115
+#line 1126
             }
             else
             {
 
-#line 1115
+#line 1126
                 wB_0 = 1.0f;
 
-#line 1115
+#line 1126
             }
 
-#line 1122
-            float3 _S252 = thr_1 * le_1 * float3(wB_0) ;
+#line 1133
+            float3 _S256 = thr_1 * le_1 * float3(wB_0) ;
 
-#line 1122
-            Parts_add_0(&st_1->parts_0, depth_3, cls_4, _S252);
+#line 1133
+            Parts_add_0(&st_1->parts_0, depth_3, cls_4, _S256);
             if(_S219)
             {
 
-#line 1123
-                _S250 = st_1->gi_0;
+#line 1134
+                _S254 = st_1->gi_0;
 
-#line 1123
+#line 1134
             }
             else
             {
 
-#line 1123
-                _S250 = false;
+#line 1134
+                _S254 = false;
 
-#line 1123
+#line 1134
             }
 
-#line 1123
-            if(_S250)
+#line 1134
+            if(_S254)
             {
 
 
-                uint _S253 = restirScratch_0(pixel_7) + 18U;
+                uint _S257 = restirScratch_0(pixel_7) + 18U;
 
-#line 1127
+#line 1138
                 k_4 = 0U;
                 for(;;)
                 {
 
-#line 1128
+#line 1139
                     if(k_4 < 3U)
                     {
                     }
                     else
                     {
 
-#line 1128
+#line 1139
                         break;
                     }
 
-#line 1129
-                    float device* _S254 = kernelContext_27->restir_0+(_S253 + k_4);
+#line 1140
+                    float device* _S258 = kernelContext_29->restir_0+(_S257 + k_4);
 
-#line 1129
-                    *_S254 = *_S254 + _S252[k_4];
+#line 1140
+                    *_S258 = *_S258 + _S256[k_4];
 
-#line 1128
+#line 1139
                     k_4 = k_4 + 1U;
 
-#line 1128
+#line 1139
                 }
 
-#line 1123
+#line 1134
             }
 
-#line 1111
+#line 1122
         }
 
-#line 1132
-        float metallic_1 = kernelContext_27->materials_0[mi_0 + 6U] * texRM_0.y;
-        float rough_1 = kernelContext_27->materials_0[mi_0 + 7U] * texRM_0.x;
-        float transmission_2 = kernelContext_27->materials_0[mi_0 + 8U];
-        float ior_2 = kernelContext_27->materials_0[mi_0 + 9U];
-        float dispersion_0 = kernelContext_27->materials_0[mi_0 + 21U];
+#line 1143
+        float metallic_1 = kernelContext_29->materials_0[mi_0 + 6U] * texRM_0.y;
+        float rough_1 = kernelContext_29->materials_0[mi_0 + 7U] * texRM_0.x;
+        float transmission_2 = kernelContext_29->materials_0[mi_0 + 8U];
+        float ior_2 = kernelContext_29->materials_0[mi_0 + 9U];
+        float dispersion_0 = kernelContext_29->materials_0[mi_0 + 21U];
         if(dispersion_0 > 0.0f)
         {
 
-#line 1137
-            _S234 = transmission_2 > 0.0f;
+#line 1148
+            _S253 = transmission_2 > 0.0f;
 
-#line 1137
+#line 1148
         }
         else
         {
 
-#line 1137
-            _S234 = false;
+#line 1148
+            _S253 = false;
 
-#line 1137
+#line 1148
         }
 
-#line 1137
+#line 1148
         float eta_2;
 
-#line 1137
-        float _S255;
+#line 1148
+        float _S259;
 
-#line 1137
+#line 1148
         float3 thr_2;
 
-#line 1137
-        if(_S234)
+#line 1148
+        if(_S253)
         {
 
 
             if(chan_2 < int(0))
             {
-                float _S256 = Rng_next_0(&rng_4);
+                float _S260 = Rng_next_0(&rng_4);
 
-#line 1143
-                int _S257 = min(int(_S256 * 3.0f), int(2));
-                if(_S257 == int(0))
+#line 1154
+                int _S261 = min(int(_S260 * 3.0f), int(2));
+                if(_S261 == int(0))
                 {
 
-#line 1144
+#line 1155
                     wB_0 = 1.0f;
 
-#line 1144
+#line 1155
                 }
                 else
                 {
 
-#line 1144
+#line 1155
                     wB_0 = 0.0f;
 
-#line 1144
+#line 1155
                 }
 
-#line 1144
-                if(_S257 == int(1))
+#line 1155
+                if(_S261 == int(1))
                 {
 
-#line 1144
+#line 1155
                     eta_2 = 1.0f;
 
-#line 1144
+#line 1155
                 }
                 else
                 {
 
-#line 1144
+#line 1155
                     eta_2 = 0.0f;
 
-#line 1144
+#line 1155
                 }
 
-#line 1144
-                if(_S257 == int(2))
+#line 1155
+                if(_S261 == int(2))
                 {
 
-#line 1144
-                    _S255 = 1.0f;
+#line 1155
+                    _S259 = 1.0f;
 
-#line 1144
+#line 1155
                 }
                 else
                 {
 
-#line 1144
-                    _S255 = 0.0f;
+#line 1155
+                    _S259 = 0.0f;
 
-#line 1144
+#line 1155
                 }
 
-#line 1144
-                float3 thr_3 = thr_1 * (float3(3.0f)  * float3(wB_0, eta_2, _S255));
+#line 1155
+                float3 thr_3 = thr_1 * (float3(3.0f)  * float3(wB_0, eta_2, _S259));
 
-#line 1144
-                chan_1 = _S257;
+#line 1155
+                chan_1 = _S261;
 
-#line 1144
+#line 1155
                 thr_2 = thr_3;
 
-#line 1141
+#line 1152
             }
             else
             {
 
-#line 1141
+#line 1152
                 chan_1 = chan_2;
 
-#line 1141
+#line 1152
                 thr_2 = thr_1;
 
-#line 1141
+#line 1152
             }
 
-#line 1141
+#line 1152
             wB_0 = max(ior_2 + float(chan_1 - int(1)) * (ior_2 - 1.0f) * 0.02500000037252903f * dispersion_0, 1.0f);
 
-#line 1137
+#line 1148
         }
         else
         {
 
-#line 1137
+#line 1148
             wB_0 = ior_2;
 
-#line 1137
+#line 1148
             chan_1 = chan_2;
 
-#line 1137
+#line 1148
             thr_2 = thr_1;
 
-#line 1137
+#line 1148
         }
 
-#line 1150
+#line 1161
         if(_S219)
         {
 
-#line 1150
-            _S250 = st_1->gi_0;
+#line 1161
+            _S254 = st_1->gi_0;
 
-#line 1150
+#line 1161
         }
         else
         {
 
-#line 1150
-            _S250 = false;
+#line 1161
+            _S254 = false;
 
-#line 1150
+#line 1161
         }
 
-#line 1150
-        bool _S258;
+#line 1161
+        bool _S262;
 
-#line 1150
-        if(_S250)
+#line 1161
+        if(_S254)
         {
 
-#line 1150
-            _S258 = transmission_2 > 0.0f;
+#line 1161
+            _S262 = transmission_2 > 0.0f;
 
-#line 1150
+#line 1161
         }
         else
         {
 
-#line 1150
-            _S258 = false;
+#line 1161
+            _S262 = false;
 
-#line 1150
+#line 1161
         }
 
-#line 1150
-        if(_S258)
+#line 1161
+        if(_S262)
         {
 
-#line 1151
-            *(kernelContext_27->restir_0+(restirScratch_0(pixel_7) + 22U)) = (as_type<float>((0U)));
+#line 1162
+            *(kernelContext_29->restir_0+(restirScratch_0(pixel_7) + 22U)) = (as_type<float>((0U)));
 
-#line 1150
+#line 1161
         }
 
-        float _S259 = max(rough_1 * rough_1, 0.0010000000474974513f);
+        float _S263 = max(rough_1 * rough_1, 0.0010000000474974513f);
         if(outside_1)
         {
 
-#line 1153
+#line 1164
             eta_2 = wB_0;
 
-#line 1153
+#line 1164
         }
         else
         {
 
-#line 1153
+#line 1164
             eta_2 = 1.0f / wB_0;
 
-#line 1153
+#line 1164
         }
 
         thread float3 T_2;
 
-#line 1155
+#line 1166
         thread float3 B_2;
         basis_0(n_8, &T_2, &B_2);
-        float _S260 = max(dot(wo_1, n_8), 9.9999997473787516e-05f);
+        float _S264 = max(dot(wo_1, n_8), 9.9999997473787516e-05f);
 
-#line 1157
-        float3 woL_6 = float3(dot(wo_1, T_2), dot(wo_1, B_2), _S260);
-        float fSel_1 = fresnelDielectric_0(_S260, wB_0);
+#line 1168
+        float3 woL_6 = float3(dot(wo_1, T_2), dot(wo_1, B_2), _S264);
+        float fSel_1 = fresnelDielectric_0(_S264, wB_0);
         thread Surface_0 surf_3;
         (&surf_3)->albedo_0 = albedo_2;
         (&surf_3)->metallic_0 = metallic_1;
-        (&surf_3)->alpha_3 = _S259;
+        (&surf_3)->alpha_3 = _S263;
         (&surf_3)->transmission_1 = transmission_2;
         (&surf_3)->ior_1 = wB_0;
         (&surf_3)->eta_1 = eta_2;
@@ -4307,115 +4394,13 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
 
         (&surf_3)->tComp_0 = 1.0f;
 
-#line 1169
-        bool _S261;
-        if(kernelContext_27->params_0[int(29)] != 0U)
-        {
-
-#line 1170
-            _S261 = transmission_2 > 0.0f;
-
-#line 1170
-        }
-        else
-        {
-
-#line 1170
-            _S261 = false;
-
-#line 1170
-        }
-
-#line 1170
-        bool _S262;
-
-#line 1170
-        if(_S261)
-        {
-
-#line 1170
-            _S262 = rough_1 > 0.0f;
-
-#line 1170
-        }
-        else
-        {
-
-#line 1170
-            _S262 = false;
-
-#line 1170
-        }
-
-#line 1170
-        if(_S262)
-        {
-
-#line 1171
-            (&surf_3)->tComp_0 = 1.0f / max(dielectricAlbedo_0(_S260, rough_1, wB_0, outside_1), 0.10000000149011612f);
-
-#line 1170
-        }
-
-
-        if(outside_1)
-        {
-
-#line 1173
-            _S255 = kernelContext_27->materials_0[mi_0 + 15U];
-
-#line 1173
-        }
-        else
-        {
-
-#line 1173
-            _S255 = 0.0f;
-
-#line 1173
-        }
-
-#line 1173
-        (&surf_3)->coat_0 = _S255;
-        uint _S263 = mi_0 + 16U;
-
-#line 1174
-        (&surf_3)->coatAlpha_0 = max(kernelContext_27->materials_0[_S263] * kernelContext_27->materials_0[_S263], 0.0010000000474974513f);
-        float coatF_0 = fresnelDielectric_0(_S260, 1.5f);
-        (&surf_3)->coatP_0 = _S255 * coatF_0;
-
-#line 1176
-        float3 _S264;
-        if(outside_1)
-        {
-
-#line 1177
-            _S264 = float3(kernelContext_27->materials_0[mi_0 + 18U], kernelContext_27->materials_0[mi_0 + 19U], kernelContext_27->materials_0[mi_0 + 20U]);
-
-#line 1177
-        }
-        else
-        {
-
-#line 1177
-            _S264 = float3(0.0f) ;
-
-#line 1177
-        }
-
-#line 1177
-        (&surf_3)->sheenColor_0 = _S264;
-        float _S265 = max(_S264.x, max(_S264.y, _S264.z));
-        float _S266 = max(kernelContext_27->materials_0[mi_0 + 17U], 0.070000000298023224f);
-        (&surf_3)->sheenAlpha_0 = _S266 * _S266;
-
 #line 1180
-        float _S267;
-        if(_S265 > 0.0f)
+        bool _S265;
+        if(kernelContext_29->params_0[int(29)] != 0U)
         {
 
 #line 1181
-            _S267 = _S265 * sheenAlbedo_0(_S260, _S266);
+            _S265 = transmission_2 > 0.0f;
 
 #line 1181
         }
@@ -4423,15 +4408,117 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
         {
 
 #line 1181
-            _S267 = 0.0f;
+            _S265 = false;
 
 #line 1181
         }
 
 #line 1181
-        (&surf_3)->sheenP_0 = _S267;
+        bool _S266;
 
 #line 1181
+        if(_S265)
+        {
+
+#line 1181
+            _S266 = rough_1 > 0.0f;
+
+#line 1181
+        }
+        else
+        {
+
+#line 1181
+            _S266 = false;
+
+#line 1181
+        }
+
+#line 1181
+        if(_S266)
+        {
+
+#line 1182
+            (&surf_3)->tComp_0 = 1.0f / max(dielectricAlbedo_0(_S264, rough_1, wB_0, outside_1), 0.10000000149011612f);
+
+#line 1181
+        }
+
+
+        if(outside_1)
+        {
+
+#line 1184
+            _S259 = kernelContext_29->materials_0[mi_0 + 15U];
+
+#line 1184
+        }
+        else
+        {
+
+#line 1184
+            _S259 = 0.0f;
+
+#line 1184
+        }
+
+#line 1184
+        (&surf_3)->coat_0 = _S259;
+        uint _S267 = mi_0 + 16U;
+
+#line 1185
+        (&surf_3)->coatAlpha_0 = max(kernelContext_29->materials_0[_S267] * kernelContext_29->materials_0[_S267], 0.0010000000474974513f);
+        float coatF_0 = fresnelDielectric_0(_S264, 1.5f);
+        (&surf_3)->coatP_0 = _S259 * coatF_0;
+
+#line 1187
+        float3 _S268;
+        if(outside_1)
+        {
+
+#line 1188
+            _S268 = float3(kernelContext_29->materials_0[mi_0 + 18U], kernelContext_29->materials_0[mi_0 + 19U], kernelContext_29->materials_0[mi_0 + 20U]);
+
+#line 1188
+        }
+        else
+        {
+
+#line 1188
+            _S268 = float3(0.0f) ;
+
+#line 1188
+        }
+
+#line 1188
+        (&surf_3)->sheenColor_0 = _S268;
+        float _S269 = max(_S268.x, max(_S268.y, _S268.z));
+        float _S270 = max(kernelContext_29->materials_0[mi_0 + 17U], 0.070000000298023224f);
+        (&surf_3)->sheenAlpha_0 = _S270 * _S270;
+
+#line 1191
+        float _S271;
+        if(_S269 > 0.0f)
+        {
+
+#line 1192
+            _S271 = _S269 * sheenAlbedo_0(_S264, _S270);
+
+#line 1192
+        }
+        else
+        {
+
+#line 1192
+            _S271 = 0.0f;
+
+#line 1192
+        }
+
+#line 1192
+        (&surf_3)->sheenP_0 = _S271;
+
+#line 1192
         k_4 = 0U;
 
 
@@ -4439,253 +4526,259 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
         for(;;)
         {
 
-#line 1185
+#line 1196
             if(k_4 < _S198)
             {
             }
             else
             {
 
-#line 1185
+#line 1196
                 break;
             }
             uint o_8 = k_4 * 16U;
-            float3 col_0 = float3((as_type<float>((kernelContext_27->lights_0[o_8 + 1U]))), (as_type<float>((kernelContext_27->lights_0[o_8 + 2U]))), (as_type<float>((kernelContext_27->lights_0[o_8 + 3U])))) * float3((as_type<float>((kernelContext_27->lights_0[o_8 + 4U])))) ;
-            float3 vec_0 = float3((as_type<float>((kernelContext_27->lights_0[o_8 + 5U]))), (as_type<float>((kernelContext_27->lights_0[o_8 + 6U]))), (as_type<float>((kernelContext_27->lights_0[o_8 + 7U]))));
+            float3 col_0 = float3((as_type<float>((kernelContext_29->lights_0[o_8 + 1U]))), (as_type<float>((kernelContext_29->lights_0[o_8 + 2U]))), (as_type<float>((kernelContext_29->lights_0[o_8 + 3U])))) * float3((as_type<float>((kernelContext_29->lights_0[o_8 + 4U])))) ;
+            float3 vec_0 = float3((as_type<float>((kernelContext_29->lights_0[o_8 + 5U]))), (as_type<float>((kernelContext_29->lights_0[o_8 + 6U]))), (as_type<float>((kernelContext_29->lights_0[o_8 + 7U]))));
 
-            bool virt_0 = kernelContext_27->lights_0[o_8] == 3U;
+            bool virt_0 = kernelContext_29->lights_0[o_8] == 3U;
             if(virt_0)
             {
 
-#line 1192
+#line 1203
                 if(_S197)
                 {
 
-#line 1192
+#line 1203
                     _S190 = depth_3 == 0U;
 
-#line 1192
+#line 1203
                 }
                 else
                 {
 
-#line 1192
+#line 1203
                     _S190 = false;
 
-#line 1192
+#line 1203
                 }
 
-#line 1192
+#line 1203
                 _S190 = !_S190;
 
-#line 1192
+#line 1203
             }
             else
             {
 
-#line 1192
+#line 1203
                 _S190 = false;
 
-#line 1192
+#line 1203
             }
 
-#line 1192
+#line 1203
             if(_S190)
             {
 
-#line 1193
+#line 1204
                 k_4 = k_4 + 1U;
-
-#line 1185
-                continue;
-            }
-
-#line 1195
-            if((kernelContext_27->lights_0[o_8 + 14U] & (kernelContext_27->lights_0)[_S198 * 16U + _S202]) == 0U)
-            {
 
 #line 1196
-                k_4 = k_4 + 1U;
-
-#line 1185
                 continue;
             }
 
-#line 1200
-            if(kernelContext_27->lights_0[o_8] == 1U)
+#line 1206
+            uint _S272 = kernelContext_29->lights_0[o_8 + 14U];
+
+#line 1206
+            uint _S273 = recvMask_0(_S202, kernelContext_29);
+
+#line 1206
+            if((_S272 & _S273) == 0U)
             {
 
-#line 1200
+#line 1207
+                k_4 = k_4 + 1U;
+
+#line 1196
+                continue;
+            }
+
+#line 1211
+            if(kernelContext_29->lights_0[o_8] == 1U)
+            {
+
+#line 1211
                 _S191 = true;
 
-#line 1200
+#line 1211
             }
             else
             {
 
-#line 1200
+#line 1211
                 _S191 = virt_0;
 
-#line 1200
+#line 1211
             }
 
-#line 1200
+#line 1211
             if(_S191)
             {
 
-#line 1200
+#line 1211
                 wi_6 = - normalize(vec_0);
 
-#line 1200
+#line 1211
                 dist_4 = 1.00000001504746622e+30f;
 
-#line 1200
+#line 1211
                 li_0 = col_0;
 
-#line 1200
+#line 1211
             }
             else
             {
 
-#line 1208
+#line 1219
                 float3 toL_1 = vec_0 - p_6;
                 float d2_1 = dot(toL_1, toL_1);
                 float dist_5 = sqrt(d2_1);
                 float3 wi_7 = toL_1 / float3(dist_5) ;
                 float3 li_1 = col_0 / float3(d2_1) ;
-                uint _S268 = o_8 + 15U;
+                uint _S274 = o_8 + 15U;
 
-#line 1213
-                if(kernelContext_27->lights_0[_S268] != 0U)
+#line 1224
+                if(kernelContext_29->lights_0[_S274] != 0U)
                 {
 
-#line 1213
-                    float _S269 = iesFactor_0(kernelContext_27->lights_0[_S268] - 1U, - wi_7, kernelContext_27);
+#line 1224
+                    float _S275 = iesFactor_0(kernelContext_29->lights_0[_S274] - 1U, - wi_7, kernelContext_29);
 
-#line 1213
-                    wi_6 = li_1 * float3(_S269) ;
+#line 1224
+                    wi_6 = li_1 * float3(_S275) ;
 
-#line 1213
+#line 1224
                 }
                 else
                 {
 
-#line 1213
+#line 1224
                     wi_6 = li_1;
 
-#line 1213
+#line 1224
                 }
 
-                if(kernelContext_27->lights_0[o_8] == 2U)
+                if(kernelContext_29->lights_0[o_8] == 2U)
                 {
 
-                    float att_0 = saturate(dot(float3((as_type<float>((kernelContext_27->lights_0[o_8 + 8U]))), (as_type<float>((kernelContext_27->lights_0[o_8 + 9U]))), (as_type<float>((kernelContext_27->lights_0[o_8 + 10U])))), - wi_7) * (as_type<float>((kernelContext_27->lights_0[o_8 + 11U]))) + (as_type<float>((kernelContext_27->lights_0[o_8 + 12U]))));
+                    float att_0 = saturate(dot(float3((as_type<float>((kernelContext_29->lights_0[o_8 + 8U]))), (as_type<float>((kernelContext_29->lights_0[o_8 + 9U]))), (as_type<float>((kernelContext_29->lights_0[o_8 + 10U])))), - wi_7) * (as_type<float>((kernelContext_29->lights_0[o_8 + 11U]))) + (as_type<float>((kernelContext_29->lights_0[o_8 + 12U]))));
 
-#line 1218
+#line 1229
                     li_0 = wi_6 * float3((att_0 * att_0)) ;
 
-#line 1215
+#line 1226
                 }
                 else
                 {
 
-#line 1215
+#line 1226
                     li_0 = wi_6;
 
-#line 1215
+#line 1226
                 }
 
-#line 1215
+#line 1226
                 wi_6 = wi_7;
 
-#line 1215
+#line 1226
                 dist_4 = dist_5;
 
-#line 1200
+#line 1211
             }
 
-#line 1222
+#line 1233
             float c_8 = dot(n_8, wi_6);
             if(c_8 > 0.0f)
             {
 
-#line 1223
-                bool _S270 = occluded_0(p_6, wi_6, dist_4 - 0.0010000000474974513f, kernelContext_27);
+#line 1234
+                bool _S276 = occluded_0(p_6, wi_6, dist_4 - 0.0010000000474974513f, kernelContext_29);
 
 
                 if(_S197)
                 {
 
-#line 1226
+#line 1237
                     track_0 = depth_3 == 0U;
 
-#line 1226
+#line 1237
                 }
                 else
                 {
 
-#line 1226
+#line 1237
                     track_0 = false;
 
-#line 1226
+#line 1237
                 }
-                bool _S271 = !_S270;
+                bool _S277 = !_S276;
 
-#line 1227
-                if(_S271)
+#line 1238
+                if(_S277)
                 {
 
-#line 1227
+#line 1238
                     chooseEnv_0 = true;
 
-#line 1227
+#line 1238
                 }
                 else
                 {
 
-#line 1227
+#line 1238
                     chooseEnv_0 = track_0;
 
-#line 1227
+#line 1238
                 }
 
-#line 1227
+#line 1238
                 if(chooseEnv_0)
                 {
-                    float3 _S272 = float3(dot(wi_6, T_2), dot(wi_6, B_2), c_8);
+                    float3 _S278 = float3(dot(wi_6, T_2), dot(wi_6, B_2), c_8);
 
-#line 1229
-                    thread Surface_0 _S273 = surf_3;
+#line 1240
+                    thread Surface_0 _S279 = surf_3;
 
-#line 1229
-                    Lobes_0 _S274 = evalLobes_0(&_S273, woL_6, _S272, kernelContext_27);
-                    float3 cd_1 = thr_2 * _S274.diffuse_0 * li_0;
-                    float3 cs_1 = thr_2 * _S274.specular_1 * li_0;
-                    if(_S271)
+#line 1240
+                    Lobes_0 _S280 = evalLobes_0(&_S279, woL_6, _S278, kernelContext_29);
+                    float3 cd_1 = thr_2 * _S280.diffuse_0 * li_0;
+                    float3 cs_1 = thr_2 * _S280.specular_1 * li_0;
+                    if(_S277)
                     {
 
-#line 1232
+#line 1243
                         _S192 = !virt_0;
 
-#line 1232
+#line 1243
                     }
                     else
                     {
 
-#line 1232
+#line 1243
                         _S192 = false;
 
-#line 1232
+#line 1243
                     }
 
-#line 1232
+#line 1243
                     if(_S192)
                     {
 
-#line 1233
-                        Parts_addLight_0(&st_1->parts_0, depth_3, cls_4, thr_2 * (_S274.diffuse_0 + _S274.specular_1) * li_0, cd_1, cs_1);
+#line 1244
+                        Parts_addLight_0(&st_1->parts_0, depth_3, cls_4, thr_2 * (_S280.diffuse_0 + _S280.specular_1) * li_0, cd_1, cs_1);
 
-#line 1232
+#line 1243
                     }
 
                     if(track_0)
@@ -4693,642 +4786,653 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
                         if(virt_0)
                         {
 
-#line 1236
+#line 1247
                             vv_0 = 0.0f;
 
-#line 1236
+#line 1247
                         }
                         else
                         {
 
-#line 1236
+#line 1247
                             vv_0 = lum_0(cd_1 + cs_1);
 
-#line 1236
+#line 1247
                         }
                         st_1->visTotal_0 = st_1->visTotal_0 + vv_0;
-                        if(_S270)
+                        if(_S276)
                         {
 
-#line 1238
+#line 1249
                             us_0 = 0.0f;
 
-#line 1238
+#line 1249
                         }
                         else
                         {
 
-#line 1238
+#line 1249
                             us_0 = vv_0;
 
-#line 1238
+#line 1249
                         }
 
-#line 1238
+#line 1249
                         st_1->visLit_0 = st_1->visLit_0 + us_0;
-                        uint _S275 = kernelContext_27->lights_0[o_8 + 13U];
+                        uint _S281 = kernelContext_29->lights_0[o_8 + 13U];
 
-#line 1239
-                        float3 _S276 = float3(c_8) ;
+#line 1250
+                        float3 _S282 = float3(c_8) ;
 
-#line 1239
-                        float3 _S277 = cd_1 / _S276;
+#line 1250
+                        float3 _S283 = cd_1 / _S282;
 
-#line 1239
-                        float3 _S278 = cs_1 / _S276;
+#line 1250
+                        float3 _S284 = cs_1 / _S282;
 
-#line 1239
-                        if(_S270)
+#line 1250
+                        if(_S276)
                         {
 
-#line 1239
+#line 1250
                             _S188 = 0.0f;
 
-#line 1239
+#line 1250
                         }
                         else
                         {
 
-#line 1239
+#line 1250
                             _S188 = 1.0f;
 
-#line 1239
+#line 1250
                         }
 
-#line 1239
-                        if(_S270)
+#line 1250
+                        if(_S276)
                         {
 
-#line 1239
+#line 1250
                             _S189 = 0.0f;
 
-#line 1239
+#line 1250
                         }
                         else
                         {
 
-#line 1239
+#line 1250
                             _S189 = c_8;
 
-#line 1239
+#line 1250
                         }
 
-#line 1239
-                        addSlot_0(pixel_7, _S275, _S277, _S278, wi_6, _S188, _S189, kernelContext_27);
+#line 1250
+                        addSlot_0(pixel_7, _S281, _S283, _S284, wi_6, _S188, _S189, kernelContext_29);
 
-#line 1234
+#line 1245
                     }
 
-#line 1227
+#line 1238
                 }
 
-#line 1223
+#line 1234
             }
 
-#line 1185
+#line 1196
             k_4 = k_4 + 1U;
 
-#line 1185
+#line 1196
         }
 
-#line 1248
+#line 1259
         if(restirCompiled_0)
         {
 
-#line 1248
+#line 1259
             _S190 = depth_3 == 0U;
 
-#line 1248
+#line 1259
         }
         else
         {
 
-#line 1248
+#line 1259
             _S190 = false;
 
-#line 1248
+#line 1259
         }
 
-#line 1248
+#line 1259
         if(_S190)
         {
 
-#line 1248
-            _S191 = kernelContext_27->params_0[int(36)] != 0U;
+#line 1259
+            _S191 = kernelContext_29->params_0[int(36)] != 0U;
 
-#line 1248
+#line 1259
         }
         else
         {
 
-#line 1248
+#line 1259
             _S191 = false;
 
-#line 1248
+#line 1259
         }
 
-#line 1248
+#line 1259
         bool suits_0;
 
-#line 1248
+#line 1259
         bool ok_0;
 
-#line 1248
+#line 1259
         bool reDI_0;
 
-#line 1248
-        bool reGI_0;
+#line 1259
+        bool refracted_0;
 
-#line 1248
+#line 1259
         if(_S191)
         {
 
-#line 1248
-            float _S279 = pf_0(3U, kernelContext_27);
+#line 1259
+            float _S285 = pf_0(3U, kernelContext_29);
 
-            if(_S279 == 0.0f)
+            if(_S285 == 0.0f)
             {
 
-#line 1250
+#line 1261
                 chooseEnv_0 = transmission_2 == 0.0f;
 
-#line 1250
+#line 1261
             }
             else
             {
 
-#line 1250
+#line 1261
                 chooseEnv_0 = false;
 
-#line 1250
+#line 1261
             }
 
-#line 1250
+#line 1261
             if(chooseEnv_0)
             {
 
-#line 1250
+#line 1261
                 _S192 = ((&surf_3)->alpha_3) >= 0.15000000596046448f;
 
-#line 1250
+#line 1261
             }
             else
             {
 
-#line 1250
+#line 1261
                 _S192 = false;
 
-#line 1250
+#line 1261
             }
             if(_S192)
             {
 
-#line 1251
+#line 1262
                 if(((&surf_3)->coat_0) == 0.0f)
                 {
 
-#line 1251
+#line 1262
                     suits_0 = true;
 
-#line 1251
+#line 1262
                 }
                 else
                 {
 
-#line 1251
+#line 1262
                     suits_0 = ((&surf_3)->coatAlpha_0) >= 0.15000000596046448f;
 
-#line 1251
+#line 1262
                 }
 
-#line 1251
+#line 1262
             }
             else
             {
 
-#line 1251
+#line 1262
                 suits_0 = false;
 
-#line 1251
+#line 1262
             }
             if(suits_0)
             {
 
-#line 1252
-                ok_0 = (kernelContext_27->params_0[int(36)] & 1U) != 0U;
+#line 1263
+                ok_0 = (kernelContext_29->params_0[int(36)] & 1U) != 0U;
 
-#line 1252
+#line 1263
             }
             else
             {
 
-#line 1252
+#line 1263
                 ok_0 = false;
 
-#line 1252
+#line 1263
             }
 
-#line 1252
+#line 1263
             if(ok_0)
             {
 
-#line 1252
+#line 1263
                 reDI_0 = emitterCount_0 > 0U;
 
-#line 1252
+#line 1263
             }
             else
             {
 
-#line 1252
+#line 1263
                 reDI_0 = false;
 
-#line 1252
+#line 1263
             }
 
             if(suits_0)
             {
 
-#line 1254
-                track_0 = (kernelContext_27->params_0[int(36)] & 2U) != 0U;
+#line 1265
+                refracted_0 = (kernelContext_29->params_0[int(36)] & 2U) != 0U;
 
-#line 1254
+#line 1265
             }
             else
             {
 
-#line 1254
+#line 1265
+                refracted_0 = false;
+
+#line 1265
+            }
+
+#line 1265
+            if(refracted_0)
+            {
+
+#line 1265
+                track_0 = !_S197;
+
+#line 1265
+            }
+            else
+            {
+
+#line 1265
                 track_0 = false;
 
-#line 1254
-            }
-
-#line 1254
-            if(track_0)
-            {
-
-#line 1254
-                reGI_0 = !_S197;
-
-#line 1254
-            }
-            else
-            {
-
-#line 1254
-                reGI_0 = false;
-
-#line 1254
+#line 1265
             }
             st_1->restir_1 = reDI_0;
-            st_1->gi_0 = reGI_0;
+            st_1->gi_0 = track_0;
             if(suits_0)
             {
 
-#line 1257
-                restirGbuffer_0(pixel_7, p_6, n_8, kernelContext_27);
+#line 1268
+                restirGbuffer_0(pixel_7, p_6, n_8, kernelContext_29);
 
 
-                if(reGI_0)
+                if(track_0)
                 {
 
-#line 1260
-                    thread Surface_0 _S280 = surf_3;
+#line 1271
+                    thread Surface_0 _S286 = surf_3;
 
-#line 1260
-                    restirGIPrepare_0(pixel_7, p_6, n_8, _S216, &_S280, T_2, B_2, woL_6, &rng_4, kernelContext_27);
+#line 1271
+                    restirGIPrepare_0(pixel_7, p_6, n_8, _S216, &_S286, T_2, B_2, woL_6, &rng_4, kernelContext_29);
 
-#line 1260
+#line 1271
                 }
 
-#line 1257
+#line 1268
             }
             else
             {
 
-#line 1257
-                restirClear_0(pixel_7, kernelContext_27);
+#line 1268
+                restirClear_0(pixel_7, kernelContext_29);
 
-#line 1257
+#line 1268
             }
 
-#line 1248
+#line 1259
         }
         else
         {
 
-#line 1248
+#line 1259
             reDI_0 = false;
 
-#line 1248
+#line 1259
         }
 
-#line 1266
+#line 1277
         if(reDI_0)
         {
 
-#line 1266
-            thread Surface_0 _S281 = surf_3;
+#line 1277
+            uint _S287 = recvMask_0(_S202, kernelContext_29);
 
-#line 1266
-            RestirPick_0 _S282 = restirDI_0(pixel_7, p_6, n_8, _S216, &_S281, T_2, B_2, woL_6, &rng_4, kernelContext_27);
+#line 1277
+            thread Surface_0 _S288 = surf_3;
+
+#line 1277
+            RestirPick_0 _S289 = restirDI_0(pixel_7, _S287, p_6, n_8, _S216, &_S288, T_2, B_2, woL_6, &rng_4, kernelContext_29);
 
 
-            if(_S282.valid_0)
+            if(_S289.valid_0)
             {
+
+
+                uint _S290 = _S289.e_1 - 1U;
+
+#line 1284
+                uint _S291 = recvMask_0(_S202, kernelContext_29);
+
+#line 1282
                 thread float3 wi_8;
 
-#line 1271
+#line 1282
                 thread float3 g_4;
                 thread float dist_6;
 
-#line 1272
+#line 1283
                 thread float cosi_5;
 
-#line 1272
+#line 1283
                 thread float plsa_5;
 
-#line 1272
-                bool _S283 = restirLight_0(_S282.e_1 - 1U, _S282.x_6, p_6, n_8, &wi_8, &dist_6, &cosi_5, &g_4, &plsa_5, kernelContext_27);
+#line 1283
+                bool _S292 = restirLight_0(_S290, _S291, _S289.x_6, p_6, n_8, &wi_8, &dist_6, &cosi_5, &g_4, &plsa_5, kernelContext_29);
 
 
-                bool _S284 = !_S282.occ_0;
+                bool _S293 = !_S289.occ_0;
 
-#line 1275
-                if(_S284)
+#line 1286
+                if(_S293)
                 {
 
-#line 1275
+#line 1286
                     chooseEnv_0 = true;
 
-#line 1275
+#line 1286
                 }
                 else
                 {
 
-#line 1275
+#line 1286
                     chooseEnv_0 = _S197;
 
-#line 1275
+#line 1286
                 }
 
-#line 1275
+#line 1286
                 if(chooseEnv_0)
                 {
                     float3 wiL_6 = float3(dot(wi_8, T_2), dot(wi_8, B_2), cosi_5);
 
-#line 1277
-                    thread Surface_0 _S285 = surf_3;
+#line 1288
+                    thread Surface_0 _S294 = surf_3;
 
-#line 1277
-                    float _S286 = restirMis_0(&_S285, woL_6, wiL_6, plsa_5);
+#line 1288
+                    float _S295 = restirMis_0(&_S294, woL_6, wiL_6, plsa_5);
 
-#line 1277
-                    thread Surface_0 _S287 = surf_3;
+#line 1288
+                    thread Surface_0 _S296 = surf_3;
 
-#line 1277
-                    Lobes_0 _S288 = evalLobes_0(&_S287, woL_6, wiL_6, kernelContext_27);
+#line 1288
+                    Lobes_0 _S297 = evalLobes_0(&_S296, woL_6, wiL_6, kernelContext_29);
 
-#line 1277
-                    float3 _S289 = float3((_S286 * _S282.W_0)) ;
+#line 1288
+                    float3 _S298 = float3((_S295 * _S289.W_0)) ;
 
 
-                    float3 cd_2 = thr_2 * _S288.diffuse_0 * g_4 * _S289;
-                    float3 cs_2 = thr_2 * _S288.specular_1 * g_4 * _S289;
-                    if(_S284)
+                    float3 cd_2 = thr_2 * _S297.diffuse_0 * g_4 * _S298;
+                    float3 cs_2 = thr_2 * _S297.specular_1 * g_4 * _S298;
+                    if(_S293)
                     {
 
-#line 1283
+#line 1294
                         Parts_addLight_0(&st_1->parts_0, depth_3, cls_4, cd_2 + cs_2, cd_2, cs_2);
 
-#line 1282
+#line 1293
                     }
 
                     if(_S197)
                     {
                         float vv_1 = lum_0(cd_2 + cs_2);
                         st_1->visTotal_0 = st_1->visTotal_0 + vv_1;
-                        if(_S282.occ_0)
+                        if(_S289.occ_0)
                         {
 
-#line 1288
+#line 1299
                             dist_4 = 0.0f;
 
-#line 1288
+#line 1299
                         }
                         else
                         {
 
-#line 1288
+#line 1299
                             dist_4 = vv_1;
 
-#line 1288
+#line 1299
                         }
 
-#line 1288
+#line 1299
                         st_1->visLit_0 = st_1->visLit_0 + dist_4;
-                        float3 _S290 = cd_2 / float3(cosi_5) ;
+                        float3 _S299 = cd_2 / float3(cosi_5) ;
 
-#line 1289
-                        float3 _S291 = cs_2 / float3(cosi_5) ;
+#line 1300
+                        float3 _S300 = cs_2 / float3(cosi_5) ;
 
-#line 1289
-                        float3 _S292 = wi_8;
+#line 1300
+                        float3 _S301 = wi_8;
 
-#line 1289
-                        if(_S282.occ_0)
+#line 1300
+                        if(_S289.occ_0)
                         {
 
-#line 1289
+#line 1300
                             vv_0 = 0.0f;
 
-#line 1289
+#line 1300
                         }
                         else
                         {
 
-#line 1289
+#line 1300
                             vv_0 = 1.0f;
 
-#line 1289
+#line 1300
                         }
 
-#line 1289
-                        if(_S282.occ_0)
+#line 1300
+                        if(_S289.occ_0)
                         {
 
-#line 1289
+#line 1300
                             us_0 = 0.0f;
 
-#line 1289
+#line 1300
                         }
                         else
                         {
 
-#line 1289
+#line 1300
                             us_0 = cosi_5;
 
-#line 1289
+#line 1300
                         }
 
-#line 1289
-                        addSlot_0(pixel_7, 3U, _S290, _S291, _S292, vv_0, us_0, kernelContext_27);
+#line 1300
+                        addSlot_0(pixel_7, 3U, _S299, _S300, _S301, vv_0, us_0, kernelContext_29);
 
-#line 1284
+#line 1295
                     }
 
-#line 1275
+#line 1286
                 }
 
-#line 1269
+#line 1280
             }
 
-#line 1266
+#line 1277
         }
 
-#line 1296
+#line 1307
         float chooseLight_0 = Rng_next_0(&rng_4);
         if(reDI_0)
         {
 
-#line 1297
+#line 1308
             if(hasEnv_0)
             {
 
-#line 1297
+#line 1308
                 dist_4 = 1.0f;
 
-#line 1297
+#line 1308
             }
             else
             {
 
-#line 1297
+#line 1308
                 dist_4 = 0.0f;
 
-#line 1297
+#line 1308
             }
 
-#line 1297
+#line 1308
         }
         else
         {
 
-#line 1297
+#line 1308
             dist_4 = _S199;
 
-#line 1297
+#line 1308
         }
         if(hasEnv_0)
         {
 
-#line 1298
+#line 1309
             chooseEnv_0 = chooseLight_0 < dist_4;
 
-#line 1298
+#line 1309
         }
         else
         {
 
-#line 1298
+#line 1309
             chooseEnv_0 = false;
 
-#line 1298
+#line 1309
         }
         if(emitterCount_0 > 0U)
         {
 
-#line 1299
+#line 1310
             _S192 = !chooseEnv_0;
 
-#line 1299
+#line 1310
         }
         else
         {
 
-#line 1299
+#line 1310
             _S192 = false;
 
-#line 1299
+#line 1310
         }
 
-#line 1299
+#line 1310
         if(_S192)
         {
 
-#line 1299
+#line 1310
             suits_0 = !reDI_0;
 
-#line 1299
+#line 1310
         }
         else
         {
 
-#line 1299
+#line 1310
             suits_0 = false;
 
-#line 1299
+#line 1310
         }
 
-#line 1299
+#line 1310
         uint lobeCls_0;
 
-#line 1299
+#line 1310
         uint cls_5;
 
-#line 1299
+#line 1310
         if(suits_0)
         {
-            float _S293 = Rng_next_0(&rng_4);
+            float _S302 = Rng_next_0(&rng_4);
             float ua_1 = Rng_next_0(&rng_4);
             float ub_1 = Rng_next_0(&rng_4);
 
-            uint _S294 = emitterCount_0 - 1U;
+            uint _S303 = emitterCount_0 - 1U;
 
-#line 1305
+#line 1316
             lobeCls_0 = 0U;
 
-#line 1305
-            cls_5 = _S294;
+#line 1316
+            cls_5 = _S303;
             for(;;)
             {
 
-#line 1306
+#line 1317
                 if(lobeCls_0 < cls_5)
                 {
                 }
                 else
                 {
 
-#line 1306
+#line 1317
                     break;
                 }
                 uint mid_3 = (lobeCls_0 + cls_5) / 2U;
-                if(kernelContext_27->emitCdf_0[mid_3] >= _S293)
+                if(kernelContext_29->emitCdf_0[mid_3] >= _S302)
                 {
 
-#line 1309
+#line 1320
                     cls_5 = mid_3;
 
-#line 1309
+#line 1320
                 }
                 else
                 {
 
-#line 1309
+#line 1320
                     lobeCls_0 = mid_3 + 1U;
 
-#line 1309
+#line 1320
                 }
 
-#line 1306
+#line 1317
             }
 
-#line 1314
+#line 1325
             uint e_3 = lobeCls_0 * 16U;
-            float3 a_4 = float3(kernelContext_27->emitters_0[e_3], kernelContext_27->emitters_0[e_3 + 1U], kernelContext_27->emitters_0[e_3 + 2U]);
-            float3 b_3 = float3(kernelContext_27->emitters_0[e_3 + 3U], kernelContext_27->emitters_0[e_3 + 4U], kernelContext_27->emitters_0[e_3 + 5U]);
-            float3 c_9 = float3(kernelContext_27->emitters_0[e_3 + 6U], kernelContext_27->emitters_0[e_3 + 7U], kernelContext_27->emitters_0[e_3 + 8U]);
+            float3 a_4 = float3(kernelContext_29->emitters_0[e_3], kernelContext_29->emitters_0[e_3 + 1U], kernelContext_29->emitters_0[e_3 + 2U]);
+            float3 b_3 = float3(kernelContext_29->emitters_0[e_3 + 3U], kernelContext_29->emitters_0[e_3 + 4U], kernelContext_29->emitters_0[e_3 + 5U]);
+            float3 c_9 = float3(kernelContext_29->emitters_0[e_3 + 6U], kernelContext_29->emitters_0[e_3 + 7U], kernelContext_29->emitters_0[e_3 + 8U]);
             float su_1 = sqrt(ua_1);
 
             float3 toL_2 = a_4 * float3((1.0f - su_1))  + b_3 * float3((su_1 * (1.0f - ub_1)))  + c_9 * float3((su_1 * ub_1))  - p_6;
@@ -5340,192 +5444,219 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
             if(cosi_6 > 0.0f)
             {
 
-#line 1326
+#line 1337
                 ok_0 = cosl_1 > 9.9999997473787516e-06f;
 
-#line 1326
+#line 1337
             }
             else
             {
 
-#line 1326
+#line 1337
                 ok_0 = false;
 
-#line 1326
+#line 1337
             }
 
-#line 1326
+#line 1337
             if(ok_0)
             {
 
-#line 1326
-                bool _S295 = occluded_0(p_6, wi_9, dist_7 * 0.99900001287460327f, kernelContext_27);
+#line 1337
+                uint _S304 = (as_type<uint>((kernelContext_29->emitters_0[e_3 + 14U])));
+
+#line 1337
+                uint _S305 = recvMask_0(_S202, kernelContext_29);
+
+#line 1337
+                refracted_0 = (_S304 & _S305) != 0U;
+
+#line 1337
+            }
+            else
+            {
+
+#line 1337
+                refracted_0 = false;
+
+#line 1337
+            }
+
+#line 1337
+            if(refracted_0)
+            {
+
+#line 1337
+                bool _S306 = occluded_0(p_6, wi_9, dist_7 * 0.99900001287460327f, kernelContext_29);
 
 
                 if(_S197)
                 {
 
-#line 1329
+#line 1340
                     track_0 = depth_3 == 0U;
 
-#line 1329
+#line 1340
                 }
                 else
                 {
 
-#line 1329
+#line 1340
                     track_0 = false;
 
-#line 1329
+#line 1340
                 }
-                bool _S296 = !_S295;
+                bool _S307 = !_S306;
 
-#line 1330
-                if(_S296)
+#line 1341
+                bool _S308;
+
+#line 1341
+                if(_S307)
                 {
 
-#line 1330
-                    reGI_0 = true;
+#line 1341
+                    _S308 = true;
 
-#line 1330
+#line 1341
                 }
                 else
                 {
 
-#line 1330
-                    reGI_0 = track_0;
+#line 1341
+                    _S308 = track_0;
 
-#line 1330
+#line 1341
                 }
 
-#line 1330
-                if(reGI_0)
+#line 1341
+                if(_S308)
                 {
-                    float pl_2 = (1.0f - _S199) * kernelContext_27->emitters_0[e_3 + 13U] * d2_2 / (kernelContext_27->emitters_0[e_3 + 12U] * cosl_1);
+                    float pl_2 = (1.0f - _S199) * kernelContext_29->emitters_0[e_3 + 13U] * d2_2 / (kernelContext_29->emitters_0[e_3 + 12U] * cosl_1);
                     float3 wiL_7 = float3(dot(wi_9, T_2), dot(wi_9, B_2), cosi_6);
 
-#line 1333
-                    thread Surface_0 _S297 = surf_3;
+#line 1344
+                    thread Surface_0 _S309 = surf_3;
 
-#line 1333
-                    float _S298 = reflectivePdf_0(&_S297, woL_6, wiL_7);
+#line 1344
+                    float _S310 = reflectivePdf_0(&_S309, woL_6, wiL_7);
 
-                    float _S299 = pl_2 * pl_2;
+                    float _S311 = pl_2 * pl_2;
 
-#line 1335
-                    float wl_0 = _S299 / (_S299 + _S298 * _S298);
-                    float3 le_2 = float3(kernelContext_27->emitters_0[e_3 + 9U], kernelContext_27->emitters_0[e_3 + 10U], kernelContext_27->emitters_0[e_3 + 11U]);
+#line 1346
+                    float wl_0 = _S311 / (_S311 + _S310 * _S310);
+                    float3 le_2 = float3(kernelContext_29->emitters_0[e_3 + 9U], kernelContext_29->emitters_0[e_3 + 10U], kernelContext_29->emitters_0[e_3 + 11U]);
 
-#line 1336
-                    thread Surface_0 _S300 = surf_3;
+#line 1347
+                    thread Surface_0 _S312 = surf_3;
 
-#line 1336
-                    Lobes_0 _S301 = evalLobes_0(&_S300, woL_6, wiL_7, kernelContext_27);
+#line 1347
+                    Lobes_0 _S313 = evalLobes_0(&_S312, woL_6, wiL_7, kernelContext_29);
 
-#line 1336
-                    float3 _S302 = float3(pl_2) ;
+#line 1347
+                    float3 _S314 = float3(pl_2) ;
 
-#line 1336
-                    float3 _S303 = float3(wl_0) ;
+#line 1347
+                    float3 _S315 = float3(wl_0) ;
 
-                    float3 cd_3 = thr_2 * _S301.diffuse_0 * le_2 / _S302 * _S303;
-                    float3 cs_3 = thr_2 * _S301.specular_1 * le_2 / _S302 * _S303;
-                    if(_S296)
+                    float3 cd_3 = thr_2 * _S313.diffuse_0 * le_2 / _S314 * _S315;
+                    float3 cs_3 = thr_2 * _S313.specular_1 * le_2 / _S314 * _S315;
+                    if(_S307)
                     {
 
-#line 1340
-                        thread Surface_0 _S304 = surf_3;
+#line 1351
+                        thread Surface_0 _S316 = surf_3;
 
-#line 1340
-                        float3 _S305 = evalReflective_0(&_S304, woL_6, wiL_7, kernelContext_27);
-                        Parts_addLight_0(&st_1->parts_0, depth_3, cls_4, thr_2 * _S305 * le_2 / _S302 * _S303, cd_3, cs_3);
+#line 1351
+                        float3 _S317 = evalReflective_0(&_S316, woL_6, wiL_7, kernelContext_29);
+                        Parts_addLight_0(&st_1->parts_0, depth_3, cls_4, thr_2 * _S317 * le_2 / _S314 * _S315, cd_3, cs_3);
 
-#line 1340
+#line 1351
                     }
 
                     if(track_0)
                     {
                         float vv_2 = lum_0(cd_3 + cs_3);
                         st_1->visTotal_0 = st_1->visTotal_0 + vv_2;
-                        if(_S295)
+                        if(_S306)
                         {
 
-#line 1346
+#line 1357
                             vv_0 = 0.0f;
 
-#line 1346
+#line 1357
                         }
                         else
                         {
 
-#line 1346
+#line 1357
                             vv_0 = vv_2;
 
-#line 1346
+#line 1357
                         }
 
-#line 1346
+#line 1357
                         st_1->visLit_0 = st_1->visLit_0 + vv_0;
 
-#line 1346
-                        float3 _S306 = float3(cosi_6) ;
-                        float3 _S307 = cd_3 / _S306;
+#line 1357
+                        float3 _S318 = float3(cosi_6) ;
+                        float3 _S319 = cd_3 / _S318;
 
-#line 1347
-                        float3 _S308 = cs_3 / _S306;
+#line 1358
+                        float3 _S320 = cs_3 / _S318;
 
-#line 1347
-                        if(_S295)
+#line 1358
+                        if(_S306)
                         {
 
-#line 1347
+#line 1358
                             us_0 = 0.0f;
 
-#line 1347
+#line 1358
                         }
                         else
                         {
 
-#line 1347
+#line 1358
                             us_0 = 1.0f;
 
-#line 1347
+#line 1358
                         }
 
-#line 1347
-                        if(_S295)
+#line 1358
+                        if(_S306)
                         {
 
-#line 1347
+#line 1358
                             _S188 = 0.0f;
 
-#line 1347
+#line 1358
                         }
                         else
                         {
 
-#line 1347
+#line 1358
                             _S188 = cosi_6;
 
-#line 1347
+#line 1358
                         }
 
-#line 1347
-                        addSlot_0(pixel_7, 3U, _S307, _S308, wi_9, us_0, _S188, kernelContext_27);
-
-#line 1342
-                    }
-
-#line 1330
-                }
-
-#line 1326
-            }
-
-#line 1299
-        }
+#line 1358
+                        addSlot_0(pixel_7, 3U, _S319, _S320, wi_9, us_0, _S188, kernelContext_29);
 
 #line 1353
+                    }
+
+#line 1341
+                }
+
+#line 1337
+            }
+
+#line 1310
+        }
+
+#line 1364
         if(chooseEnv_0)
         {
             float e1_0 = Rng_next_0(&rng_4);
@@ -5535,667 +5666,668 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
             thread float pdfE_0;
             thread float3 leE_0;
 
-#line 1360
-            float3 _S309 = envSample_0(e1_0, e2_0, e3_1, e4_0, &pdfE_0, &leE_0, kernelContext_27);
+#line 1371
+            float3 _S321 = envSample_0(e1_0, e2_0, e3_1, e4_0, &pdfE_0, &leE_0, kernelContext_29);
 
-            float cosi_7 = dot(n_8, _S309);
+            float cosi_7 = dot(n_8, _S321);
             if(pdfE_0 > 0.0f)
             {
 
-#line 1363
+#line 1374
                 ok_0 = cosi_7 > 0.0f;
 
-#line 1363
+#line 1374
             }
             else
             {
 
-#line 1363
+#line 1374
                 ok_0 = false;
 
-#line 1363
+#line 1374
             }
 
-#line 1363
+#line 1374
             if(ok_0)
             {
 
-#line 1363
-                bool _S310 = occluded_0(p_6, _S309, 1.00000001504746622e+30f, kernelContext_27);
+#line 1374
+                bool _S322 = occluded_0(p_6, _S321, 1.00000001504746622e+30f, kernelContext_29);
 
 
                 if(_S197)
                 {
 
-#line 1366
+#line 1377
                     track_0 = depth_3 == 0U;
 
-#line 1366
+#line 1377
                 }
                 else
                 {
 
-#line 1366
+#line 1377
                     track_0 = false;
 
-#line 1366
+#line 1377
                 }
-                bool _S311 = !_S310;
+                bool _S323 = !_S322;
 
-#line 1367
-                if(_S311)
+#line 1378
+                if(_S323)
                 {
 
-#line 1367
-                    reGI_0 = true;
+#line 1378
+                    refracted_0 = true;
 
-#line 1367
+#line 1378
                 }
                 else
                 {
 
-#line 1367
-                    reGI_0 = track_0;
+#line 1378
+                    refracted_0 = track_0;
 
-#line 1367
+#line 1378
                 }
 
-#line 1367
-                if(reGI_0)
+#line 1378
+                if(refracted_0)
                 {
                     float pl_3 = dist_4 * pdfE_0;
-                    float3 wiL_8 = float3(dot(_S309, T_2), dot(_S309, B_2), cosi_7);
+                    float3 wiL_8 = float3(dot(_S321, T_2), dot(_S321, B_2), cosi_7);
 
-#line 1370
-                    thread Surface_0 _S312 = surf_3;
+#line 1381
+                    thread Surface_0 _S324 = surf_3;
 
-#line 1370
-                    float _S313 = reflectivePdf_0(&_S312, woL_6, wiL_8);
+#line 1381
+                    float _S325 = reflectivePdf_0(&_S324, woL_6, wiL_8);
 
-                    float _S314 = pl_3 * pl_3;
+                    float _S326 = pl_3 * pl_3;
 
-#line 1372
-                    float wl_1 = _S314 / (_S314 + _S313 * _S313);
+#line 1383
+                    float wl_1 = _S326 / (_S326 + _S325 * _S325);
 
-#line 1372
-                    thread Surface_0 _S315 = surf_3;
+#line 1383
+                    thread Surface_0 _S327 = surf_3;
 
-#line 1372
-                    Lobes_0 _S316 = evalLobes_0(&_S315, woL_6, wiL_8, kernelContext_27);
+#line 1383
+                    Lobes_0 _S328 = evalLobes_0(&_S327, woL_6, wiL_8, kernelContext_29);
 
-#line 1372
-                    float3 _S317 = float3(pl_3) ;
+#line 1383
+                    float3 _S329 = float3(pl_3) ;
 
-#line 1372
-                    float3 _S318 = float3(wl_1) ;
+#line 1383
+                    float3 _S330 = float3(wl_1) ;
 
-                    float3 cd_4 = thr_2 * _S316.diffuse_0 * leE_0 / _S317 * _S318;
-                    float3 cs_4 = thr_2 * _S316.specular_1 * leE_0 / _S317 * _S318;
-                    if(_S311)
+                    float3 cd_4 = thr_2 * _S328.diffuse_0 * leE_0 / _S329 * _S330;
+                    float3 cs_4 = thr_2 * _S328.specular_1 * leE_0 / _S329 * _S330;
+                    if(_S323)
                     {
 
-#line 1376
-                        thread Surface_0 _S319 = surf_3;
+#line 1387
+                        thread Surface_0 _S331 = surf_3;
 
-#line 1376
-                        float3 _S320 = evalReflective_0(&_S319, woL_6, wiL_8, kernelContext_27);
-                        Parts_addLight_0(&st_1->parts_0, depth_3, cls_4, thr_2 * _S320 * leE_0 / _S317 * _S318, cd_4, cs_4);
+#line 1387
+                        float3 _S332 = evalReflective_0(&_S331, woL_6, wiL_8, kernelContext_29);
+                        Parts_addLight_0(&st_1->parts_0, depth_3, cls_4, thr_2 * _S332 * leE_0 / _S329 * _S330, cd_4, cs_4);
 
-#line 1376
+#line 1387
                     }
 
                     if(track_0)
                     {
                         float vv_3 = lum_0(cd_4 + cs_4);
                         st_1->visTotal_0 = st_1->visTotal_0 + vv_3;
-                        if(_S310)
+                        if(_S322)
                         {
 
-#line 1382
+#line 1393
                             vv_0 = 0.0f;
 
-#line 1382
+#line 1393
                         }
                         else
                         {
 
-#line 1382
+#line 1393
                             vv_0 = vv_3;
 
-#line 1382
+#line 1393
                         }
 
-#line 1382
+#line 1393
                         st_1->visLit_0 = st_1->visLit_0 + vv_0;
-                        if(kernelContext_27->params_0[int(41)] == 0U)
+                        if(kernelContext_29->params_0[int(41)] == 0U)
                         {
 
-#line 1383
-                            float3 _S321 = float3(cosi_7) ;
-                            float3 _S322 = cd_4 / _S321;
+#line 1394
+                            float3 _S333 = float3(cosi_7) ;
+                            float3 _S334 = cd_4 / _S333;
 
-#line 1384
-                            float3 _S323 = cs_4 / _S321;
+#line 1395
+                            float3 _S335 = cs_4 / _S333;
 
-#line 1384
-                            if(_S310)
+#line 1395
+                            if(_S322)
                             {
 
-#line 1384
+#line 1395
                                 us_0 = 0.0f;
 
-#line 1384
+#line 1395
                             }
                             else
                             {
 
-#line 1384
+#line 1395
                                 us_0 = 1.0f;
 
-#line 1384
+#line 1395
                             }
 
-#line 1384
-                            if(_S310)
+#line 1395
+                            if(_S322)
                             {
 
-#line 1384
+#line 1395
                                 _S188 = 0.0f;
 
-#line 1384
+#line 1395
                             }
                             else
                             {
 
-#line 1384
+#line 1395
                                 _S188 = cosi_7;
 
-#line 1384
+#line 1395
                             }
 
-#line 1384
-                            addSlot_0(pixel_7, 3U, _S322, _S323, _S309, us_0, _S188, kernelContext_27);
+#line 1395
+                            addSlot_0(pixel_7, 3U, _S334, _S335, _S321, us_0, _S188, kernelContext_29);
 
-#line 1383
+#line 1394
                         }
 
-#line 1378
+#line 1389
                     }
 
-#line 1367
+#line 1378
                 }
 
-#line 1363
+#line 1374
             }
 
-#line 1353
+#line 1364
         }
 
-#line 1392
+#line 1403
         float lobe_0 = Rng_next_0(&rng_4);
         float u1_3 = Rng_next_0(&rng_4);
         float u2_3 = Rng_next_0(&rng_4);
         float u3_1 = Rng_next_0(&rng_4);
 
-#line 1401
+#line 1412
         if(((&surf_3)->coat_0) > 0.0f)
         {
 
-#line 1401
-            float _S324 = Rng_next_0(&rng_4);
+#line 1412
+            float _S336 = Rng_next_0(&rng_4);
 
-#line 1401
-            vv_0 = _S324;
+#line 1412
+            vv_0 = _S336;
 
-#line 1401
+#line 1412
         }
         else
         {
 
-#line 1401
+#line 1412
             vv_0 = 1.0f;
 
-#line 1401
+#line 1412
         }
         if(((&surf_3)->sheenP_0) > 0.0f)
         {
 
-#line 1402
-            float _S325 = Rng_next_0(&rng_4);
+#line 1413
+            float _S337 = Rng_next_0(&rng_4);
 
-#line 1402
-            us_0 = _S325;
+#line 1413
+            us_0 = _S337;
 
-#line 1402
+#line 1413
         }
         else
         {
 
-#line 1402
+#line 1413
             us_0 = 1.0f;
 
-#line 1402
+#line 1413
         }
         if(vv_0 < ((&surf_3)->coatP_0))
         {
             float3 h_10 = sampleVndf_0(woL_6, (&surf_3)->coatAlpha_0, u1_3, u2_3);
             float woh_0 = dot(woL_6, h_10);
             float3 wiL_9 = float3((2.0f * woh_0))  * h_10 - woL_6;
-            float _S326 = wiL_9.z;
-            float3 _S327 = float3((fresnelDielectric_0(woh_0, 1.5f) / coatF_0 * G1_0(max(_S326, 0.0f), (&surf_3)->coatAlpha_0))) ;
+            float _S338 = wiL_9.z;
+            float3 _S339 = float3((fresnelDielectric_0(woh_0, 1.5f) / coatF_0 * G1_0(max(_S338, 0.0f), (&surf_3)->coatAlpha_0))) ;
 
-#line 1409
-            ok_0 = _S326 > 0.0f;
+#line 1420
+            ok_0 = _S338 > 0.0f;
 
-#line 1409
+#line 1420
             lobeCls_0 = 1U;
 
-#line 1409
-            track_0 = false;
+#line 1420
+            refracted_0 = false;
 
-#line 1409
+#line 1420
             wi_6 = wiL_9;
 
-#line 1409
-            li_0 = _S327;
+#line 1420
+            li_0 = _S339;
 
-#line 1403
+#line 1414
         }
         else
         {
 
-#line 1411
+#line 1422
             if(us_0 < ((&surf_3)->sheenP_0))
             {
 
                 float3 wiL_10 = cosineLocal_0(u1_3, u2_3);
 
-                float _S328 = wiL_10.z;
+                float _S340 = wiL_10.z;
 
-#line 1416
-                float3 _S329 = (&surf_3)->sheenColor_0 * float3(sheenCore_0(_S260, _S328, normalize(woL_6 + wiL_10).z, (&surf_3)->sheenAlpha_0))  * float3(3.1415927410125732f)  / float3((_S328 * (&surf_3)->sheenP_0)) ;
+#line 1427
+                float3 _S341 = (&surf_3)->sheenColor_0 * float3(sheenCore_0(_S264, _S340, normalize(woL_6 + wiL_10).z, (&surf_3)->sheenAlpha_0))  * float3(3.1415927410125732f)  / float3((_S340 * (&surf_3)->sheenP_0)) ;
 
-#line 1416
+#line 1427
                 ok_0 = true;
 
-#line 1416
+#line 1427
                 lobeCls_0 = 1U;
 
-#line 1416
-                track_0 = false;
+#line 1427
+                refracted_0 = false;
 
-#line 1416
+#line 1427
                 wi_6 = wiL_10;
 
-#line 1416
-                li_0 = _S329;
+#line 1427
+                li_0 = _S341;
 
-#line 1411
+#line 1422
             }
             else
             {
 
-#line 1418
+#line 1429
                 if(lobe_0 < metallic_1)
                 {
-                    float3 h_11 = sampleVndf_0(woL_6, _S259, u1_3, u2_3);
+                    float3 h_11 = sampleVndf_0(woL_6, _S263, u1_3, u2_3);
                     float woh_1 = dot(woL_6, h_11);
                     float3 wiL_11 = float3((2.0f * woh_1))  * h_11 - woL_6;
-                    float _S330 = wiL_11.z;
+                    float _S342 = wiL_11.z;
 
-#line 1423
-                    bool _S331 = _S330 > 0.0f;
-                    float3 _S332 = schlick_0(albedo_2, woh_1);
+#line 1434
+                    bool _S343 = _S342 > 0.0f;
+                    float3 _S344 = schlick_0(albedo_2, woh_1);
 
-#line 1424
-                    thread Surface_0 _S333 = surf_3;
+#line 1435
+                    thread Surface_0 _S345 = surf_3;
 
-#line 1424
-                    float3 _S334 = multiscatterFactor_0(&_S333, _S260, kernelContext_27);
+#line 1435
+                    float3 _S346 = multiscatterFactor_0(&_S345, _S264, kernelContext_29);
 
-#line 1424
-                    float3 _S335 = _S332 * _S334 * float3(G1_0(max(_S330, 0.0f), _S259)) ;
+#line 1435
+                    float3 _S347 = _S344 * _S346 * float3(G1_0(max(_S342, 0.0f), _S263)) ;
 
-#line 1424
-                    ok_0 = _S331;
+#line 1435
+                    ok_0 = _S343;
 
-#line 1424
+#line 1435
                     lobeCls_0 = 1U;
 
-#line 1424
-                    track_0 = false;
+#line 1435
+                    refracted_0 = false;
 
-#line 1424
+#line 1435
                     wi_6 = wiL_11;
 
-#line 1424
-                    li_0 = _S335;
+#line 1435
+                    li_0 = _S347;
 
-#line 1418
+#line 1429
                 }
                 else
                 {
 
-#line 1426
+#line 1437
                     if(lobe_0 < (metallic_1 + (1.0f - metallic_1) * transmission_2))
                     {
-                        float3 h_12 = sampleVndf_0(woL_6, _S259, u1_3, u2_3);
+                        float3 h_12 = sampleVndf_0(woL_6, _S263, u1_3, u2_3);
                         float woh_2 = dot(woL_6, h_12);
                         if(u3_1 < (fresnelDielectric_0(woh_2, eta_2)))
                         {
                             float3 wiL_12 = float3((2.0f * woh_2))  * h_12 - woL_6;
-                            float _S336 = wiL_12.z;
-                            float3 _S337 = float3((G1_0(max(_S336, 0.0f), _S259) * (&surf_3)->tComp_0)) ;
+                            float _S348 = wiL_12.z;
+                            float3 _S349 = float3((G1_0(max(_S348, 0.0f), _S263) * (&surf_3)->tComp_0)) ;
 
-#line 1434
-                            ok_0 = _S336 > 0.0f;
+#line 1445
+                            ok_0 = _S348 > 0.0f;
 
-#line 1434
+#line 1445
                             lobeCls_0 = 1U;
 
-#line 1434
-                            track_0 = false;
+#line 1445
+                            refracted_0 = false;
 
-#line 1434
+#line 1445
                             wi_6 = wiL_12;
 
-#line 1434
-                            li_0 = _S337;
+#line 1445
+                            li_0 = _S349;
 
-#line 1430
+#line 1441
                         }
                         else
                         {
 
-#line 1438
+#line 1449
                             float r_7 = 1.0f / eta_2;
                             float k_5 = 1.0f - r_7 * r_7 * (1.0f - woh_2 * woh_2);
 
-#line 1439
-                            float3 _S338 = float3(r_7) ;
-                            float3 wiL_13 = - woL_6 * _S338 + float3((r_7 * woh_2 - sqrt(max(k_5, 0.0f))))  * h_12;
-                            float _S339 = wiL_13.z;
+#line 1450
+                            float3 _S350 = float3(r_7) ;
+                            float3 wiL_13 = - woL_6 * _S350 + float3((r_7 * woh_2 - sqrt(max(k_5, 0.0f))))  * h_12;
+                            float _S351 = wiL_13.z;
 
-#line 1441
-                            if(_S339 < 0.0f)
+#line 1452
+                            if(_S351 < 0.0f)
                             {
 
-#line 1441
+#line 1452
                                 ok_0 = k_5 > 0.0f;
 
-#line 1441
+#line 1452
                             }
                             else
                             {
 
-#line 1441
+#line 1452
                                 ok_0 = false;
 
-#line 1441
+#line 1452
                             }
 
 
 
-                            float3 _S340 = albedo_2 * float3(G1_0(max(- _S339, 0.0f), _S259))  * _S338 * _S338 * float3((&surf_3)->tComp_0) ;
+                            float3 _S352 = albedo_2 * float3(G1_0(max(- _S351, 0.0f), _S263))  * _S350 * _S350 * float3((&surf_3)->tComp_0) ;
 
-#line 1445
+#line 1456
                             lobeCls_0 = 2U;
 
-#line 1445
-                            track_0 = true;
+#line 1456
+                            refracted_0 = true;
 
-#line 1445
+#line 1456
                             wi_6 = wiL_13;
 
-#line 1445
-                            li_0 = _S340;
+#line 1456
+                            li_0 = _S352;
 
-#line 1430
+#line 1441
                         }
 
-#line 1426
+#line 1437
                     }
                     else
                     {
 
-#line 1448
+#line 1459
                         if(u3_1 < fSel_1)
                         {
-                            float3 h_13 = sampleVndf_0(woL_6, _S259, u1_3, u2_3);
+                            float3 h_13 = sampleVndf_0(woL_6, _S263, u1_3, u2_3);
                             float woh_3 = dot(woL_6, h_13);
                             float3 wiL_14 = float3((2.0f * woh_3))  * h_13 - woL_6;
-                            float _S341 = wiL_14.z;
-                            float3 _S342 = float3((fresnelDielectric_0(woh_3, wB_0) / fSel_1 * G1_0(max(_S341, 0.0f), _S259))) ;
+                            float _S353 = wiL_14.z;
+                            float3 _S354 = float3((fresnelDielectric_0(woh_3, wB_0) / fSel_1 * G1_0(max(_S353, 0.0f), _S263))) ;
 
-#line 1454
-                            ok_0 = _S341 > 0.0f;
+#line 1465
+                            ok_0 = _S353 > 0.0f;
 
-#line 1454
+#line 1465
                             lobeCls_0 = 1U;
 
-#line 1454
+#line 1465
                             wi_6 = wiL_14;
 
-#line 1454
-                            li_0 = _S342;
+#line 1465
+                            li_0 = _S354;
 
-#line 1448
+#line 1459
                         }
                         else
                         {
 
-#line 1458
-                            float3 _S343 = cosineLocal_0(u1_3, u2_3);
+#line 1469
+                            float3 _S355 = cosineLocal_0(u1_3, u2_3);
 
-#line 1458
+#line 1469
                             ok_0 = true;
 
-#line 1458
+#line 1469
                             lobeCls_0 = 0U;
 
-#line 1458
-                            wi_6 = _S343;
+#line 1469
+                            wi_6 = _S355;
 
-#line 1458
+#line 1469
                             li_0 = albedo_2;
 
-#line 1448
+#line 1459
                         }
 
-#line 1448
-                        track_0 = false;
+#line 1459
+                        refracted_0 = false;
 
-#line 1426
+#line 1437
                     }
 
-#line 1418
+#line 1429
                 }
 
-#line 1411
+#line 1422
             }
 
-#line 1403
+#line 1414
         }
 
-#line 1462
+#line 1473
         if(!ok_0)
         {
 
-#line 1462
+#line 1473
             alive_0 = false;
 
-#line 1462
+#line 1473
             thr_1 = thr_2;
             break;
         }
 
-#line 1464
+#line 1475
         if(depth_3 == 0U)
         {
 
-#line 1464
+#line 1475
             cls_5 = lobeCls_0;
 
-#line 1464
+#line 1475
         }
         else
         {
 
-#line 1464
+#line 1475
             cls_5 = cls_4;
 
-#line 1464
+#line 1475
         }
 
-        st_1->misPrev_0 = !track_0;
-        if(track_0)
+        st_1->misPrev_0 = !refracted_0;
+        if(refracted_0)
         {
 
-#line 1467
+#line 1478
             _S188 = 0.0f;
 
-#line 1467
+#line 1478
         }
         else
         {
 
-#line 1467
-            thread Surface_0 _S344 = surf_3;
+#line 1478
+            thread Surface_0 _S356 = surf_3;
 
-#line 1467
-            float _S345 = reflectivePdf_0(&_S344, woL_6, wi_6);
+#line 1478
+            float _S357 = reflectivePdf_0(&_S356, woL_6, wi_6);
 
-#line 1467
-            _S188 = _S345;
+#line 1478
+            _S188 = _S357;
 
-#line 1467
+#line 1478
         }
 
-#line 1467
+#line 1478
         st_1->qPrev_0 = _S188;
+        st_1->prevInst_0 = _S202 + 1U;
 
         float3 dir_3 = normalize(float3(wi_6.x)  * T_2 + float3(wi_6.y)  * B_2 + float3(wi_6.z)  * n_8);
 
         float side_0 = dot(dir_3, ng_0);
-        if(track_0)
+        if(refracted_0)
         {
 
-#line 1472
-            reGI_0 = side_0 >= 0.0f;
+#line 1484
+            track_0 = side_0 >= 0.0f;
 
-#line 1472
+#line 1484
         }
         else
         {
 
-#line 1472
-            reGI_0 = side_0 <= 0.0f;
+#line 1484
+            track_0 = side_0 <= 0.0f;
 
-#line 1472
+#line 1484
         }
 
-#line 1472
-        if(reGI_0)
+#line 1484
+        if(track_0)
         {
 
-#line 1472
+#line 1484
             dir_2 = dir_3;
 
-#line 1472
+#line 1484
             cls_4 = cls_5;
 
-#line 1472
+#line 1484
             alive_0 = false;
 
-#line 1472
+#line 1484
             thr_1 = thr_2;
             break;
         }
 
-#line 1474
+#line 1486
         if(side_0 > 0.0f)
         {
 
-#line 1474
+#line 1486
             _S189 = 9.9999997473787516e-05f;
 
-#line 1474
+#line 1486
         }
         else
         {
 
-#line 1474
+#line 1486
             _S189 = -9.9999997473787516e-05f;
 
-#line 1474
+#line 1486
         }
 
-#line 1474
-        float3 _S346 = hit_1 + ng_0 * float3(_S189) ;
+#line 1486
+        float3 _S358 = hit_1 + ng_0 * float3(_S189) ;
         float3 thr_4 = thr_2 * li_0;
 
         if(depth_3 >= 2U)
         {
             float pr_0 = clamp(max(thr_4.x, max(thr_4.y, thr_4.z)), 0.05000000074505806f, 0.94999998807907104f);
-            float _S347 = Rng_next_0(&rng_4);
+            float _S359 = Rng_next_0(&rng_4);
 
-#line 1480
-            if(_S347 > pr_0)
+#line 1492
+            if(_S359 > pr_0)
             {
 
-#line 1480
-                org_2 = _S346;
+#line 1492
+                org_2 = _S358;
 
-#line 1480
+#line 1492
                 dir_2 = dir_3;
 
-#line 1480
+#line 1492
                 cls_4 = cls_5;
 
-#line 1480
+#line 1492
                 alive_0 = false;
 
-#line 1480
+#line 1492
                 thr_1 = thr_4;
                 break;
             }
 
-#line 1481
+#line 1493
             thr_1 = thr_4 / float3(pr_0) ;
 
-#line 1477
+#line 1489
         }
         else
         {
 
-#line 1477
+#line 1489
             thr_1 = thr_4;
 
-#line 1477
+#line 1489
         }
 
-#line 973
-        uint _S348 = once_0 + 1U;
+#line 981
+        uint _S360 = once_0 + 1U;
 
-#line 973
+#line 981
         cls_4 = cls_5;
 
-#line 973
+#line 981
         dir_2 = dir_3;
 
-#line 973
-        org_2 = _S346;
+#line 981
+        org_2 = _S358;
 
-#line 973
+#line 981
         chan_2 = chan_1;
 
-#line 973
-        once_0 = _S348;
+#line 981
+        once_0 = _S360;
 
-#line 973
+#line 981
     }
 
-#line 1485
+#line 1497
     st_1->rng_0 = (&rng_4)->state_0;
     st_1->org_0 = org_2;
     st_1->dir_0 = dir_2;
@@ -6205,125 +6337,125 @@ bool shadePath_0(PathState_0 thread* st_1, const Hit_0 thread* hq_0, uint depth_
     if(depth_3 == 0U)
     {
 
-#line 1491
+#line 1503
         _S187 = st_1->gi_0;
 
-#line 1491
+#line 1503
     }
     else
     {
 
-#line 1491
+#line 1503
         _S187 = false;
 
-#line 1491
+#line 1503
     }
 
-#line 1491
+#line 1503
     if(_S187)
     {
 
         uint so_1 = restirScratch_0(pixel_7);
 
-#line 1494
+#line 1506
         k_4 = 0U;
         for(;;)
         {
 
-#line 1495
+#line 1507
             if(k_4 < 3U)
             {
             }
             else
             {
 
-#line 1495
+#line 1507
                 break;
             }
-            *(kernelContext_27->restir_0+(so_1 + 15U + k_4)) = thr_1[k_4];
-            *(kernelContext_27->restir_0+(so_1 + 18U + k_4)) = (&st_1->parts_0)->total_0[k_4];
+            *(kernelContext_29->restir_0+(so_1 + 15U + k_4)) = thr_1[k_4];
+            *(kernelContext_29->restir_0+(so_1 + 18U + k_4)) = (&st_1->parts_0)->total_0[k_4];
 
-#line 1495
+#line 1507
             k_4 = k_4 + 1U;
 
-#line 1495
+#line 1507
         }
 
-#line 1500
-        *(kernelContext_27->restir_0+(so_1 + 21U)) = st_1->qPrev_0;
+#line 1512
+        *(kernelContext_29->restir_0+(so_1 + 21U)) = st_1->qPrev_0;
 
-#line 1491
+#line 1503
     }
 
-#line 1502
+#line 1514
     return alive_0;
 }
 
 
-#line 1526
-float3 giFinish_0(float3 pathTotal_0, uint pixel_8, KernelContext_0 thread* kernelContext_28)
+#line 1538
+float3 giFinish_0(float3 pathTotal_0, uint pixel_8, KernelContext_0 thread* kernelContext_30)
 {
-    uint co_3 = restirBase_0(pixel_8, kernelContext_28->params_0[int(6)] & 1U);
+    uint co_3 = restirBase_0(pixel_8, kernelContext_30->params_0[int(6)] & 1U);
     uint so_2 = restirScratch_0(pixel_8);
-    float wsum_5 = *(kernelContext_28->restir_0+so_2);
-    float m_1 = *(kernelContext_28->restir_0+(so_2 + 1U)) + 1.0f;
-    float _S349 = *(kernelContext_28->restir_0+(so_2 + 2U));
-    float3 _S350 = float3(*(kernelContext_28->restir_0+(so_2 + 3U)), *(kernelContext_28->restir_0+(so_2 + 4U)), *(kernelContext_28->restir_0+(so_2 + 5U)));
-    float3 _S351 = float3(*(kernelContext_28->restir_0+(so_2 + 6U)), *(kernelContext_28->restir_0+(so_2 + 7U)), *(kernelContext_28->restir_0+(so_2 + 8U)));
-    float3 _S352 = float3(*(kernelContext_28->restir_0+(so_2 + 9U)), *(kernelContext_28->restir_0+(so_2 + 10U)), *(kernelContext_28->restir_0+(so_2 + 11U)));
-    float3 _S353 = float3(*(kernelContext_28->restir_0+(so_2 + 12U)), *(kernelContext_28->restir_0+(so_2 + 13U)), *(kernelContext_28->restir_0+(so_2 + 14U)));
-    float _S354 = *(kernelContext_28->restir_0+(so_2 + 15U));
+    float wsum_5 = *(kernelContext_30->restir_0+so_2);
+    float m_1 = *(kernelContext_30->restir_0+(so_2 + 1U)) + 1.0f;
+    float _S361 = *(kernelContext_30->restir_0+(so_2 + 2U));
+    float3 _S362 = float3(*(kernelContext_30->restir_0+(so_2 + 3U)), *(kernelContext_30->restir_0+(so_2 + 4U)), *(kernelContext_30->restir_0+(so_2 + 5U)));
+    float3 _S363 = float3(*(kernelContext_30->restir_0+(so_2 + 6U)), *(kernelContext_30->restir_0+(so_2 + 7U)), *(kernelContext_30->restir_0+(so_2 + 8U)));
+    float3 _S364 = float3(*(kernelContext_30->restir_0+(so_2 + 9U)), *(kernelContext_30->restir_0+(so_2 + 10U)), *(kernelContext_30->restir_0+(so_2 + 11U)));
+    float3 _S365 = float3(*(kernelContext_30->restir_0+(so_2 + 12U)), *(kernelContext_30->restir_0+(so_2 + 13U)), *(kernelContext_30->restir_0+(so_2 + 14U)));
+    float _S366 = *(kernelContext_30->restir_0+(so_2 + 15U));
 
-#line 1537
-    float _S355 = *(kernelContext_28->restir_0+(so_2 + 16U));
+#line 1549
+    float _S367 = *(kernelContext_30->restir_0+(so_2 + 16U));
 
-#line 1537
-    float _S356 = *(kernelContext_28->restir_0+(so_2 + 17U));
-    float3 d0_0 = float3(*(kernelContext_28->restir_0+(so_2 + 18U)), *(kernelContext_28->restir_0+(so_2 + 19U)), *(kernelContext_28->restir_0+(so_2 + 20U)));
-    float qPrev_1 = *(kernelContext_28->restir_0+(so_2 + 21U));
+#line 1549
+    float _S368 = *(kernelContext_30->restir_0+(so_2 + 17U));
+    float3 d0_0 = float3(*(kernelContext_30->restir_0+(so_2 + 18U)), *(kernelContext_30->restir_0+(so_2 + 19U)), *(kernelContext_30->restir_0+(so_2 + 20U)));
+    float qPrev_1 = *(kernelContext_30->restir_0+(so_2 + 21U));
 
-#line 1539
+#line 1551
     bool own_0;
-    if((as_type<uint>((*(kernelContext_28->restir_0+(so_2 + 22U))))) != 0U)
+    if((as_type<uint>((*(kernelContext_30->restir_0+(so_2 + 22U))))) != 0U)
     {
 
-#line 1540
+#line 1552
         own_0 = qPrev_1 > 0.0f;
 
-#line 1540
+#line 1552
     }
     else
     {
 
-#line 1540
+#line 1552
         own_0 = false;
 
-#line 1540
+#line 1552
     }
     float3 giTotal_0 = pathTotal_0 - d0_0;
 
-#line 1541
+#line 1553
     float pSel_2;
 
-#line 1541
+#line 1553
     float wsum_6;
 
-#line 1541
+#line 1553
     float W_1;
 
-#line 1541
+#line 1553
     float3 cSel_2;
 
-#line 1541
+#line 1553
     float3 xSel_2;
 
-#line 1541
+#line 1553
     float3 nSel_2;
 
-#line 1541
+#line 1553
     float3 lSel_2;
 
-#line 1541
+#line 1553
     float3 result_0;
 
     if(own_0)
@@ -6335,269 +6467,269 @@ float3 giFinish_0(float3 pathTotal_0, uint pixel_8, KernelContext_0 thread* kern
             float wOwn_0 = pOwn_0 / qPrev_1;
             float wsum_7 = wsum_5 + wOwn_0;
             thread Rng_0 r_8;
-            (&r_8)->state_0 = pcg_0(pixel_8 ^ (pcg_0(kernelContext_28->params_0[int(6)] * 2246822507U + 4660U)));
-            float _S357 = Rng_next_0(&r_8);
+            (&r_8)->state_0 = pcg_0(pixel_8 ^ (pcg_0(kernelContext_30->params_0[int(6)] * 2246822507U + 4660U)));
+            float _S369 = Rng_next_0(&r_8);
 
-#line 1553
-            if((_S357 * wsum_7) < wOwn_0)
+#line 1565
+            if((_S369 * wsum_7) < wOwn_0)
             {
 
 
-                float3 _S358 = float3(*(kernelContext_28->restir_0+(co_3 + 16U)), *(kernelContext_28->restir_0+(co_3 + 17U)), *(kernelContext_28->restir_0+(co_3 + 18U)));
-                float3 _S359 = float3(*(kernelContext_28->restir_0+(co_3 + 19U)), *(kernelContext_28->restir_0+(co_3 + 20U)), *(kernelContext_28->restir_0+(co_3 + 21U)));
-                if(_S354 > 9.99999997475242708e-07f)
+                float3 _S370 = float3(*(kernelContext_30->restir_0+(co_3 + 16U)), *(kernelContext_30->restir_0+(co_3 + 17U)), *(kernelContext_30->restir_0+(co_3 + 18U)));
+                float3 _S371 = float3(*(kernelContext_30->restir_0+(co_3 + 19U)), *(kernelContext_30->restir_0+(co_3 + 20U)), *(kernelContext_30->restir_0+(co_3 + 21U)));
+                if(_S366 > 9.99999997475242708e-07f)
                 {
 
-#line 1559
-                    pSel_2 = giTotal_0.x / _S354;
+#line 1571
+                    pSel_2 = giTotal_0.x / _S366;
 
-#line 1559
+#line 1571
                 }
                 else
                 {
 
-#line 1559
+#line 1571
                     pSel_2 = 0.0f;
 
-#line 1559
+#line 1571
                 }
 
-#line 1559
-                if(_S355 > 9.99999997475242708e-07f)
+#line 1571
+                if(_S367 > 9.99999997475242708e-07f)
                 {
 
-#line 1559
-                    wsum_6 = giTotal_0.y / _S355;
+#line 1571
+                    wsum_6 = giTotal_0.y / _S367;
 
-#line 1559
+#line 1571
                 }
                 else
                 {
 
-#line 1559
+#line 1571
                     wsum_6 = 0.0f;
 
-#line 1559
+#line 1571
                 }
 
-#line 1559
-                if(_S356 > 9.99999997475242708e-07f)
+#line 1571
+                if(_S368 > 9.99999997475242708e-07f)
                 {
 
-#line 1559
-                    W_1 = giTotal_0.z / _S356;
+#line 1571
+                    W_1 = giTotal_0.z / _S368;
 
-#line 1559
+#line 1571
                 }
                 else
                 {
 
-#line 1559
+#line 1571
                     W_1 = 0.0f;
 
-#line 1559
+#line 1571
                 }
 
-#line 1559
-                float3 _S360 = float3(pSel_2, wsum_6, W_1);
+#line 1571
+                float3 _S372 = float3(pSel_2, wsum_6, W_1);
 
-#line 1559
+#line 1571
                 pSel_2 = pOwn_0;
 
-#line 1559
+#line 1571
                 cSel_2 = cOwn_0;
 
-#line 1559
-                xSel_2 = _S358;
+#line 1571
+                xSel_2 = _S370;
 
-#line 1559
-                nSel_2 = _S359;
+#line 1571
+                nSel_2 = _S371;
 
-#line 1559
-                lSel_2 = _S360;
+#line 1571
+                lSel_2 = _S372;
 
-#line 1553
+#line 1565
             }
             else
             {
 
-#line 1553
-                pSel_2 = _S349;
+#line 1565
+                pSel_2 = _S361;
 
-#line 1553
-                cSel_2 = _S350;
+#line 1565
+                cSel_2 = _S362;
 
-#line 1553
-                xSel_2 = _S351;
+#line 1565
+                xSel_2 = _S363;
 
-#line 1553
-                nSel_2 = _S352;
+#line 1565
+                nSel_2 = _S364;
 
-#line 1553
-                lSel_2 = _S353;
+#line 1565
+                lSel_2 = _S365;
 
-#line 1553
+#line 1565
             }
 
-#line 1553
+#line 1565
             wsum_6 = wsum_7;
 
-#line 1547
+#line 1559
         }
         else
         {
 
-#line 1547
-            pSel_2 = _S349;
+#line 1559
+            pSel_2 = _S361;
 
-#line 1547
-            cSel_2 = _S350;
+#line 1559
+            cSel_2 = _S362;
 
-#line 1547
-            xSel_2 = _S351;
+#line 1559
+            xSel_2 = _S363;
 
-#line 1547
-            nSel_2 = _S352;
+#line 1559
+            nSel_2 = _S364;
 
-#line 1547
-            lSel_2 = _S353;
+#line 1559
+            lSel_2 = _S365;
 
-#line 1547
+#line 1559
             wsum_6 = wsum_5;
 
-#line 1547
+#line 1559
         }
 
-#line 1547
+#line 1559
         result_0 = d0_0;
 
-#line 1543
+#line 1555
     }
     else
     {
 
-#line 1564
+#line 1576
         float3 result_1 = d0_0 + giTotal_0;
 
-#line 1564
-        pSel_2 = _S349;
+#line 1576
+        pSel_2 = _S361;
 
-#line 1564
-        cSel_2 = _S350;
+#line 1576
+        cSel_2 = _S362;
 
-#line 1564
-        xSel_2 = _S351;
+#line 1576
+        xSel_2 = _S363;
 
-#line 1564
-        nSel_2 = _S352;
+#line 1576
+        nSel_2 = _S364;
 
-#line 1564
-        lSel_2 = _S353;
+#line 1576
+        lSel_2 = _S365;
 
-#line 1564
+#line 1576
         wsum_6 = wsum_5;
 
-#line 1564
+#line 1576
         result_0 = result_1;
 
-#line 1543
+#line 1555
     }
 
-#line 1565
-    bool _S361 = pSel_2 > 0.0f;
+#line 1577
+    bool _S373 = pSel_2 > 0.0f;
 
-#line 1565
-    if(_S361)
+#line 1577
+    if(_S373)
     {
 
-#line 1565
+#line 1577
         W_1 = wsum_6 / (m_1 * pSel_2);
 
-#line 1565
+#line 1577
     }
     else
     {
 
-#line 1565
+#line 1577
         W_1 = 0.0f;
 
-#line 1565
+#line 1577
     }
     float3 result_2 = result_0 + cSel_2 * float3(W_1) ;
 
-#line 1566
+#line 1578
     uint k_6 = 0U;
     for(;;)
     {
 
-#line 1567
+#line 1579
         if(k_6 < 3U)
         {
         }
         else
         {
 
-#line 1567
+#line 1579
             break;
         }
-        *(kernelContext_28->restir_0+(co_3 + 16U + k_6)) = xSel_2[k_6];
-        *(kernelContext_28->restir_0+(co_3 + 19U + k_6)) = nSel_2[k_6];
-        *(kernelContext_28->restir_0+(co_3 + 22U + k_6)) = lSel_2[k_6];
+        *(kernelContext_30->restir_0+(co_3 + 16U + k_6)) = xSel_2[k_6];
+        *(kernelContext_30->restir_0+(co_3 + 19U + k_6)) = nSel_2[k_6];
+        *(kernelContext_30->restir_0+(co_3 + 22U + k_6)) = lSel_2[k_6];
 
-#line 1567
+#line 1579
         k_6 = k_6 + 1U;
 
-#line 1567
+#line 1579
     }
 
-#line 1573
-    *(kernelContext_28->restir_0+(co_3 + 25U)) = W_1;
-    *(kernelContext_28->restir_0+(co_3 + 26U)) = m_1;
-    float device* _S362 = kernelContext_28->restir_0+(co_3 + 27U);
+#line 1585
+    *(kernelContext_30->restir_0+(co_3 + 25U)) = W_1;
+    *(kernelContext_30->restir_0+(co_3 + 26U)) = m_1;
+    float device* _S374 = kernelContext_30->restir_0+(co_3 + 27U);
 
-#line 1575
-    if(_S361)
+#line 1587
+    if(_S373)
     {
 
-#line 1575
+#line 1587
         k_6 = 1U;
 
-#line 1575
+#line 1587
     }
     else
     {
 
-#line 1575
+#line 1587
         k_6 = 0U;
 
-#line 1575
+#line 1587
     }
 
-#line 1575
-    *_S362 = (as_type<float>((k_6)));
+#line 1587
+    *_S374 = (as_type<float>((k_6)));
     return result_2;
 }
 
 
-void finishPath_0(const PathState_0 thread* st_2, uint pixel_9, KernelContext_0 thread* kernelContext_29)
+void finishPath_0(const PathState_0 thread* st_2, uint pixel_9, KernelContext_0 thread* kernelContext_31)
 {
 
-#line 1580
-    Parts_0 _S363 = st_2->parts_0;
+#line 1592
+    Parts_0 _S375 = st_2->parts_0;
 
-#line 1580
-    float _S364 = st_2->visLit_0;
+#line 1592
+    float _S376 = st_2->visLit_0;
 
-#line 1580
-    float _S365 = st_2->visTotal_0;
+#line 1592
+    float _S377 = st_2->visTotal_0;
 
-#line 1580
-    float3 _S366 = (&st_2->parts_0)->total_0;
+#line 1592
+    float3 _S378 = (&st_2->parts_0)->total_0;
 
-#line 1580
+#line 1592
     float3 radiance_0;
 
-#line 1586
+#line 1598
     if(st_2->gi_0)
     {
 
@@ -6605,286 +6737,286 @@ void finishPath_0(const PathState_0 thread* st_2, uint pixel_9, KernelContext_0 
         if((st_2->chan_0) >= int(0))
         {
 
-#line 1591
-            *(kernelContext_29->restir_0+(restirScratch_0(pixel_9) + 22U)) = (as_type<float>((0U)));
+#line 1603
+            *(kernelContext_31->restir_0+(restirScratch_0(pixel_9) + 22U)) = (as_type<float>((0U)));
 
-#line 1590
+#line 1602
         }
 
-#line 1590
-        float3 _S367 = giFinish_0(_S366, pixel_9, kernelContext_29);
+#line 1602
+        float3 _S379 = giFinish_0(_S378, pixel_9, kernelContext_31);
 
-#line 1590
-        radiance_0 = _S367;
+#line 1602
+        radiance_0 = _S379;
 
-#line 1586
+#line 1598
     }
     else
     {
 
-#line 1586
-        radiance_0 = _S366;
+#line 1598
+        radiance_0 = _S378;
 
-#line 1586
+#line 1598
     }
 
-#line 1586
-    bool _S368;
+#line 1598
+    bool _S380;
 
-#line 1594
+#line 1606
     if(any(isnan(radiance_0)))
     {
 
-#line 1594
-        _S368 = true;
+#line 1606
+        _S380 = true;
 
-#line 1594
+#line 1606
     }
     else
     {
 
-#line 1594
-        _S368 = any(isinf(radiance_0));
+#line 1606
+        _S380 = any(isinf(radiance_0));
 
-#line 1594
+#line 1606
     }
 
-#line 1594
+#line 1606
     Parts_0 parts_1;
 
-#line 1594
+#line 1606
     float visLit_1;
 
-#line 1594
+#line 1606
     float visTotal_1;
 
-#line 1594
-    if(_S368)
+#line 1606
+    if(_S380)
     {
-        float3 _S369 = float3(0.0f) ;
+        float3 _S381 = float3(0.0f) ;
 
-#line 1596
-        radiance_0 = _S369;
+#line 1608
+        radiance_0 = _S381;
 
-#line 1596
-        (&parts_1)->total_0 = _S369;
+#line 1608
+        (&parts_1)->total_0 = _S381;
 
-#line 1596
-        (&parts_1)->directDiffuse_0 = _S369;
+#line 1608
+        (&parts_1)->directDiffuse_0 = _S381;
 
-#line 1596
-        (&parts_1)->indirectDiffuse_0 = _S369;
+#line 1608
+        (&parts_1)->indirectDiffuse_0 = _S381;
 
-#line 1596
-        (&parts_1)->specular_0 = _S369;
+#line 1608
+        (&parts_1)->specular_0 = _S381;
 
-#line 1596
-        (&parts_1)->transmission_0 = _S369;
+#line 1608
+        (&parts_1)->transmission_0 = _S381;
 
-#line 1596
-        (&parts_1)->emission_0 = _S369;
+#line 1608
+        (&parts_1)->emission_0 = _S381;
 
-#line 1596
+#line 1608
         visLit_1 = 0.0f;
 
-#line 1596
+#line 1608
         visTotal_1 = 0.0f;
 
-#line 1594
+#line 1606
     }
     else
     {
 
-#line 1594
-        parts_1 = _S363;
+#line 1606
+        parts_1 = _S375;
 
-#line 1594
-        visLit_1 = _S364;
+#line 1606
+        visLit_1 = _S376;
 
-#line 1594
-        visTotal_1 = _S365;
-
-#line 1594
-    }
-
-#line 1602
-    uint o_9 = 3U * pixel_9;
-    float device* _S370 = kernelContext_29->accum_0+o_9;
-
-#line 1603
-    *_S370 = *_S370 + radiance_0.x;
-    uint _S371 = o_9 + 1U;
-
-#line 1604
-    float device* _S372 = kernelContext_29->accum_0+_S371;
-
-#line 1604
-    *_S372 = *_S372 + radiance_0.y;
-    uint _S373 = o_9 + 2U;
-
-#line 1605
-    float device* _S374 = kernelContext_29->accum_0+_S373;
-
-#line 1605
-    *_S374 = *_S374 + radiance_0.z;
-    if(kernelContext_29->params_0[int(32)] != 0U)
-    {
-        float l_1 = lum_0(radiance_0);
-        float device* _S375 = kernelContext_29->pixelStats_0+o_9;
-
-#line 1609
-        *_S375 = *_S375 + 1.0f;
-        float device* _S376 = kernelContext_29->pixelStats_0+_S371;
-
-#line 1610
-        *_S376 = *_S376 + l_1;
-        float device* _S377 = kernelContext_29->pixelStats_0+_S373;
-
-#line 1611
-        *_S377 = *_S377 + l_1 * l_1;
+#line 1606
+        visTotal_1 = _S377;
 
 #line 1606
     }
 
 #line 1614
-    if(kernelContext_29->params_0[int(28)] != 0U)
-    {
-        uint lo_3 = 65U * pixel_9;
-        array<float3, int(5)> _S378 = { { parts_1.directDiffuse_0, parts_1.indirectDiffuse_0, parts_1.specular_0, parts_1.transmission_0, parts_1.emission_0 } };
+    uint o_9 = 3U * pixel_9;
+    float device* _S382 = kernelContext_31->accum_0+o_9;
+
+#line 1615
+    *_S382 = *_S382 + radiance_0.x;
+    uint _S383 = o_9 + 1U;
+
+#line 1616
+    float device* _S384 = kernelContext_31->accum_0+_S383;
+
+#line 1616
+    *_S384 = *_S384 + radiance_0.y;
+    uint _S385 = o_9 + 2U;
 
 #line 1617
+    float device* _S386 = kernelContext_31->accum_0+_S385;
+
+#line 1617
+    *_S386 = *_S386 + radiance_0.z;
+    if(kernelContext_31->params_0[int(32)] != 0U)
+    {
+        float l_1 = lum_0(radiance_0);
+        float device* _S387 = kernelContext_31->pixelStats_0+o_9;
+
+#line 1621
+        *_S387 = *_S387 + 1.0f;
+        float device* _S388 = kernelContext_31->pixelStats_0+_S383;
+
+#line 1622
+        *_S388 = *_S388 + l_1;
+        float device* _S389 = kernelContext_31->pixelStats_0+_S385;
+
+#line 1623
+        *_S389 = *_S389 + l_1 * l_1;
+
+#line 1618
+    }
+
+#line 1626
+    if(kernelContext_31->params_0[int(28)] != 0U)
+    {
+        uint lo_3 = 65U * pixel_9;
+        array<float3, int(5)> _S390 = { { parts_1.directDiffuse_0, parts_1.indirectDiffuse_0, parts_1.specular_0, parts_1.transmission_0, parts_1.emission_0 } };
+
+#line 1629
         uint k_7 = 0U;
         for(;;)
         {
 
-#line 1618
+#line 1630
             if(k_7 < 5U)
             {
             }
             else
             {
 
-#line 1618
+#line 1630
                 break;
             }
-            uint _S379 = lo_3 + 3U * k_7;
+            uint _S391 = lo_3 + 3U * k_7;
 
-#line 1620
-            float device* _S380 = kernelContext_29->lighting_0+_S379;
+#line 1632
+            float device* _S392 = kernelContext_31->lighting_0+_S391;
 
-#line 1620
-            *_S380 = *_S380 + _S378[k_7].x;
-            float device* _S381 = kernelContext_29->lighting_0+(_S379 + 1U);
+#line 1632
+            *_S392 = *_S392 + _S390[k_7].x;
+            float device* _S393 = kernelContext_31->lighting_0+(_S391 + 1U);
 
-#line 1621
-            *_S381 = *_S381 + _S378[k_7].y;
-            float device* _S382 = kernelContext_29->lighting_0+(_S379 + 2U);
+#line 1633
+            *_S393 = *_S393 + _S390[k_7].y;
+            float device* _S394 = kernelContext_31->lighting_0+(_S391 + 2U);
 
-#line 1622
-            *_S382 = *_S382 + _S378[k_7].z;
+#line 1634
+            *_S394 = *_S394 + _S390[k_7].z;
 
-#line 1618
+#line 1630
             k_7 = k_7 + 1U;
 
-#line 1618
+#line 1630
         }
 
-#line 1624
-        float device* _S383 = kernelContext_29->lighting_0+(lo_3 + 15U);
+#line 1636
+        float device* _S395 = kernelContext_31->lighting_0+(lo_3 + 15U);
 
-#line 1624
-        *_S383 = *_S383 + visLit_1;
-        float device* _S384 = kernelContext_29->lighting_0+(lo_3 + 16U);
+#line 1636
+        *_S395 = *_S395 + visLit_1;
+        float device* _S396 = kernelContext_31->lighting_0+(lo_3 + 16U);
 
-#line 1625
-        *_S384 = *_S384 + visTotal_1;
+#line 1637
+        *_S396 = *_S396 + visTotal_1;
 
-#line 1614
+#line 1626
     }
 
-#line 1627
+#line 1639
     return;
 }
 
 
 #line 9 "shaders/pathtrace.slang"
-[[kernel]] void pathtrace(uint3 tid_0 [[thread_position_in_grid]], uint device* params_1 [[buffer(6)]], float device* pixelStats_1 [[buffer(18)]], metal::raytracing::acceleration_structure<metal::raytracing::instancing> scene_1 [[buffer(0)]], float device* restir_2 [[buffer(19)]], float device* envPixels_1 [[buffer(10)]], uint device* instances_1 [[buffer(3)]], uint device* indices_1 [[buffer(2)]], float device* positions_1 [[buffer(1)]], float device* materials_1 [[buffer(4)]], float device* vnormals_1 [[buffer(16)]], float device* uvs_1 [[buffer(13)]], uint device* texInfo_1 [[buffer(15)]], float device* texels_1 [[buffer(14)]], float device* emitters_1 [[buffer(8)]], uint device* lights_1 [[buffer(5)]], float device* lighting_1 [[buffer(17)]], float device* emitCdf_1 [[buffer(9)]], float device* envMarginal_1 [[buffer(11)]], float device* envCond_1 [[buffer(12)]], float device* accum_1 [[buffer(7)]])
+[[kernel]] void pathtrace(uint3 tid_0 [[thread_position_in_grid]], uint device* params_1 [[buffer(6)]], float device* pixelStats_1 [[buffer(18)]], metal::raytracing::acceleration_structure<metal::raytracing::instancing> scene_1 [[buffer(0)]], float device* restir_2 [[buffer(19)]], float device* envPixels_1 [[buffer(10)]], uint device* instances_1 [[buffer(3)]], uint device* indices_1 [[buffer(2)]], float device* positions_1 [[buffer(1)]], float device* materials_1 [[buffer(4)]], float device* vnormals_1 [[buffer(16)]], float device* uvs_1 [[buffer(13)]], uint device* texInfo_1 [[buffer(15)]], float device* texels_1 [[buffer(14)]], uint device* lights_1 [[buffer(5)]], float device* emitters_1 [[buffer(8)]], float device* lighting_1 [[buffer(17)]], float device* emitCdf_1 [[buffer(9)]], float device* envMarginal_1 [[buffer(11)]], float device* envCond_1 [[buffer(12)]], float device* accum_1 [[buffer(7)]])
 {
 
 #line 9
-    thread KernelContext_0 kernelContext_30;
+    thread KernelContext_0 kernelContext_32;
 
 #line 9
-    (&kernelContext_30)->params_0 = params_1;
+    (&kernelContext_32)->params_0 = params_1;
 
 #line 9
-    (&kernelContext_30)->pixelStats_0 = pixelStats_1;
+    (&kernelContext_32)->pixelStats_0 = pixelStats_1;
 
 #line 9
-    (&kernelContext_30)->scene_0 = scene_1;
+    (&kernelContext_32)->scene_0 = scene_1;
 
 #line 9
-    (&kernelContext_30)->restir_0 = restir_2;
+    (&kernelContext_32)->restir_0 = restir_2;
 
 #line 9
-    (&kernelContext_30)->envPixels_0 = envPixels_1;
+    (&kernelContext_32)->envPixels_0 = envPixels_1;
 
 #line 9
-    (&kernelContext_30)->instances_0 = instances_1;
+    (&kernelContext_32)->instances_0 = instances_1;
 
 #line 9
-    (&kernelContext_30)->indices_0 = indices_1;
+    (&kernelContext_32)->indices_0 = indices_1;
 
 #line 9
-    (&kernelContext_30)->positions_0 = positions_1;
+    (&kernelContext_32)->positions_0 = positions_1;
 
 #line 9
-    (&kernelContext_30)->materials_0 = materials_1;
+    (&kernelContext_32)->materials_0 = materials_1;
 
 #line 9
-    (&kernelContext_30)->vnormals_0 = vnormals_1;
+    (&kernelContext_32)->vnormals_0 = vnormals_1;
 
 #line 9
-    (&kernelContext_30)->uvs_0 = uvs_1;
+    (&kernelContext_32)->uvs_0 = uvs_1;
 
 #line 9
-    (&kernelContext_30)->texInfo_0 = texInfo_1;
+    (&kernelContext_32)->texInfo_0 = texInfo_1;
 
 #line 9
-    (&kernelContext_30)->texels_0 = texels_1;
+    (&kernelContext_32)->texels_0 = texels_1;
 
 #line 9
-    (&kernelContext_30)->emitters_0 = emitters_1;
+    (&kernelContext_32)->lights_0 = lights_1;
 
 #line 9
-    (&kernelContext_30)->lights_0 = lights_1;
+    (&kernelContext_32)->emitters_0 = emitters_1;
 
 #line 9
-    (&kernelContext_30)->lighting_0 = lighting_1;
+    (&kernelContext_32)->lighting_0 = lighting_1;
 
 #line 9
-    (&kernelContext_30)->emitCdf_0 = emitCdf_1;
+    (&kernelContext_32)->emitCdf_0 = emitCdf_1;
 
 #line 9
-    (&kernelContext_30)->envMarginal_0 = envMarginal_1;
+    (&kernelContext_32)->envMarginal_0 = envMarginal_1;
 
 #line 9
-    (&kernelContext_30)->envCond_0 = envCond_1;
+    (&kernelContext_32)->envCond_0 = envCond_1;
 
 #line 9
-    (&kernelContext_30)->accum_0 = accum_1;
+    (&kernelContext_32)->accum_0 = accum_1;
 
-    uint _S385 = tid_0.x;
+    uint _S397 = tid_0.x;
 
 #line 11
-    bool _S386;
+    bool _S398;
 
 #line 11
-    if(_S385 >= params_1[int(0)])
+    if(_S397 >= params_1[int(0)])
     {
 
 #line 11
-        _S386 = true;
+        _S398 = true;
 
 #line 11
     }
@@ -6892,13 +7024,13 @@ void finishPath_0(const PathState_0 thread* st_2, uint pixel_9, KernelContext_0 
     {
 
 #line 11
-        _S386 = (tid_0.y) >= ((&kernelContext_30)->params_0)[int(1)];
+        _S398 = (tid_0.y) >= ((&kernelContext_32)->params_0)[int(1)];
 
 #line 11
     }
 
 #line 11
-    if(_S386)
+    if(_S398)
     {
 
 #line 12
@@ -6906,10 +7038,10 @@ void finishPath_0(const PathState_0 thread* st_2, uint pixel_9, KernelContext_0 
     }
 
 #line 13
-    uint _S387 = tid_0.y;
+    uint _S399 = tid_0.y;
 
 #line 13
-    uint _S388 = _S387 * (&kernelContext_30)->params_0[int(0)] + _S385;
+    uint _S400 = _S399 * (&kernelContext_32)->params_0[int(0)] + _S397;
 
 #line 13
     uint k_8 = 0U;
@@ -6917,7 +7049,7 @@ void finishPath_0(const PathState_0 thread* st_2, uint pixel_9, KernelContext_0 
     {
 
 #line 14
-        if(k_8 < ((&kernelContext_30)->params_0)[int(35)])
+        if(k_8 < ((&kernelContext_32)->params_0)[int(35)])
         {
         }
         else
@@ -6926,14 +7058,14 @@ void finishPath_0(const PathState_0 thread* st_2, uint pixel_9, KernelContext_0 
 #line 14
             break;
         }
-        if((&kernelContext_30)->params_0[int(32)] != 0U)
+        if((&kernelContext_32)->params_0[int(32)] != 0U)
         {
 
 #line 16
-            bool _S389 = pixelActive_0(_S388, &kernelContext_30);
+            bool _S401 = pixelActive_0(_S400, &kernelContext_32);
 
 #line 16
-            _S386 = !_S389;
+            _S398 = !_S401;
 
 #line 16
         }
@@ -6941,13 +7073,13 @@ void finishPath_0(const PathState_0 thread* st_2, uint pixel_9, KernelContext_0 
         {
 
 #line 16
-            _S386 = false;
+            _S398 = false;
 
 #line 16
         }
 
 #line 16
-        if(_S386)
+        if(_S398)
         {
 
 #line 17
@@ -6955,8 +7087,8 @@ void finishPath_0(const PathState_0 thread* st_2, uint pixel_9, KernelContext_0 
         }
 
 #line 17
-        PathState_0 _S390 = generatePathFor_0(_S385, _S387, (&kernelContext_30)->params_0[int(6)] + k_8, &kernelContext_30);
-        thread PathState_0 st_3 = _S390;
+        PathState_0 _S402 = generatePathFor_0(_S397, _S399, (&kernelContext_32)->params_0[int(6)] + k_8, &kernelContext_32);
+        thread PathState_0 st_3 = _S402;
 
 #line 18
         uint depth_4 = 0U;
@@ -6964,7 +7096,7 @@ void finishPath_0(const PathState_0 thread* st_2, uint pixel_9, KernelContext_0 
         {
 
 #line 19
-            if(depth_4 < ((&kernelContext_30)->params_0)[int(7)])
+            if(depth_4 < ((&kernelContext_32)->params_0)[int(7)])
             {
             }
             else
@@ -6975,15 +7107,15 @@ void finishPath_0(const PathState_0 thread* st_2, uint pixel_9, KernelContext_0 
             }
 
 #line 19
-            Hit_0 _S391 = traceClosest_0((&st_3)->org_0, (&st_3)->dir_0, &kernelContext_30);
+            Hit_0 _S403 = traceClosest_0((&st_3)->org_0, (&st_3)->dir_0, &kernelContext_32);
 
 #line 19
-            thread Hit_0 _S392 = _S391;
+            thread Hit_0 _S404 = _S403;
 
 #line 19
-            bool _S393 = shadePath_0(&st_3, &_S392, depth_4, _S388, &kernelContext_30);
+            bool _S405 = shadePath_0(&st_3, &_S404, depth_4, _S400, &kernelContext_32);
 
-            if(!_S393)
+            if(!_S405)
             {
 
 #line 22
@@ -6997,10 +7129,10 @@ void finishPath_0(const PathState_0 thread* st_2, uint pixel_9, KernelContext_0 
         }
 
 #line 19
-        thread PathState_0 _S394 = st_3;
+        thread PathState_0 _S406 = st_3;
 
 #line 19
-        finishPath_0(&_S394, _S388, &kernelContext_30);
+        finishPath_0(&_S406, _S400, &kernelContext_32);
 
 #line 14
         k_8 = k_8 + 1U;

@@ -175,8 +175,8 @@ class Sync:
         """Light linking (receivers, up to 31 linked lights) and IES profiles of the punctual lights.
 
         A linked light gets one group bit; an instance carries the bits of the lights that shine on
-        it. Unlinked lights use bit 31, which every instance has. Blocker collections and linked area
-        lights are not supported."""
+        it. Unlinked lights use bit 31, which every instance has. An area light emits as its own bit.
+        Blocker collections are not supported."""
         UNLINKED = 0x80000000
         masks = {}
         bit = 0
@@ -186,9 +186,6 @@ class Sync:
             if ll.blocker_collection is not None:
                 self.warn(f"Light '{ob.name}': blocker linking is not supported")
             if ll.receiver_collection is None:
-                continue
-            if rec[0] == "area":
-                self.warn(f"Light '{ob.name}': light linking of area lights is not supported")
                 continue
             if bit >= 31:
                 self.warn("Light linking supports 31 linked lights; the rest shine on everything")
@@ -206,6 +203,9 @@ class Sync:
                 inst_mask[idx] = m
         for idx, m in inst_mask.items():
             self.scene.set_instance_light_mask(idx, m)
+        for key, rec in self.lights.items():
+            if rec[0] == "area" and key in masks:
+                self.scene.set_instance_emit_mask(rec[2][2], masks[key][0])
         for key, rec in self.lights.items():
             if rec[0] != "punctual":
                 continue

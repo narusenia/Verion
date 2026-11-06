@@ -180,6 +180,11 @@ float3 sampleVndf(float3 wo, float alpha, float u1, float u2)
 
 float lum(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
 
+// Light linking: per instance, after the light table, a pair of masks: the lights that shine on it and the
+// group it emits as when it is an area light. A light reaches an instance when their masks share a bit.
+uint recvMask(uint inst) { return lights[params[5] * 16 + 2 * inst]; }
+uint emitMask(uint inst) { return lights[params[5] * 16 + 2 * inst + 1]; }
+
 // IES profile at word offset `po` of `lights`: nine frame floats (rows x, y, z of the light's world
 // frame), then 361 horizontal rows of 181 vertical samples at one degree. `d` points from the light.
 float iesFactor(uint po, float3 d)
@@ -593,6 +598,7 @@ struct PathState
     bool gi;       // the first hit takes part in ReSTIR GI: the rest of the path is resampled when it ends
     bool restir;   // the first hit took its emitter sample from ReSTIR: light sampling then has probability 1 at the next hit
     float qPrev;   // its density
+    uint prevInst; // instance index + 1 of the last surface that scattered the path (0: none), for light linking
     float visLit;
     float visTotal;
     Parts parts;
@@ -640,6 +646,7 @@ PathState generatePathFor(uint px, uint py, uint sample)
     s.restir = false;
     s.gi = false;
     s.qPrev = 0.0;
+    s.prevInst = 0;
     s.visLit = 0.0;
     s.visTotal = 0.0;
     s.parts = (Parts)0;
@@ -680,7 +687,7 @@ uint restirScratch(uint pixel) { return pixel * RESTIR_STRIDE + 2 * RESTIR_HALF;
 // The light arriving from point `x` of emitter `e` at `p` without the BSDF: Le cos(light) / d^2,
 // and the density plain light sampling has for it.
 // False when the point is behind the surface or the light faces away.
-bool restirLight(uint e, float3 x, float3 p, float3 n, out float3 wi, out float dist, out float cosi, out float3 g, out float plsa)
+bool restirLight(uint e, uint recv, float3 x, float3 p, float3 n, out float3 wi, out float dist, out float cosi, out float3 g, out float plsa)
 {
     uint o = e * 16;
     float3 a = float3(emitters[o], emitters[o + 1], emitters[o + 2]);
@@ -696,7 +703,8 @@ bool restirLight(uint e, float3 x, float3 p, float3 n, out float3 wi, out float 
     // Density per solid angle of drawing this point by emitted power: what the BSDF-sampled hits
     // on emitters are weighed against, as in plain light sampling.
     plsa = emitters[o + 13] * d2 / (max(emitters[o + 12], 1.0e-30) * max(cosl, 1.0e-5));
-    return cosi > 0.0 && cosl > 1.0e-5 && d2 > 1.0e-12;
+    // Light linking: an area light linked away from this instance contributes nothing.
+    return cosi > 0.0 && cosl > 1.0e-5 && d2 > 1.0e-12 && (asuint(emitters[o + 14]) & recv) != 0;
 }
 
 // Power-heuristic weight of the light-sampling strategy, which the BSDF-sampled hits on emitters complement.
@@ -720,7 +728,7 @@ struct RestirPick
 // winner, and a hidden winner is stored with weight 0 so shadows do not spread. The reuse takes
 // the previous reservoirs without a visibility test of their own, so it is biased near shadow
 // edges; the image is marked non-physical (ADR-0016).
-RestirPick restirDI(uint pixel, float3 p, float3 n, float pHitT, Surface surf, float3 T, float3 B, float3 woL, inout Rng rng)
+RestirPick restirDI(uint pixel, uint recv, float3 p, float3 n, float pHitT, Surface surf, float3 T, float3 B, float3 woL, inout Rng rng)
 {
     uint w = params[0];
     uint cur = params[6] & 1u;
@@ -757,7 +765,7 @@ RestirPick restirDI(uint pixel, float3 p, float3 n, float pHitT, Surface surf, f
         float3 wi, g;
         float dist, cosi, plsa;
         float phat = 0.0;
-        if (q > 0.0 && restirLight(lo, x, p, n, wi, dist, cosi, g, plsa))
+        if (q > 0.0 && restirLight(lo, recv, x, p, n, wi, dist, cosi, g, plsa))
         {
             float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
             phat = lum(evalReflective(surf, woL, wiL) * g) * restirMis(surf, woL, wiL, plsa);
@@ -803,7 +811,7 @@ RestirPick restirDI(uint pixel, float3 p, float3 n, float pHitT, Surface surf, f
             float3 wi, g;
             float dist, cosi, plsa;
             float phat = 0.0;
-            if (restirLight(ei - 1, xc, p, n, wi, dist, cosi, g, plsa))
+            if (restirLight(ei - 1, recv, xc, p, n, wi, dist, cosi, g, plsa))
             {
                 float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
                 phat = lum(evalReflective(surf, woL, wiL) * g) * restirMis(surf, woL, wiL, plsa);
@@ -832,7 +840,7 @@ RestirPick restirDI(uint pixel, float3 p, float3 n, float pHitT, Surface surf, f
     {
         float3 wi, g;
         float dist, cosi, plsa;
-        restirLight(selE - 1, selX, p, n, wi, dist, cosi, g, plsa);
+        restirLight(selE - 1, recv, selX, p, n, wi, dist, cosi, g, plsa);
         r.occ = occluded(p, wi, dist * (1.0 - 1.0e-3));
     }
     uint co = restirBase(pixel, cur);
@@ -1108,6 +1116,9 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
             n = normalize(n + wo * (0.05 - woN));
 
         float3 le = float3(materials[mi + 3], materials[mi + 4], materials[mi + 5]) * texEmission;
+        // Light linking: an area light linked away from the surface the path came from adds nothing.
+        if (st.prevInst != 0 && (emitMask(hq.inst) & recvMask(st.prevInst - 1)) == 0)
+            le = float3(0.0);
         if (any(le > 0.0))
         {
             float wB = 1.0;
@@ -1192,7 +1203,7 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
             if (virt && !(lightingOn && depth == 0))
                 continue;
             // Light linking: the light shines on this instance only when their masks share a bit.
-            if ((lights[o + 14] & lights[lightCount * 16 + hq.inst]) == 0)
+            if ((lights[o + 14] & recvMask(hq.inst)) == 0)
                 continue;
             float3 wi;
             float dist;
@@ -1265,12 +1276,12 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
         }
         if (reDI)
         {
-            RestirPick pick = restirDI(pixel, p, n, pHitT, surf, T, B, woL, rng);
+            RestirPick pick = restirDI(pixel, recvMask(hq.inst), p, n, pHitT, surf, T, B, woL, rng);
             if (pick.valid)
             {
                 float3 wi, g;
                 float dist, cosi, plsa;
-                restirLight(pick.e - 1, pick.x, p, n, wi, dist, cosi, g, plsa);
+                restirLight(pick.e - 1, recvMask(hq.inst), pick.x, p, n, wi, dist, cosi, g, plsa);
                 bool track = lightingOn;
                 if (!pick.occ || track)
                 {
@@ -1323,7 +1334,7 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
             float3 wi = toL / dist;
             float cosl = abs(dot(normalize(cross(b - a, c - a)), wi));
             float cosi = dot(n, wi);
-            if (cosi > 0.0 && cosl > 1.0e-5)
+            if (cosi > 0.0 && cosl > 1.0e-5 && (asuint(emitters[e + 14]) & recvMask(hq.inst)) != 0)
             {
                 bool occ = occluded(p, wi, dist * (1.0 - 1.0e-3));
                 bool track = lightingOn && depth == 0;
@@ -1465,6 +1476,7 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
             cls = lobeCls;
         st.misPrev = !refracted;
         st.qPrev = refracted ? 0.0 : reflectivePdf(surf, woL, wiL);
+        st.prevInst = hq.inst + 1;
 
         dir = normalize(wiL.x * T + wiL.y * B + wiL.z * n);
         // A shading normal can bend a sample through the true surface; drop it rather than leak.

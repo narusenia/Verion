@@ -286,7 +286,7 @@ pub fn pack_emitters(scene: &Scene) -> Emitters {
     let mut words: Vec<f32> = Vec::new();
     let mut powers: Vec<f32> = Vec::new(); // area * radiance per emissive triangle
     let mut bases = Vec::with_capacity(scene.instances().len());
-    for inst in scene.instances() {
+    for (instance, inst) in scene.instances().iter().enumerate() {
         let base = &scene.materials()[inst.material.index()].base;
         let le = base.emission;
         let radiance = le[0] + le[1] + le[2];
@@ -314,7 +314,12 @@ pub fn pack_emitters(scene: &Scene) -> Emitters {
             powers.push(area * radiance);
             // Degenerate triangles keep their slot (area 0) so primitive index maps to a record.
             words.extend(a.into_iter().chain(b).chain(c).chain(le));
-            words.extend([area, 0.0, 0.0, 0.0]);
+            words.extend([
+                area,
+                0.0,
+                f32::from_bits(scene.instance_emit_mask(instance)),
+                0.0,
+            ]);
         }
     }
     // Selection probability proportional to emitted power; the CDF drives light sampling.
@@ -455,7 +460,7 @@ pub fn pack_materials(scene: &Scene, textures: bool) -> Result<Materials, String
 
 /// The next-event table of delta lights and the uniform sky.
 pub struct LightTable {
-    /// `LIGHT_WORDS` per light (`count` of them), then one light-link mask per instance, then the IES
+    /// `LIGHT_WORDS` per light (`count` of them), then a light-link mask pair (receive, emit) per instance, then the IES
     /// profiles: nine frame floats and the table each, at the offsets the lights name in word 15.
     pub lights: Vec<u32>,
     /// Lights in the table, the virtual main light included.
@@ -645,7 +650,11 @@ pub fn pack_lights(scene: &Scene) -> LightTable {
         lights.extend(words);
     }
     let count = lights.len() / LIGHT_WORDS;
-    lights.extend((0..scene.instances().len()).map(|i| scene.instance_light_mask(i)));
+    // Per instance: the lights that shine on it, and the group it emits as when it is an area light.
+    for i in 0..scene.instances().len() {
+        lights.push(scene.instance_light_mask(i));
+        lights.push(scene.instance_emit_mask(i));
+    }
     for (light, extra_index) in profiles {
         let (profile, axes) = scene
             .light_id(extra_index)
