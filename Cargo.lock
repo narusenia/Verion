@@ -2568,6 +2568,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "verion-gpu-vulkan"
+version = "0.0.0"
+
+[[package]]
 name = "verion-render-cli"
 version = "0.0.0"
 dependencies = [
