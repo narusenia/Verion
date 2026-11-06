@@ -31,6 +31,8 @@ class VerionRenderEngine(bpy.types.RenderEngine):
     bl_idname = "VERION"
     bl_label = "Verion"
     bl_use_preview = False
+    # Blender's own shader nodes (Principled, ...): without this the Shader Editor is hidden for the engine.
+    bl_use_shading_nodes_custom = False
     bl_use_postprocess = True
 
     def __init__(self, *args, **kwargs):
