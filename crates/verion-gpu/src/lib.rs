@@ -6,7 +6,7 @@ pub mod pack;
 pub mod readback;
 pub mod wavefront;
 
-use verion_scene::{Camera, LIGHT_SLOTS, Scene};
+use verion_scene::{Camera, Changes, LIGHT_SLOTS, Scene};
 
 /// A ray-tracing path tracer on one GPU API.
 pub trait RayTracingBackend: Sized {
@@ -21,6 +21,10 @@ pub trait RayTracingBackend: Sized {
     /// Uploads the scene and builds its acceleration structures.
     fn new(ctx: &Self::Context, scene: &Scene) -> Result<Self, Self::Error>;
 
+    /// Applies the scene edits in `changes` (from `Scene::take_changes`) without rebuilding what
+    /// they leave alone (REQ-ACC-003; the reuse table is on `pack::UpdatePlan`). Start a new
+    /// accumulation afterwards: samples from before the edit no longer match the scene.
+    fn update(&mut self, scene: &Scene, changes: &Changes) -> Result<UpdateReport, Self::Error>;
     /// Replaces the camera without rebuilding the acceleration structures. Start a new
     /// accumulation afterwards; samples gathered from the old camera no longer match.
     fn set_camera(&mut self, cam: &Camera);
@@ -48,6 +52,16 @@ pub trait RayTracingBackend: Sized {
     fn render_normals(&self, width: u32, height: u32) -> Result<Vec<[f32; 3]>, Self::Error>;
     /// Albedo, depth and ids of the first hit through each pixel centre.
     fn render_aovs(&self, width: u32, height: u32) -> Result<Aovs, Self::Error>;
+}
+
+/// What one `update` redid.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UpdateReport {
+    /// Bottom-level structures built (every mesh after a geometry change).
+    pub blases_built: usize,
+    pub tlas_built: bool,
+    /// Bytes written to GPU tables.
+    pub bytes_uploaded: usize,
 }
 
 /// Running radiance sums of one image, read back as means.

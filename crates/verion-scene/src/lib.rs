@@ -17,7 +17,7 @@ pub use material::{
 };
 pub use mesh::{Mesh, MeshError};
 pub use scene::{
-    Camera, IDENTITY, ImageId, Instance, InstanceId, Light, LightId, MaterialId, MeshId, Revisions,
-    Scene, SceneError, Transform,
+    Camera, Changes, IDENTITY, ImageId, Instance, InstanceId, Light, LightId, MaterialId, MeshId,
+    Revisions, Scene, SceneError, Transform,
 };
 pub use shading::{LIGHT_SLOTS, LightComponents, ShadingContext};

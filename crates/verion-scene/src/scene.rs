@@ -11,11 +11,11 @@ pub const IDENTITY: Transform = [
     [0.0, 0.0, 1.0, 0.0],
 ];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MeshId(u32);
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MaterialId(u32);
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct InstanceId(u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LightId(u32);
@@ -100,6 +100,34 @@ pub struct Revisions {
     pub camera: u64,
 }
 
+/// What changed since the last [`Scene::take_changes`], so a renderer updates only that
+/// (REQ-ACC-003). One consumer takes them; revisions stay for anyone who only compares.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Changes {
+    /// Meshes or instances were added or re-pointed, or a mesh changed shape: rebuild everything.
+    pub geometry: bool,
+    /// Meshes whose vertex data changed with the same triangles (Mesh Deformation), sorted.
+    pub deformed: Vec<MeshId>,
+    /// Instances whose transform or material changed, sorted.
+    pub instances: Vec<InstanceId>,
+    /// Materials whose physical parameters changed (stylization layers are not GPU data), sorted.
+    pub materials: Vec<MaterialId>,
+    pub lights: bool,
+    pub camera: bool,
+}
+
+impl Changes {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+fn mark<T: Ord>(list: &mut Vec<T>, id: T) {
+    if let Err(at) = list.binary_search(&id) {
+        list.insert(at, id);
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SceneError {
     /// An instance refers to a mesh or material that is not in this scene.
@@ -129,6 +157,7 @@ pub struct Scene {
     camera: Camera,
     working_space: ColorSpace,
     revisions: Revisions,
+    changes: Changes,
 }
 
 impl Scene {
@@ -138,6 +167,11 @@ impl Scene {
 
     pub fn revisions(&self) -> Revisions {
         self.revisions
+    }
+
+    /// The changes since the previous call, and forgets them.
+    pub fn take_changes(&mut self) -> Changes {
+        std::mem::take(&mut self.changes)
     }
 
     pub fn meshes(&self) -> &[Mesh] {
@@ -182,17 +216,25 @@ impl Scene {
 
     pub fn add_mesh(&mut self, mesh: Mesh) -> MeshId {
         self.revisions.geometry += 1;
+        self.changes.geometry = true;
         self.meshes.push(mesh);
         MeshId(self.meshes.len() as u32 - 1)
     }
 
     pub fn set_mesh(&mut self, id: MeshId, mesh: Mesh) {
         self.revisions.geometry += 1;
+        let old = &self.meshes[id.index()];
+        if old.indices() == mesh.indices() && old.positions().len() == mesh.positions().len() {
+            mark(&mut self.changes.deformed, id);
+        } else {
+            self.changes.geometry = true;
+        }
         self.meshes[id.index()] = mesh;
     }
 
     pub fn add_material(&mut self, material: Material) -> MaterialId {
         self.revisions.material += 1;
+        self.changes.geometry = true;
         if !material.stylization.is_empty() {
             self.revisions.stylization += 1;
         }
@@ -210,6 +252,9 @@ impl Scene {
         if self.materials[id.index()].stylization != material.stylization {
             self.revisions.stylization += 1;
         }
+        if self.materials[id.index()].base != material.base {
+            mark(&mut self.changes.materials, id);
+        }
         self.materials[id.index()] = material;
     }
 
@@ -222,6 +267,7 @@ impl Scene {
     pub fn add_instance(&mut self, instance: Instance) -> Result<InstanceId, SceneError> {
         self.check(&instance)?;
         self.revisions.geometry += 1;
+        self.changes.geometry = true;
         self.instances.push(instance);
         Ok(InstanceId(self.instances.len() as u32 - 1))
     }
@@ -229,12 +275,19 @@ impl Scene {
     pub fn set_instance(&mut self, id: InstanceId, instance: Instance) -> Result<(), SceneError> {
         self.check(&instance)?;
         self.revisions.geometry += 1;
+        let old = self.instances[id.index()];
+        if old.mesh != instance.mesh {
+            self.changes.geometry = true;
+        } else if old != instance {
+            mark(&mut self.changes.instances, id);
+        }
         self.instances[id.index()] = instance;
         Ok(())
     }
 
     pub fn add_light(&mut self, light: Light) -> LightId {
         self.revisions.lighting += 1;
+        self.changes.lights = true;
         self.lights.push(light);
         LightId(self.lights.len() as u32 - 1)
     }
@@ -246,11 +299,13 @@ impl Scene {
 
     pub fn set_light(&mut self, id: LightId, light: Light) {
         self.revisions.lighting += 1;
+        self.changes.lights = true;
         self.lights[id.index()] = light;
     }
 
     pub fn set_camera(&mut self, camera: Camera) {
         self.revisions.camera += 1;
+        self.changes.camera = true;
         self.camera = camera;
     }
 
@@ -362,6 +417,53 @@ mod tests {
         s.set_camera(Camera::default());
         expect.camera += 1;
         assert_eq!(s.revisions(), expect);
+    }
+
+    #[test]
+    fn changes_name_what_to_update() {
+        let mut s = Scene::new();
+        let mesh = s.add_mesh(tri());
+        let material = s.add_material(Material::default());
+        let inst = Instance {
+            mesh,
+            material,
+            transform: IDENTITY,
+        };
+        let id = s.add_instance(inst).unwrap();
+        assert!(s.take_changes().geometry);
+        assert!(s.take_changes().is_empty());
+
+        let mut moved = inst;
+        moved.transform[0][3] = 1.0;
+        s.set_instance(id, moved).unwrap();
+        s.set_instance(id, moved).unwrap();
+        let c = s.take_changes();
+        assert_eq!((c.geometry, c.instances.clone()), (false, vec![id]));
+
+        let mut bent = tri();
+        let mut p = bent.positions().to_vec();
+        p[1][0] = 2.0;
+        bent = Mesh::new(p, None, None, vec![0, 1, 2]).unwrap();
+        s.set_mesh(mesh, bent);
+        let c = s.take_changes();
+        assert_eq!((c.geometry, c.deformed), (false, vec![mesh]));
+
+        let m = Material {
+            stylization: vec![StylizationLayer::HybridSurface(HybridSurface::TOON)],
+            ..Default::default()
+        };
+        s.set_material(material, m);
+        assert!(s.take_changes().is_empty(), "stylization is not GPU data");
+        let mut m = Material::default();
+        m.base.roughness = 0.1;
+        s.set_material(material, m);
+        assert_eq!(s.take_changes().materials, vec![material]);
+
+        s.set_camera(Camera::default());
+        let light = s.add_light(Light::Environment { color: [1.0; 3] });
+        s.set_light(light, Light::Environment { color: [2.0; 3] });
+        let c = s.take_changes();
+        assert!(c.camera && c.lights && !c.geometry);
     }
 
     #[test]

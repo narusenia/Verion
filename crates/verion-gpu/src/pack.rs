@@ -101,6 +101,8 @@ pub struct Packed {
     pub texels: Vec<f32>,
     /// 4 words per texture: texel offset, width, height, mip level count.
     pub tex_info: Vec<u32>,
+    /// Image index per texture slot.
+    pub texture_images: Vec<usize>,
     pub meshes: Vec<MeshRange>,
     /// Per instance, in table order: its mesh index and object-to-world transform.
     pub tlas: Vec<(usize, Transform)>,
@@ -214,85 +216,102 @@ fn mip_chain(image: &Image) -> (Vec<f32>, u32) {
     }
 }
 
-/// Flattens `scene` into the kernel tables. The error is a message for the backend's scene error.
-pub fn pack(scene: &Scene) -> Result<Packed, String> {
-    if scene.instances().is_empty() {
-        return Err("scene has no instances".into());
-    }
-    let mut positions: Vec<f32> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    let mut uvs: Vec<f32> = Vec::new();
-    let mut vnormals: Vec<f32> = Vec::new();
-    let mut meshes = Vec::new();
+/// Vertex tables of every mesh, concatenated.
+pub struct Geometry {
+    pub positions: Vec<f32>,
+    pub indices: Vec<u32>,
+    pub uvs: Vec<f32>,
+    pub vnormals: Vec<f32>,
+    pub meshes: Vec<MeshRange>,
+}
+
+pub fn pack_geometry(scene: &Scene) -> Geometry {
+    let mut g = Geometry {
+        positions: Vec::new(),
+        indices: Vec::new(),
+        uvs: Vec::new(),
+        vnormals: Vec::new(),
+        meshes: Vec::new(),
+    };
     for mesh in scene.meshes() {
-        meshes.push(MeshRange {
-            vertex_offset: (positions.len() / 3) as u32,
+        g.meshes.push(MeshRange {
+            vertex_offset: (g.positions.len() / 3) as u32,
             vertex_count: mesh.positions().len() as u32,
-            index_offset: indices.len() as u32,
+            index_offset: g.indices.len() as u32,
             index_count: mesh.indices().len() as u32,
         });
-        positions.extend(mesh.positions().iter().flatten());
+        g.positions.extend(mesh.positions().iter().flatten());
         match mesh.uvs() {
-            Some(uv) => uvs.extend(uv.iter().flatten()),
-            None => uvs.extend(std::iter::repeat_n(0.0, mesh.positions().len() * 2)),
+            Some(uv) => g.uvs.extend(uv.iter().flatten()),
+            None => g
+                .uvs
+                .extend(std::iter::repeat_n(0.0, mesh.positions().len() * 2)),
         }
         match mesh.normals() {
-            Some(n) => vnormals.extend(n.iter().flatten()),
-            None => vnormals.extend(std::iter::repeat_n(0.0, mesh.positions().len() * 3)),
+            Some(n) => g.vnormals.extend(n.iter().flatten()),
+            None => g
+                .vnormals
+                .extend(std::iter::repeat_n(0.0, mesh.positions().len() * 3)),
         }
-        indices.extend_from_slice(mesh.indices());
+        g.indices.extend_from_slice(mesh.indices());
     }
+    g
+}
 
-    let mut table = vec![0u32; scene.instances().len() * INSTANCE_WORDS];
-    let mut tlas = Vec::new();
-    let mut emitters: Vec<f32> = Vec::new();
+/// Emissive world-space triangles and their selection CDF.
+pub struct Emitters {
+    pub words: Vec<f32>,
+    pub cdf: Vec<f32>,
+    /// Per instance: its first emitter + 1, or 0 when it does not emit.
+    pub bases: Vec<u32>,
+}
+
+impl Emitters {
+    pub fn count(&self) -> u32 {
+        self.cdf.len() as u32
+    }
+}
+
+pub fn pack_emitters(scene: &Scene) -> Emitters {
+    let mut words: Vec<f32> = Vec::new();
     let mut powers: Vec<f32> = Vec::new(); // area * radiance per emissive triangle
-    for (record, inst) in table.chunks_mut(INSTANCE_WORDS).zip(scene.instances()) {
-        let range = meshes[inst.mesh.index()];
-        record[0] = range.vertex_offset;
-        record[1] = range.index_offset;
-        record[2] = inst.material.index() as u32;
-        for (word, v) in record[4..].iter_mut().zip(inst.transform.iter().flatten()) {
-            *word = v.to_bits();
-        }
-        let le = scene.materials()[inst.material.index()].base.emission;
+    let mut bases = Vec::with_capacity(scene.instances().len());
+    for inst in scene.instances() {
+        let base = &scene.materials()[inst.material.index()].base;
+        let le = base.emission;
         let radiance = le[0] + le[1] + le[2];
         // A textured emitter has no constant radiance to sample, so only BSDF sampling finds it.
-        let textured = scene.materials()[inst.material.index()]
-            .base
-            .emission_texture
-            .is_some();
-        if radiance > 0.0 && !textured {
-            let mesh = &scene.meshes()[inst.mesh.index()];
-            record[3] = powers.len() as u32 + 1;
-            for tri in mesh.indices().as_chunks::<3>().0 {
-                let [a, b, c] =
-                    [0, 1, 2].map(|k| world(&inst.transform, mesh.positions()[tri[k] as usize]));
-                let (e1, e2) = (
-                    [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
-                    [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
-                );
-                let cross = [
-                    e1[1] * e2[2] - e1[2] * e2[1],
-                    e1[2] * e2[0] - e1[0] * e2[2],
-                    e1[0] * e2[1] - e1[1] * e2[0],
-                ];
-                let area =
-                    0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
-                powers.push(area * radiance);
-                // Degenerate triangles keep their slot (area 0) so primitive index maps to a record.
-                emitters.extend(a.into_iter().chain(b).chain(c).chain(le));
-                emitters.extend([area, 0.0, 0.0, 0.0]);
-            }
+        if radiance <= 0.0 || base.emission_texture.is_some() {
+            bases.push(0);
+            continue;
         }
-        tlas.push((inst.mesh.index(), inst.transform));
+        let mesh = &scene.meshes()[inst.mesh.index()];
+        bases.push(powers.len() as u32 + 1);
+        for tri in mesh.indices().as_chunks::<3>().0 {
+            let [a, b, c] =
+                [0, 1, 2].map(|k| world(&inst.transform, mesh.positions()[tri[k] as usize]));
+            let (e1, e2) = (
+                [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+                [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+            );
+            let cross = [
+                e1[1] * e2[2] - e1[2] * e2[1],
+                e1[2] * e2[0] - e1[0] * e2[2],
+                e1[0] * e2[1] - e1[1] * e2[0],
+            ];
+            let area =
+                0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+            powers.push(area * radiance);
+            // Degenerate triangles keep their slot (area 0) so primitive index maps to a record.
+            words.extend(a.into_iter().chain(b).chain(c).chain(le));
+            words.extend([area, 0.0, 0.0, 0.0]);
+        }
     }
-
     // Selection probability proportional to emitted power; the CDF drives light sampling.
     let total: f32 = powers.iter().sum();
-    let mut emit_cdf = Vec::with_capacity(powers.len());
+    let mut cdf = Vec::with_capacity(powers.len());
     let mut running = 0.0;
-    for (record, power) in emitters
+    for (record, power) in words
         .as_chunks_mut::<EMITTER_WORDS>()
         .0
         .iter_mut()
@@ -300,16 +319,56 @@ pub fn pack(scene: &Scene) -> Result<Packed, String> {
     {
         record[13] = power / total;
         running += power / total;
-        emit_cdf.push(running);
+        cdf.push(running);
     }
-    if let Some(last) = emit_cdf.last_mut() {
+    if let Some(last) = cdf.last_mut() {
         *last = 1.0;
     }
+    Emitters { words, cdf, bases }
+}
 
+/// The instance table and, per instance, its mesh index and transform for the TLAS.
+pub fn pack_instances(
+    scene: &Scene,
+    meshes: &[MeshRange],
+    emitter_bases: &[u32],
+) -> (Vec<u32>, Vec<(usize, Transform)>) {
+    let mut table = vec![0u32; scene.instances().len() * INSTANCE_WORDS];
+    let mut tlas = Vec::new();
+    for ((record, inst), base) in table
+        .chunks_mut(INSTANCE_WORDS)
+        .zip(scene.instances())
+        .zip(emitter_bases)
+    {
+        let range = meshes[inst.mesh.index()];
+        record[0] = range.vertex_offset;
+        record[1] = range.index_offset;
+        record[2] = inst.material.index() as u32;
+        record[3] = *base;
+        for (word, v) in record[4..].iter_mut().zip(inst.transform.iter().flatten()) {
+            *word = v.to_bits();
+        }
+        tlas.push((inst.mesh.index(), inst.transform));
+    }
+    (table, tlas)
+}
+
+/// The material table and the textures it refers to.
+pub struct Materials {
+    pub materials: Vec<f32>,
+    pub texels: Vec<f32>,
+    /// 4 words per texture: texel offset, width, height, mip level count.
+    pub tex_info: Vec<u32>,
+    /// Image index per texture slot, to tell whether the texture tables changed.
+    pub images: Vec<usize>,
+}
+
+pub fn pack_materials(scene: &Scene) -> Result<Materials, String> {
     // Every referenced image becomes one texture with a full mip chain.
     let mut texture_of: HashMap<usize, u32> = HashMap::new();
     let mut texels: Vec<f32> = Vec::new();
     let mut tex_info: Vec<u32> = Vec::new();
+    let mut images: Vec<usize> = Vec::new();
     let mut texture = |id: Option<ImageId>| -> Result<f32, String> {
         let Some(id) = id else { return Ok(0.0) };
         let slot = match texture_of.get(&id.index()) {
@@ -329,6 +388,7 @@ pub fn pack(scene: &Scene) -> Result<Packed, String> {
                 ]);
                 texels.extend(chain);
                 texture_of.insert(id.index(), slot);
+                images.push(id.index());
                 slot
             }
         };
@@ -370,7 +430,21 @@ pub fn pack(scene: &Scene) -> Result<Packed, String> {
         ]);
     }
     debug_assert_eq!(materials.len(), scene.materials().len() * MATERIAL_WORDS);
+    Ok(Materials {
+        materials,
+        texels,
+        tex_info,
+        images,
+    })
+}
 
+/// The next-event table of delta lights and the uniform sky.
+pub struct LightTable {
+    pub lights: Vec<u32>,
+    pub sky: [f32; 3],
+}
+
+pub fn pack_lights(scene: &Scene) -> LightTable {
     // Environment lights are summed into one uniform sky; the rest go to the NEE table.
     let mut sky = [0.0f32; 3];
     let mut lights = Vec::new();
@@ -431,34 +505,135 @@ pub fn pack(scene: &Scene) -> Result<Packed, String> {
     for (rank, &i) in ranked.iter().enumerate() {
         lights[i * LIGHT_WORDS + 13] = rank.min(2) as u32;
     }
+    LightTable { lights, sky }
+}
 
-    let env = build_env(scene)?;
-    let info = SceneInfo {
-        light_count: (lights.len() / LIGHT_WORDS) as u32,
-        emitter_count: powers.len() as u32,
+/// The scene-wide constants for the current lights and emitters.
+pub fn scene_info(light_table: &LightTable, emitters: &Emitters, env: &Env) -> SceneInfo {
+    SceneInfo {
+        light_count: (light_table.lights.len() / LIGHT_WORDS) as u32,
+        emitter_count: emitters.count(),
         env_width: env.width,
         env_height: env.height,
         env_pdf_scale: env.pdf_scale,
-        sky,
-    };
+        sky: light_table.sky,
+    }
+}
+
+/// Environment sampling tables of `scene` (empty without an environment map).
+pub fn pack_env(scene: &Scene) -> Result<Env, String> {
+    build_env(scene)
+}
+
+/// Identifies the environment map (image and scale), so an update can skip rebuilding its
+/// sampling tables when only other lights changed.
+pub fn env_key(scene: &Scene) -> Option<(usize, u32)> {
+    scene.lights().iter().find_map(|l| match *l {
+        Light::EnvironmentMap { image, scale } => Some((image.index(), scale.to_bits())),
+        _ => None,
+    })
+}
+
+/// Flattens `scene` into the kernel tables. The error is a message for the backend's scene error.
+pub fn pack(scene: &Scene) -> Result<Packed, String> {
+    if scene.instances().is_empty() {
+        return Err("scene has no instances".into());
+    }
+    let g = pack_geometry(scene);
+    let emitters = pack_emitters(scene);
+    let (instances, tlas) = pack_instances(scene, &g.meshes, &emitters.bases);
+    let m = pack_materials(scene)?;
+    let light_table = pack_lights(scene);
+    let env = build_env(scene)?;
+    let info = scene_info(&light_table, &emitters, &env);
     Ok(Packed {
-        positions,
-        indices,
-        uvs,
-        vnormals,
-        instances: table,
-        materials,
-        lights,
-        emitters,
-        emit_cdf,
+        positions: g.positions,
+        indices: g.indices,
+        uvs: g.uvs,
+        vnormals: g.vnormals,
+        instances,
+        materials: m.materials,
+        lights: light_table.lights,
+        emitters: emitters.words,
+        emit_cdf: emitters.cdf,
         env,
-        texels,
-        tex_info,
-        meshes,
+        texels: m.texels,
+        tex_info: m.tex_info,
+        texture_images: m.images,
+        meshes: g.meshes,
         tlas,
         info,
         view: View::new(scene.camera()),
     })
+}
+
+/// What a batch of scene changes makes a backend redo (REQ-ACC-003). Each flag is a table to
+/// repack and upload or a structure to rebuild; everything else is reused as it is.
+///
+/// | change | reused | redone |
+/// |---|---|---|
+/// | camera | everything | the view (and the history of the integrator) |
+/// | material | BLAS, TLAS, vertex tables | material and texture tables, emitters, instance table |
+/// | light | BLAS, TLAS, tables | light table, sky, environment map |
+/// | instance transform | every BLAS | instance table, TLAS, emitters |
+/// | mesh deformation | every other BLAS | vertex tables, that BLAS, TLAS, emitters |
+/// | geometry | pipelines | everything else |
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UpdatePlan {
+    /// Meshes or instances were added or re-pointed: rebuild every table and structure.
+    pub full: bool,
+    pub materials: bool,
+    pub lights: bool,
+    pub emitters: bool,
+    pub instances: bool,
+    /// Vertex tables are rewritten in place (same sizes).
+    pub vertices: bool,
+    /// Mesh indices whose BLAS is rebuilt.
+    pub blases: Vec<usize>,
+    pub tlas: bool,
+    pub camera: bool,
+}
+
+impl UpdatePlan {
+    pub fn new(changes: &verion_scene::Changes) -> Self {
+        let mut p = Self {
+            camera: changes.camera,
+            lights: changes.lights,
+            ..Self::default()
+        };
+        if changes.geometry {
+            p.full = true;
+            p.materials = true;
+            p.lights = true;
+            p.emitters = true;
+            p.instances = true;
+            p.vertices = true;
+            p.tlas = true;
+            return p;
+        }
+        if !changes.materials.is_empty() {
+            p.materials = true;
+            p.emitters = true;
+        }
+        if !changes.instances.is_empty() {
+            p.instances = true;
+            p.tlas = true;
+            p.emitters = true;
+        }
+        if !changes.deformed.is_empty() {
+            p.vertices = true;
+            p.blases = changes.deformed.iter().map(|m| m.index()).collect();
+            p.tlas = true;
+            p.emitters = true;
+        }
+        // Emitters carry the instance table's emitter bases.
+        p.instances |= p.emitters;
+        p
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// The parameter block of an accumulation, with the per-dispatch words (6, 30, 31 and 35) zero.
@@ -503,6 +678,27 @@ pub fn base_params(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_follows_the_reuse_table() {
+        use verion_scene::Changes;
+        let p = UpdatePlan::new(&Changes {
+            camera: true,
+            ..Changes::default()
+        });
+        assert!(p.camera && !p.materials && !p.tlas && p.blases.is_empty() && !p.full);
+        let p = UpdatePlan::new(&Changes {
+            lights: true,
+            ..Changes::default()
+        });
+        assert!(p.lights && !p.emitters && !p.tlas && !p.vertices);
+        let p = UpdatePlan::new(&Changes {
+            geometry: true,
+            ..Changes::default()
+        });
+        assert!(p.full && p.tlas && p.vertices);
+        assert!(UpdatePlan::new(&Changes::default()).is_empty());
+    }
 
     #[test]
     fn mip_chain_ends_at_one_texel_and_averages() {

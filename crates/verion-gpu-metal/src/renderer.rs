@@ -10,11 +10,12 @@ use objc2_metal::{
     MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder,
     MTLComputePipelineState, MTLDevice, MTLLibrary, MTLResourceOptions, MTLResourceUsage, MTLSize,
 };
-use verion_scene::{Camera, Scene};
+use verion_scene::{Camera, Changes, Scene};
 
 use verion_gpu::{
     Accumulation as _, Adaptive, Aovs, Integrator, LightingAovs, MemoryUsage, RayTracingBackend,
-    pack::{self, PARAM_WORDS, SceneInfo, View},
+    UpdateReport,
+    pack::{self, MeshRange, PARAM_WORDS, SceneInfo, View},
     readback,
 };
 
@@ -78,7 +79,11 @@ struct EnvMap {
 pub struct Renderer {
     ctx: MetalContext,
     tlas: Tlas,
-    _blases: Vec<Blas>,
+    blases: Vec<Blas>,
+    meshes: Vec<MeshRange>,
+    /// Image per texture slot and the environment map identity the uploaded tables came from.
+    texture_images: Vec<usize>,
+    env_key: Option<(usize, u32)>,
     positions: Obj<dyn MTLBuffer>,
     indices: Obj<dyn MTLBuffer>,
     instances: Obj<dyn MTLBuffer>,
@@ -109,6 +114,12 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new(ctx: &MetalContext, scene: &Scene) -> Result<Self, Error> {
+        Self::build(ctx, scene, None)
+    }
+
+    /// Uploads `scene`. With `reuse`, the compiled pipelines of that renderer are taken over, so
+    /// a geometry update does not pay for shader compilation again.
+    fn build(ctx: &MetalContext, scene: &Scene, reuse: Option<&mut Self>) -> Result<Self, Error> {
         let packed = pack::pack(scene).map_err(Error::Scene)?;
         let blases = scene
             .meshes()
@@ -125,6 +136,20 @@ impl Renderer {
             .collect();
         let blas_refs: Vec<&Blas> = blases.iter().collect();
         let tlas = Tlas::build(ctx, &blas_refs, &tlas_instances)?;
+        let pipelines = match reuse {
+            Some(old) => (
+                old.normals.clone(),
+                old.aov.clone(),
+                old.pathtrace.clone(),
+                std::mem::take(&mut old.wavefront),
+            ),
+            None => (
+                pipeline(ctx, NORMALS_MSL, "normals")?,
+                pipeline(ctx, AOV_MSL, "aov")?,
+                pipeline(ctx, PATHTRACE_MSL, "pathtrace")?,
+                OnceCell::new(),
+            ),
+        };
 
         Ok(Self {
             ctx: ctx.clone(),
@@ -132,7 +157,10 @@ impl Renderer {
             indices: upload(ctx, &packed.indices)?,
             instances: upload(ctx, &packed.instances)?,
             tlas,
-            _blases: blases,
+            blases,
+            meshes: packed.meshes.clone(),
+            texture_images: packed.texture_images.clone(),
+            env_key: pack::env_key(scene),
             materials: upload(ctx, &packed.materials)?,
             lights: upload(ctx, &packed.lights)?,
             env: EnvMap {
@@ -149,19 +177,141 @@ impl Renderer {
             info: packed.info,
             view: packed.view,
             multiscatter: true,
-            normals: pipeline(ctx, NORMALS_MSL, "normals")?,
-            aov: pipeline(ctx, AOV_MSL, "aov")?,
-            pathtrace: pipeline(ctx, PATHTRACE_MSL, "pathtrace")?,
+            normals: pipelines.0,
+            aov: pipelines.1,
+            pathtrace: pipelines.2,
             no_lighting: upload::<f32>(ctx, &[])?,
             integrator: Integrator::default(),
             stage_timing: false,
             adaptive: None,
-            wavefront: OnceCell::new(),
+            wavefront: pipelines.3,
         })
     }
 
     pub fn adaptive(&self) -> Option<Adaptive> {
         self.adaptive
+    }
+
+    /// Applies scene edits, redoing only what `pack::UpdatePlan` says (REQ-ACC-003).
+    pub fn update(&mut self, scene: &Scene, changes: &Changes) -> Result<UpdateReport, Error> {
+        let plan = pack::UpdatePlan::new(changes);
+        let mut report = UpdateReport::default();
+        if plan.camera {
+            self.view = View::new(scene.camera());
+        }
+        if plan.full {
+            let ctx = self.ctx.clone();
+            let mut fresh = Self::build(&ctx, scene, Some(self))?;
+            fresh.view = self.view;
+            fresh.multiscatter = self.multiscatter;
+            fresh.integrator = self.integrator;
+            fresh.stage_timing = self.stage_timing;
+            fresh.adaptive = self.adaptive;
+            report.blases_built = fresh.blases.len();
+            report.tlas_built = true;
+            *self = fresh;
+            return Ok(report);
+        }
+        if plan.vertices {
+            for &m in &plan.blases {
+                let mesh = &scene.meshes()[m];
+                let r = self.meshes[m];
+                // SAFETY: the buffers are shared-storage tables sized for these ranges when the
+                // scene was uploaded (a mesh keeps its vertex count unless `Changes::geometry`),
+                // and no GPU work runs between `accumulate` calls.
+                unsafe {
+                    let base = r.vertex_offset as usize;
+                    let write =
+                        |buf: &Obj<dyn MTLBuffer>,
+                         per: usize,
+                         data: &mut dyn Iterator<Item = f32>| {
+                            let dst = buf.contents().as_ptr().cast::<f32>().add(base * per);
+                            for (i, v) in data.take(r.vertex_count as usize * per).enumerate() {
+                                *dst.add(i) = v;
+                            }
+                        };
+                    write(
+                        &self.positions,
+                        3,
+                        &mut mesh.positions().iter().flatten().copied(),
+                    );
+                    match mesh.uvs() {
+                        Some(uv) => write(&self.uvs, 2, &mut uv.iter().flatten().copied()),
+                        None => write(&self.uvs, 2, &mut std::iter::repeat(0.0)),
+                    }
+                    match mesh.normals() {
+                        Some(n) => write(&self.vnormals, 3, &mut n.iter().flatten().copied()),
+                        None => write(&self.vnormals, 3, &mut std::iter::repeat(0.0)),
+                    }
+                }
+                report.bytes_uploaded += r.vertex_count as usize * 32;
+                self.blases[m] = Blas::build(&self.ctx, mesh.positions(), mesh.indices())?;
+                report.blases_built += 1;
+            }
+        }
+        if plan.materials {
+            let m = pack::pack_materials(scene).map_err(Error::Scene)?;
+            report.bytes_uploaded += size_of_val(&m.materials[..]);
+            self.materials = upload(&self.ctx, &m.materials)?;
+            if m.images != self.texture_images {
+                report.bytes_uploaded += size_of_val(&m.texels[..]) + size_of_val(&m.tex_info[..]);
+                self.texels = upload(&self.ctx, &m.texels)?;
+                self.tex_info = upload(&self.ctx, &m.tex_info)?;
+                self.texture_images = m.images;
+            }
+        }
+        let table = pack::pack_lights(scene);
+        if plan.lights {
+            report.bytes_uploaded += size_of_val(&table.lights[..]);
+            self.lights = upload(&self.ctx, &table.lights)?;
+            self.info.light_count = (table.lights.len() / pack::LIGHT_WORDS) as u32;
+            self.info.sky = table.sky;
+            let key = pack::env_key(scene);
+            if key != self.env_key {
+                let env = pack::pack_env(scene).map_err(Error::Scene)?;
+                report.bytes_uploaded += size_of_val(&env.pixels[..]);
+                self.env = EnvMap {
+                    pixels: upload(&self.ctx, &env.pixels)?,
+                    marginal: upload(&self.ctx, &env.marginal)?,
+                    conditional: upload(&self.ctx, &env.conditional)?,
+                };
+                self.info.env_width = env.width;
+                self.info.env_height = env.height;
+                self.info.env_pdf_scale = env.pdf_scale;
+                self.env_key = key;
+            }
+        }
+        let mut bases = None;
+        if plan.emitters {
+            let e = pack::pack_emitters(scene);
+            report.bytes_uploaded += size_of_val(&e.words[..]) + size_of_val(&e.cdf[..]);
+            self.emitters = upload(&self.ctx, &e.words)?;
+            self.emit_cdf = upload(&self.ctx, &e.cdf)?;
+            self.info.emitter_count = e.count();
+            bases = Some(e.bases);
+        }
+        if plan.instances {
+            let bases = match bases {
+                Some(b) => b,
+                None => pack::pack_emitters(scene).bases,
+            };
+            let (table, tlas) = pack::pack_instances(scene, &self.meshes, &bases);
+            report.bytes_uploaded += size_of_val(&table[..]);
+            self.instances = upload(&self.ctx, &table)?;
+            if plan.tlas {
+                let insts: Vec<Instance> = tlas
+                    .iter()
+                    .map(|&(mesh, transform)| Instance {
+                        blas: mesh as u32,
+                        transform,
+                    })
+                    .collect();
+                let refs: Vec<&Blas> = self.blases.iter().collect();
+                self.tlas = Tlas::build(&self.ctx, &refs, &insts)?;
+                report.tlas_built = true;
+            }
+        }
+        Ok(report)
     }
 }
 
@@ -367,6 +517,10 @@ impl RayTracingBackend for Renderer {
 
     fn new(ctx: &MetalContext, scene: &Scene) -> Result<Self, Error> {
         Renderer::new(ctx, scene)
+    }
+
+    fn update(&mut self, scene: &Scene, changes: &Changes) -> Result<UpdateReport, Error> {
+        Renderer::update(self, scene, changes)
     }
 
     /// Replaces the camera without rebuilding the acceleration structures. Start a new
