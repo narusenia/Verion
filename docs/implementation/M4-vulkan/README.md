@@ -6,7 +6,7 @@
 | # | 項目 | REQ | 状態 |
 |---|------|-----|------|
 | 1 | `verion-gpu` を作り、CLI と Viewer が使う面（シーンの読み込み、カメラと設定、Accumulation、AOV、メモリ）を `RayTracingBackend` として切り出す。Metal は実装を移すだけで、画像はビット一致のまま | REQ-GPU-003 | 済（`crates/verion-gpu`。trait は `RayTracingBackend` と `Accumulation`、共有型は `Integrator`・`Adaptive`・`Aovs`・`LightingAovs`・`MemoryUsage`。Context とエラーは Backend の関連型。切り出し前後で Stylized と Adaptive の画素が一致） |
-| 2 | Slang → SPIR-V の生成と検査を `mise run shaders` / `shaders:check` に足す。MSL と同じく生成物をコミットし、ビルドに slangc を要らなくする | REQ-GPU-002 | 未着手 |
+| 2 | Slang → SPIR-V の生成と検査を `mise run shaders` / `shaders:check` に足す。MSL と同じく生成物をコミットし、ビルドに slangc を要らなくする | REQ-GPU-002 | 済（`crates/verion-gpu-vulkan/shaders/*.spv`。SPIR-V 1.5 + ray query に固定し、slangc がコンパイル時に検証する。クレートは今は SPIR-V を埋め込むだけで、形式と全シェーダーの揃いをテストする） |
 | 3 | `verion-gpu-vulkan`: Instance・Device・Queue と機能検出（ray query、acceleration structure、SER、timestamp）。必須機能がない環境は明示エラー、SER がなければ使わずに動く | REQ-GPU-006 / REQ-INFRA-006 | 未着手 |
 | 4 | BLAS / TLAS の構築と、メッシュ・材質・ライト・テクスチャ・環境マップの転送 | REQ-GPU-006 | 未着手 |
 | 5 | Megakernel（compute + ray query）、Accumulation、法線と Albedo / Depth / ID の AOV。Metal と同じ `pt_core.slang` を使う | REQ-GPU-006 | 未着手 |
@@ -23,6 +23,8 @@
 
 ## 決めてあること
 
+- Slang のバインド番号は SPIR-V でもそのまま使われ、descriptor set 0 の binding が Metal の buffer index と同じ番号になる（項目 2 で確認）。エントリポイント名は `main`
+
 - Vulkan のバインディングは `ash`（MIT / Apache-2.0）を第一候補にする。メモリ割り当ては、必要になった時点で自前か `gpu-allocator`（MIT / Apache-2.0）かを決める。どちらも導入時に `mise run deny` で確かめる
 - macOS では Vulkan Backend をビルドしない。MoltenVK はレイトレーシングに対応しない（ADR-0001）ので、Mac での実行確認は対象外
 - Metal と Vulkan は浮動小数点の演算順や交差判定の精度が違うので、ビット一致は求めない。比較は高 spp の画像どうしで、M1 の Mitsuba 照合と同じ方式（`exr_diff` のチャンネル平均と 4×4 ブロック）から始める
@@ -31,8 +33,7 @@
 
 ## 未決（実装中に決める）
 
-- パラメータブロック（36 語）の渡し方: push constant か、Dispatch ごとのバッファか
-- Slang のバインド番号と Vulkan の descriptor set の対応（Metal は宣言順の `[[buffer(n)]]`）
+- パラメータブロック（36 語）の渡し方: シェーダーでは `StructuredBuffer` なので、Dispatch ごとの領域を持つストレージバッファで渡す（push constant にすると Backend ごとにシェーダーを分けることになる）。領域の切り方は項目 5 で決める
 - Wavefront の間接 Dispatch とキューを、Vulkan のバリアでどう区切るか
 
 ## 要確認（利用者）

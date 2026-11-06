@@ -36,6 +36,10 @@ Metal 先行・Vulkan 後追いなので、BSDF・Integrator・Stylization を 2
 - 検証済み: 複数バッファ・構造体のバインド、複数マテリアル（`shaders/pathtrace.slang` が 10 以上のバッファを使うパストレーサーを Mitsuba 3 照合まで通した）
 - 未検証のまま: intersection function table（未使用）、SPIR-V 側、M4 Pro での動作、デバッグ性
 
+### 追記（2026-11-06）
+
+- SPIR-V 側: 全 7 シェーダーが SPIR-V 1.5（ray query）にコンパイルでき、slangc の検証を通った。バインド番号は Metal と同じ。実行の確認は M4 の Windows 機で行う
+
 ## 結果
 
 - Slang の制約に縛られる
