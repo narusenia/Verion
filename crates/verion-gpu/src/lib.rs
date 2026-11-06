@@ -2,6 +2,10 @@
 //! it. No GPU API here: the backends (`verion-gpu-metal`, later `verion-gpu-vulkan`) depend on this
 //! crate, and the CLI and the viewer pick one per platform and use it only through these traits.
 
+pub mod pack;
+pub mod readback;
+pub mod wavefront;
+
 use verion_scene::{Camera, LIGHT_SLOTS, Scene};
 
 /// A ray-tracing path tracer on one GPU API.

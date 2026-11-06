@@ -11,21 +11,18 @@ use objc2_metal::{
     MTLComputePipelineState, MTLDevice, MTLResourceOptions, MTLSize,
 };
 
-use super::{
-    Accumulation, CommandBuffer, Encoder, MAX_DEPTH, Obj, PARAM_WORDS, Renderer, pipeline,
+use verion_gpu::{
+    pack::{MAX_DEPTH, PARAM_WORDS},
+    wavefront::{GROUP, Sizes},
 };
+
+use super::{Accumulation, CommandBuffer, Encoder, Obj, Renderer, pipeline};
 use crate::{Error, MetalContext};
 
 const ARGS_MSL: &str = include_str!("../../shaders/wf_args.metal");
 const EXTEND_MSL: &str = include_str!("../../shaders/wf_extend.metal");
 const SHADE_MSL: &str = include_str!("../../shaders/wf_shade.metal");
 const SELECT_MSL: &str = include_str!("../../shaders/wf_select.metal");
-
-/// Path-state words per path; must match `shaders/include/wf_state.slang`.
-const BASE_WORDS: usize = 16;
-const SPLIT_WORDS: usize = 17;
-/// Threads per group of the extend and shade kernels (`WF_GROUP`).
-const GROUP: usize = 64;
 
 pub(super) struct Pipelines {
     args: Obj<dyn MTLComputePipelineState>,
@@ -56,20 +53,19 @@ pub(super) struct Buffers {
 
 impl Buffers {
     pub(super) fn new(ctx: &MetalContext, paths: usize, lighting: bool) -> Result<Self, Error> {
-        let words = BASE_WORDS + if lighting { SPLIT_WORDS } else { 0 };
+        let sizes = Sizes::new(paths, lighting);
         let private = |bytes: usize| -> Result<Obj<dyn MTLBuffer>, Error> {
             ctx.check_fits(bytes)?;
             ctx.device
                 .newBufferWithLength_options(bytes.max(4), MTLResourceOptions::StorageModePrivate)
                 .ok_or(Error::Resource("wavefront buffer"))
         };
-        let depth = MAX_DEPTH as usize;
         Ok(Self {
-            state: private(paths * words * 4)?,
-            hits: private(paths * 16)?,
-            queues: [private(paths * 4)?, private(paths * 4)?],
-            counts: private((depth + 1) * 4)?,
-            args: private(depth * 12)?,
+            state: private(sizes.state)?,
+            hits: private(sizes.hits)?,
+            queues: [private(sizes.queue)?, private(sizes.queue)?],
+            counts: private(sizes.counts)?,
+            args: private(sizes.args)?,
         })
     }
 
@@ -156,7 +152,7 @@ impl Renderer {
                             enc.dispatchThreadgroupsWithIndirectBuffer_indirectBufferOffset_threadsPerThreadgroup(
                                 &b.args,
                                 12 * d,
-                                size(GROUP),
+                                size(GROUP as usize),
                             );
                         }
                     }
