@@ -13,13 +13,16 @@ use libloading::{Library, Symbol};
 /// OIDN device / filter handles are opaque pointers.
 type Handle = *mut c_void;
 
-/// Where OIDN runs. The CUDA device needs an OIDN package that ships its CUDA module (the Windows
-/// and Linux release zips do) and an NVIDIA GPU; asking for it elsewhere is an `Error::Oidn`.
+/// Where OIDN runs. A GPU device needs an OIDN package that ships its module (the release zips ship
+/// CUDA and HIP; Blender's copy ships the module of its platform, Metal on macOS) and that GPU;
+/// asking for one that is not there is an `Error::Oidn`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Device {
     #[default]
     Cpu,
     Cuda,
+    Hip,
+    Metal,
 }
 
 impl Device {
@@ -28,6 +31,8 @@ impl Device {
         match self {
             Device::Cpu => 1,
             Device::Cuda => 3,
+            Device::Hip => 4,
+            Device::Metal => 5,
         }
     }
 }
@@ -56,8 +61,22 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+static HOST_LIBRARY: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// A copy of OIDN the host application ships (Blender bundles one with its GPU modules). It is tried
+/// after `VERION_OIDN_LIB` and before the system's own copies.
+pub fn set_host_library(path: &str) {
+    *HOST_LIBRARY.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.to_owned());
+}
+
 fn candidates() -> Vec<String> {
     let mut v: Vec<String> = std::env::var("VERION_OIDN_LIB").into_iter().collect();
+    v.extend(
+        HOST_LIBRARY
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone(),
+    );
     if cfg!(target_os = "macos") {
         v.push("libOpenImageDenoise.2.dylib".into());
         v.push("/opt/homebrew/lib/libOpenImageDenoise.2.dylib".into());

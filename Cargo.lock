@@ -2703,6 +2703,7 @@ version = "0.0.0"
 dependencies = [
  "numpy",
  "pyo3",
+ "verion-denoise",
  "verion-gpu",
  "verion-gpu-metal",
  "verion-gpu-vulkan",

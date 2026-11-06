@@ -52,7 +52,12 @@ class VerionSceneSettings(bpy.types.PropertyGroup):
     denoise: BoolProperty(name="Denoise", description="Intel Open Image Denoise (not physical)", default=False)
     denoise_device: EnumProperty(
         name="Device",
-        items=[("CPU", "CPU", ""), ("CUDA", "CUDA", "NVIDIA GPU; the OIDN CUDA module must be installed")],
+        items=[
+            ("CPU", "CPU", ""),
+            ("METAL", "Metal", "Apple GPU, through the OIDN module that ships with Blender"),
+            ("CUDA", "CUDA", "NVIDIA GPU, through the OIDN module that ships with Blender"),
+            ("HIP", "HIP", "AMD GPU, through the OIDN module that ships with Blender"),
+        ],
         default="CPU",
     )
     denoise_stage: EnumProperty(

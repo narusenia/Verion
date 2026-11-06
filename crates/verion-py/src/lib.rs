@@ -24,8 +24,15 @@ fn read_image<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, numpy::Py
     numpy::PyArray1::from_vec(py, flat).reshape([h, w, 3])
 }
 
+/// The OIDN library the host ships (Blender's own copy), tried after `VERION_OIDN_LIB`.
+#[pyfunction]
+fn set_oidn_library(path: &str) {
+    verion_denoise::set_host_library(path);
+}
+
 #[pymodule]
 fn verion(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(set_oidn_library, m)?)?;
     m.add_function(wrap_pyfunction!(read_image, m)?)?;
     m.add_class::<scene::Scene>()?;
     m.add_class::<engine::Engine>()?;

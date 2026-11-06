@@ -21,7 +21,7 @@
 | 12 | UDIM・タイル化したテクスチャ | REQ-IO-004 | 済（UDIM を 1 枚のアトラスに変換。`test_udim.py`） |
 | 13 | 環境光だけで照明したときの Toon の段: HDRI から支配的な光の方向を求めて仮想の主光源にする（ADR-0020）。上書き（方向・強さ・無効化）、影の光線 1 本、一様な空では出さない。太陽のない HDRI で段が出る検証 | REQ-STY | 済（ADR-0020。`pack::virtual_light`、光テーブルの kind 3、slot 3。ビューティは変わらない。上書きは Scene IR と Python と Blender のワールドタブにあり、glTF 拡張への項目の追加は利用者の確認待ち） |
 | 14 | DCC 間の一貫性: 同じシーンを Blender 経由と glTF 経由で描いて閾値内で一致する。Cycles との比較は参考値として記録する | REQ-QA | 済（`test_consistency.py`: Blender 経由と glTF 経由が画素まで一致。Cycles との比は `consistency.md` に参考値として記録） |
-| 15 | 配布: アドオン zip（macOS Apple silicon・Windows x64）。ネイティブライブラリと OIDN の CPU 版・ライセンス文書を同梱（ADR-0018）。GPU 版 OIDN を足す導線（GUI） | REQ-INFRA-003 | 未着手 |
+| 15 | 配布: アドオン zip（macOS Apple silicon・Windows x64）。ネイティブライブラリと OIDN の CPU 版・ライセンス文書を同梱（ADR-0018）。GPU 版 OIDN を足す導線（GUI） | REQ-INFRA-003 | 済（macOS Apple silicon: `scripts/package_blender.sh` が abi3 の wheel を入れた拡張 zip を作り、空の Blender プロファイルへ入れて 4.5 と 5.2 で描画まで確認。Windows x64 は同じスクリプトを Windows 機で実行（項目 16）。OIDN は Blender の同梱を使うので同梱しない（ADR-0018 の追記）。GPU デノイズは Device の選択（Metal・CUDA・HIP）。拡張のライセンス欄は仮置きで、ADR-0004 の決定が外部配布の前に要る） |
 | 16 | Windows（Vulkan）での確認: Blender 5.x と 4.5 LTS で、項目 4〜7 の画像が Metal と一致する | REQ-GPU-007 | 未着手（Windows 機の作業。`docs/handoff/` に手順を残す） |
 
 ## 決めてあること

@@ -17,6 +17,7 @@ doctest = false
 # maturin adds the extension-module link settings; plain `cargo build` links libpython.
 pyo3 = { version = "0.30", features = ["abi3-py311"] }
 numpy = "0.30"
+verion-denoise = { version = "0.0.0", path = "../verion-denoise" }
 verion-gpu = { version = "0.0.0", path = "../verion-gpu" }
 verion-render = { version = "0.0.0", path = "../verion-render" }
 verion-render-io = { version = "0.0.0", path = "../verion-render-io" }

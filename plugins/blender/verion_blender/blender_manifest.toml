@@ -10,4 +10,8 @@ type = "add-on"
 # Blender 4.5 LTS and later (ADR-0019). The native extension is an abi3 wheel built by
 # scripts/package_blender.sh; platform-specific builds list their platform below.
 blender_version_min = "4.5.0"
+# Placeholder: Verion's own license is undecided (ADR-0004). Decide it before the first external distribution.
 license = ["SPDX:Apache-2.0"]
+
+[permissions]
+files = "Reads textures and IES files; bakes into the temp directory"

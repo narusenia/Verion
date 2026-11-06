@@ -50,7 +50,26 @@ def load():
             "Update both together."
         )
     _module = verion
+    lib = blender_oidn()
+    if lib:
+        verion.set_oidn_library(lib)
     return verion
+
+
+def blender_oidn():
+    """Blender's own copy of Open Image Denoise (it ships its GPU modules too), or None."""
+    import bpy
+
+    root = os.path.dirname(bpy.app.binary_path)
+    for p in (
+        os.path.join(root, "..", "Resources", "lib", "libOpenImageDenoise.dylib"),  # macOS
+        os.path.join(root, "OpenImageDenoise.dll"),                                  # Windows
+        os.path.join(root, "lib", "libOpenImageDenoise.so.2"),                       # Linux
+        os.path.join(root, "lib", "libOpenImageDenoise.so"),
+    ):
+        if os.path.exists(p):
+            return os.path.normpath(p)
+    return None
 
 
 def available():

@@ -118,7 +118,12 @@ pub fn parse(d: &Bound<'_, PyDict>) -> PyResult<JobSettings> {
             device: choice(
                 "denoise device",
                 &get::<String>(&n, "device")?.unwrap_or_else(|| "cpu".into()),
-                &[("cpu", DenoiseDevice::Cpu), ("cuda", DenoiseDevice::Cuda)],
+                &[
+                    ("cpu", DenoiseDevice::Cpu),
+                    ("cuda", DenoiseDevice::Cuda),
+                    ("hip", DenoiseDevice::Hip),
+                    ("metal", DenoiseDevice::Metal),
+                ],
             )?,
             stage: choice(
                 "denoise stage",

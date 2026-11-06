@@ -60,6 +60,10 @@ enum DenoiseDevice {
     Cpu,
     /// NVIDIA GPU through OIDN's CUDA module
     Cuda,
+    /// AMD GPU through OIDN's HIP module
+    Hip,
+    /// Apple GPU through OIDN's Metal module
+    Metal,
 }
 
 /// Where `--denoise` filters a stylized render (ADR-0013). Reference renders denoise the beauty.
@@ -372,6 +376,8 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
             verion_denoise::Denoiser::load_on(match args.denoise_device {
                 DenoiseDevice::Cpu => verion_denoise::Device::Cpu,
                 DenoiseDevice::Cuda => verion_denoise::Device::Cuda,
+                DenoiseDevice::Hip => verion_denoise::Device::Hip,
+                DenoiseDevice::Metal => verion_denoise::Device::Metal,
             })
             .map_err(|e| e.to_string())?,
         )

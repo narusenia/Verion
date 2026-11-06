@@ -81,6 +81,13 @@ class FinalTests(unittest.TestCase):
         self.assertGreater(a.mean(), 0.05)
         self.assertIn(b"oidn", exr_header(os.path.join(TMP, "final.exr")))
 
+    @unittest.skipUnless(sys.platform == "darwin", "the Metal device of OIDN")
+    def test_denoise_on_the_gpu_device_blender_ships(self):
+        cpu = render(denoise=True, denoise_device="CPU")
+        gpu = render(denoise=True, denoise_device="METAL")
+        self.assertGreater(gpu.mean(), 0.05)
+        self.assertTrue(0.9 < gpu.mean() / cpu.mean() < 1.1, f"{gpu.mean()} vs {cpu.mean()}")
+
     def test_render_border_keeps_the_frame_size(self):
         a = render(use_border=True, border_min_x=0.25, border_max_x=0.75, border_min_y=0.25, border_max_y=0.75)
         self.assertEqual(a.shape[:2], (72, 96))
