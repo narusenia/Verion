@@ -1,3 +1,5 @@
+import weakref
+
 import bpy
 import gpu
 from gpu_extras.batch import batch_for_shader
@@ -72,7 +74,10 @@ class VerionRenderEngine(bpy.types.RenderEngine):
     def view_update(self, context, depsgraph):
         try:
             if self.viewport is None:
-                self.viewport = Viewport(native.load(), self._warn)
+                # A weak reference: the viewport must not keep the engine alive, or `__del__` (which frees
+                # the GPU) waits for the cyclic GC and the next engine runs out of memory.
+                warn = weakref.WeakMethod(self._warn)
+                self.viewport = Viewport(native.load(), lambda level, msg: (w := warn()) and w(level, msg))
             view = View.from_region(context.region_data, context.region)
             self.viewport.update(depsgraph, view, depsgraph.scene.verion)
         except Exception as e:

@@ -80,6 +80,7 @@ class Viewport:
         self.view = None
         self.image = None       # latest (version, samples, rgba array)
         self.stats = {}
+        self.failed = False
 
     # -- lifecycle --------------------------------------------------------------------------------
 
@@ -106,6 +107,7 @@ class Viewport:
     def _start(self, settings, w, h, scale=1.0):
         cfg = settings.native_settings(max(1, int(w * scale)), max(1, int(h * scale)), final=False)
         self.job = self.engine.start(cfg, interactive=True)  # replaces a running job
+        self.failed = False
         self.key = settings_key(settings)
         self.size = (w, h)
         self.moving = scale < 1.0
@@ -160,6 +162,12 @@ class Viewport:
         if got is not None:
             self.image = got
         self.stats = self.job.stats()
+        if self.job.done() and not self.failed:  # an interactive job only ends on an error
+            self.failed = True
+            try:
+                self.job.result()
+            except RuntimeError as e:
+                self.report("ERROR", f"Verion: the viewport job stopped: {e}")
         return got
 
     def status(self):
