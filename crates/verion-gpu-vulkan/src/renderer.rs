@@ -84,14 +84,16 @@ pub struct Renderer {
     multiscatter: bool,
     normals: Pipeline,
     aov: Pipeline,
-    pathtrace: Pipeline,
+    /// Indexed by whether ReSTIR is compiled in (`restirCompiled`), so a renderer without it
+    /// runs a kernel without its registers. Compiled on first use.
+    pathtrace: [OnceCell<Result<Pipeline, Error>>; 2],
     integrator: Integrator,
     /// Wavefront only: time extend and shade separately.
     stage_timing: bool,
     adaptive: Option<Adaptive>,
     restir: Option<Restir>,
-    /// Compiled on first use, so megakernel-only users skip the compile.
-    wavefront: OnceCell<Result<wavefront::Pipelines, Error>>,
+    /// Compiled on first use, so megakernel-only users skip the compile; indexed like `pathtrace`.
+    wavefront: [OnceCell<Result<wavefront::Pipelines, Error>>; 2],
 }
 
 impl Renderer {
@@ -117,7 +119,7 @@ impl Renderer {
         up.flush()?;
         let blases = accel::build_blases(ctx, &positions, &indices, &packed.meshes)?;
         let tlas = accel::build_tlas(ctx, &blases, &packed.tlas)?;
-        let pipe = |name, dynamic| Pipeline::new(ctx, name, spirv(name), dynamic);
+        let pipe = |name, dynamic| Pipeline::new(ctx, name, spirv(name), dynamic, false);
         Ok(Self {
             ctx: ctx.clone(),
             tlas,
@@ -145,12 +147,12 @@ impl Renderer {
             multiscatter: true,
             normals: pipe("normals", None)?,
             aov: pipe("aov", None)?,
-            pathtrace: pipe("pathtrace", Some(PARAMS_BINDING))?,
+            pathtrace: [OnceCell::new(), OnceCell::new()],
             integrator: Integrator::default(),
             stage_timing: false,
             adaptive: None,
             restir: None,
-            wavefront: OnceCell::new(),
+            wavefront: [OnceCell::new(), OnceCell::new()],
         })
     }
 
@@ -640,14 +642,34 @@ impl RayTracingBackend for Renderer {
 
         let desc = Descriptors::new(&self.ctx, 8)?;
         let path = self.path_resources(acc, &params);
+        let restir_on = self.restir.is_some();
+        let variant = usize::from(restir_on);
+        let mega_pipe = if wavefront {
+            None
+        } else {
+            Some(
+                self.pathtrace[variant]
+                    .get_or_init(|| {
+                        Pipeline::new(
+                            &self.ctx,
+                            "pathtrace",
+                            spirv("pathtrace"),
+                            Some(PARAMS_BINDING),
+                            restir_on,
+                        )
+                    })
+                    .as_ref()
+                    .map_err(Clone::clone)?,
+            )
+        };
         let mut mega_set = vk::DescriptorSet::null();
         // Per queue parity, then per stage (args, extend, shade); the select set is apart.
         let mut wf_sets = [[vk::DescriptorSet::null(); 3]; 2];
         let mut select_set = vk::DescriptorSet::null();
         let wf_pipes = if wavefront {
             Some(
-                self.wavefront
-                    .get_or_init(|| wavefront::Pipelines::new(&self.ctx))
+                self.wavefront[variant]
+                    .get_or_init(|| wavefront::Pipelines::new(&self.ctx, restir_on))
                     .as_ref()
                     .map_err(Clone::clone)?,
             )
@@ -666,7 +688,10 @@ impl RayTracingBackend for Renderer {
             // wf_select fills the depth-0 queue, which depth 0 then reads as its input.
             select_set = desc.set(&p.select, &wf_resources(&path, w, 0, &w.queues[0]))?;
         } else {
-            mega_set = desc.set(&self.pathtrace, &path)?;
+            mega_set = desc.set(
+                mega_pipe.expect("the megakernel runs without the wavefront"),
+                &path,
+            )?;
         }
 
         let pipe_and_set = |s: &Step| -> (&Pipeline, vk::DescriptorSet) {
@@ -676,7 +701,10 @@ impl RayTracingBackend for Renderer {
                 (Some(Stage::Args), Some(p)) => (&p.args, wf_sets[parity][0]),
                 (Some(Stage::Extend), Some(p)) => (&p.extend, wf_sets[parity][1]),
                 (Some(Stage::Shade), Some(p)) => (&p.shade, wf_sets[parity][2]),
-                _ => (&self.pathtrace, mega_set),
+                _ => (
+                    mega_pipe.expect("the megakernel runs without the wavefront"),
+                    mega_set,
+                ),
             }
         };
 

@@ -45,6 +45,10 @@ RWStructuredBuffer<float> lighting; // used only when params[28] != 0; 65 floats
 RWStructuredBuffer<float> pixelStats; // used only when params[32] != 0; 3 floats per pixel: samples taken, sum of
                                       // luminance, sum of squared luminance (adaptive sampling, REQ-ACC-007)
 
+// Fixed when the pipeline is created: false compiles ReSTIR out, so a renderer without it pays nothing
+// for its registers. params[36] still picks DI and GI at run time when this is true.
+[SpecializationConstant] const bool restirCompiled = true;
+
 RWStructuredBuffer<float> restir;   // used only when params[36] != 0 (ReSTIR, REQ-ACC-002): 80 floats per pixel: two halves of
                                     // 28, the current frame's and the previous one's, swapped by sample parity, then 24 of scratch.
                                     // A half: 0 emitter + 1 (bits, 0 = none), 1..3 DI sample point, 4 DI contribution weight W,
@@ -922,7 +926,7 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
     {
         if (!hq.hit)
         {
-            if (depth == 0 && params[36] != 0)
+            if (restirCompiled && depth == 0 && params[36] != 0)
                 restirClear(pixel);
             // Uniform sky is reached by cosine sampling, so it needs no light sampling.
             st.parts.add(depth, cls, thr * sky);
@@ -1170,7 +1174,7 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
         // ReSTIR DI at the first hit of surfaces it suits: emitters come from reservoirs, the
         // environment map is always light sampled, and BSDF hits on emitters are weighed against that.
         bool reDI = false;
-        if (depth == 0 && params[36] != 0)
+        if (restirCompiled && depth == 0 && params[36] != 0)
         {
             bool suits = pf(3) == 0.0 && transmission == 0.0 && surf.alpha >= RESTIR_MIN_ALPHA
                 && (surf.coat == 0.0 || surf.coatAlpha >= RESTIR_MIN_ALPHA);

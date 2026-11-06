@@ -24,12 +24,14 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    /// `dynamic` names the binding read through a dynamic offset, if any.
+    /// `dynamic` names the binding read through a dynamic offset, if any. `restir` is the
+    /// specialization constant `restirCompiled` (id 0) of `pt_core.slang`; kernels without it ignore it.
     pub fn new(
         ctx: &VulkanContext,
         name: &str,
         spv: &[u8],
         dynamic: Option<u32>,
+        restir: bool,
     ) -> Result<Self, Error> {
         let bindings = reflect::bindings(spv).map_err(|e| Error::Shader(format!("{name}: {e}")))?;
         let words = reflect::words(spv);
@@ -63,10 +65,19 @@ impl Pipeline {
                     d.destroy_pipeline_layout(layout, None);
                     d.destroy_descriptor_set_layout(set_layout, None);
                 })?;
+            let entries = [vk::SpecializationMapEntry::default()
+                .constant_id(0)
+                .offset(0)
+                .size(4)];
+            let data = u32::from(restir).to_ne_bytes();
+            let spec = vk::SpecializationInfo::default()
+                .map_entries(&entries)
+                .data(&data);
             let stage = vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::COMPUTE)
                 .module(module)
-                .name(c"main");
+                .name(c"main")
+                .specialization_info(&spec);
             let made = d.create_compute_pipelines(
                 vk::PipelineCache::null(),
                 &[vk::ComputePipelineCreateInfo::default()
