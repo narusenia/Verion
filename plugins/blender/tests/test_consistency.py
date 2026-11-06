@@ -76,7 +76,7 @@ def blocks(a, n=4):
 
 class ConsistencyTests(unittest.TestCase):
     def test_blender_and_gltf_agree(self):
-        cli = os.path.join(ROOT, "target", "debug", "render-cli")
+        cli = os.path.join(ROOT, "target", "debug", "render-cli.exe" if os.name == "nt" else "render-cli")
         subprocess.run(["cargo", "build", "-q", "-p", "verion-render-cli"], cwd=ROOT, check=True)
         build()
         ours = common.render("VERION", os.path.join(TMP, "blender.exr"), W, H, SPP)

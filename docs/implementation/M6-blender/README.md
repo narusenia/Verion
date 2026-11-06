@@ -22,7 +22,7 @@
 | 13 | 環境光だけで照明したときの Toon の段: HDRI から支配的な光の方向を求めて仮想の主光源にする（ADR-0020）。上書き（方向・強さ・無効化）、影の光線 1 本、一様な空では出さない。太陽のない HDRI で段が出る検証 | REQ-STY | 済（ADR-0020。`pack::virtual_light`、光テーブルの kind 3、slot 3。ビューティは変わらない。上書きは Scene IR と Python と Blender のワールドタブにあり、glTF 拡張への項目の追加は利用者の確認待ち） |
 | 14 | DCC 間の一貫性: 同じシーンを Blender 経由と glTF 経由で描いて閾値内で一致する。Cycles との比較は参考値として記録する | REQ-QA | 済（`test_consistency.py`: Blender 経由と glTF 経由が画素まで一致。Cycles との比は `consistency.md` に参考値として記録） |
 | 15 | 配布: アドオン zip（macOS Apple silicon・Windows x64）。ネイティブライブラリと OIDN の CPU 版・ライセンス文書を同梱（ADR-0018）。GPU 版 OIDN を足す導線（GUI） | REQ-INFRA-003 | 済（macOS Apple silicon: `scripts/package_blender.sh` が abi3 の wheel を入れた拡張 zip を作り、空の Blender プロファイルへ入れて 4.5 と 5.2 で描画まで確認。Windows x64 は同じスクリプトを Windows 機で実行（項目 16）。OIDN は Blender の同梱を使うので同梱しない（ADR-0018 の追記）。GPU デノイズは Device の選択（Metal・CUDA・HIP）。拡張のライセンス欄は仮置きで、ADR-0004 の決定が外部配布の前に要る） |
-| 16 | Windows（Vulkan）での確認: Blender 5.x と 4.5 LTS で、項目 4〜7 の画像が Metal と一致する | REQ-GPU-007 | 未着手（Windows 機の作業。`docs/handoff/` に手順を残す） |
+| 16 | Windows（Vulkan）での確認: Blender 5.x と 4.5 LTS で、項目 4〜7 の画像が Metal と一致する | REQ-GPU-007 | 実機確認待ち（Windows 機の作業。手順は `docs/handoff/2026-11-06-m6-device-checks.md`。スクリプトは `BLENDER` で Windows の Blender を渡せる） |
 
 ## 決めてあること
 
@@ -37,15 +37,16 @@
 
 ## 要確認（利用者）
 
-- 仕様書 `gltf-stylization-extension.md` への、仮想の主光源の上書き項目の追加（スキーマの変更。項目 13 の実装時）と、`overview.md` の未決事項の更新
+- 仕様書 `gltf-stylization-extension.md` への、仮想の主光源の上書き項目の追加（スキーマの変更。Scene IR・Python・Blender には入れてある）と、`overview.md` の未決事項の更新
+- 拡張のライセンス欄（仮置きの Apache-2.0。ADR-0004）、ADR-0018 の追記（Blender の OIDN を使う）、画像のアルファによる切り抜きを入れるか、ライトリンクのブロッカー。詳細は `docs/handoff/2026-11-06-m6-device-checks.md`
 - Octane との比較は、この M6 の後に Blender 用の無料版で行う（M5 の持ち越し。REQ-ACC-002）
 
 ## 完了条件
 
-- [ ] 実シーンを Blender で編集・プレビュー・Final 出力できる（REQ-DCC-001）
-- [ ] 編集後の First Clean Preview を計測して記録した（REQ-DCC-002）
-- [ ] Principled BSDF が変換でき、非対応ノードは警告して代替値になる（REQ-DCC-003）
-- [ ] Stylization ノードを Blender 上で編集できる
-- [ ] IES・ライトリンク・Cryptomatte・Shadow Catcher・UDIM が動く
-- [ ] Blender 経由と glTF 経由の画像が閾値内で一致する
-- [ ] 4.5 LTS と 5.x、Metal と Vulkan で動く
+- [ ] 実シーンを Blender で編集・プレビュー・Final 出力できる（REQ-DCC-001）— 編集と Final はテスト済み、プレビューの表示 `view_draw` は GUI の確認待ち
+- [x] 編集後の First Clean Preview を計測して記録した（REQ-DCC-002）
+- [x] Principled BSDF が変換でき、非対応ノードは警告して代替値になる（REQ-DCC-003）
+- [x] Stylization ノードを Blender 上で編集できる（ノードではなくパネル）
+- [x] IES・ライトリンク・Cryptomatte・Shadow Catcher・UDIM が動く
+- [x] Blender 経由と glTF 経由の画像が閾値内で一致する
+- [ ] 4.5 LTS と 5.x、Metal と Vulkan で動く — 4.5 LTS と 5.x の Metal は済、Vulkan は Windows 機の確認待ち

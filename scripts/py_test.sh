@@ -18,7 +18,10 @@ sys.path.insert(0, "$PWD/$out")
 r = unittest.TextTestRunner().run(unittest.defaultTestLoader.discover("$PWD/$tests", "test_*.py"))
 sys.exit(not r.wasSuccessful())
 PY
-for b in "$HOME"/Applications/Blender/stable/*/Blender.app/Contents/MacOS/Blender; do
+list=$(mktemp)
+sh scripts/blenders.sh > "$list"
+while read -r b; do
   echo "== $("$b" --version | head -1)"
-  "$b" -b --factory-startup --python-exit-code 1 --python "$out/run_tests.py" 2>&1 | grep -E "^(Ran|OK|FAIL|ERROR)|Error|Traceback" || true
-done
+  "$b" -b --factory-startup --python-exit-code 1 --python "$out/run_tests.py" 2>&1 < /dev/null | grep -E "^(Ran|OK|FAIL|ERROR)|Error|Traceback" || true
+done < "$list"
+rm -f "$list"

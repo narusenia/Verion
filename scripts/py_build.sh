@@ -5,4 +5,4 @@ set -eu
 rm -rf target/py target/py-wheel
 maturin build --release -q -m crates/verion-py/Cargo.toml -o target/py-wheel
 mkdir -p target/py
-unzip -q target/py-wheel/*.whl -d target/py
+python3 -m zipfile -e target/py-wheel/*.whl target/py
