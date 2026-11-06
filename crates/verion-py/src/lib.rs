@@ -6,14 +6,27 @@ mod engine;
 mod scene;
 mod settings;
 
+use numpy::PyArrayMethods as _;
 use pyo3::prelude::*;
 
 /// Bumped when the Python API changes in a way the add-on must follow; the add-on refuses an
 /// extension with another value (plugins/blender/verion_blender/native.py).
 const ABI_VERSION: u32 = 1;
 
+/// The first three channels of a `.hdr` or `.exr` file as float32 (H, W, 3), first row on top, in
+/// linear Rec.709 (a Verion render-cli output, for tools that compare renders).
+#[pyfunction]
+fn read_image<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, numpy::PyArray3<f32>>> {
+    let image = verion_render_io::load_hdri(path.as_ref(), verion_scene::ColorSpace::LinearRec709)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{path}: {e}")))?;
+    let (w, h) = (image.width() as usize, image.height() as usize);
+    let flat: Vec<f32> = image.pixels().iter().flatten().copied().collect();
+    numpy::PyArray1::from_vec(py, flat).reshape([h, w, 3])
+}
+
 #[pymodule]
 fn verion(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(read_image, m)?)?;
     m.add_class::<scene::Scene>()?;
     m.add_class::<engine::Engine>()?;
     m.add_class::<engine::Job>()?;
