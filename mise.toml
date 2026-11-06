@@ -14,6 +14,8 @@ python = "3.12"
 "pipx:mitsuba" = "3.7.1"
 # FLIP perceptual error (NVIDIA, BSD-3-Clause; pulls in numpy) for the cross-check; reported only.
 "pipx:flip-evaluator" = "1.7"
+# Builds the Python extension of the Blender add-on (verion-py, ADR-0019).
+"pipx:maturin" = "1.16"
 
 [tasks.fmt]
 description = "Check formatting"
@@ -34,6 +36,10 @@ run = "cargo test --workspace"
 [tasks."test:gpu"]
 description = "GPU tests of the Vulkan backend (needs a Vulkan ray tracing GPU; not run in CI)"
 run = "cargo test -p verion-gpu-vulkan --release -- --ignored --test-threads=1"
+
+[tasks."test:py"]
+description = "Build the Python extension and run its GPU tests under plain Python and each installed Blender (needs a ray tracing GPU; not run in CI)"
+run = "sh scripts/py_test.sh"
 
 [tasks.deny]
 description = "License, ban and source checks (deny.toml)"

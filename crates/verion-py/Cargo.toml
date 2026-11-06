@@ -8,11 +8,26 @@ publish.workspace = true
 [lib]
 name = "verion"
 crate-type = ["cdylib"]
+# Tested from Python (scripts/py_test.sh); a Rust test binary would need libpython at run time.
+test = false
+doctest = false
 
 [dependencies]
 # abi3-py311: one binary for Blender 4.5 LTS (Python 3.11) and 5.x (Python 3.13) (ADR-0019).
+# maturin adds the extension-module link settings; plain `cargo build` links libpython.
 pyo3 = { version = "0.30", features = ["abi3-py311"] }
 numpy = "0.30"
+verion-gpu = { version = "0.0.0", path = "../verion-gpu" }
+verion-render = { version = "0.0.0", path = "../verion-render" }
+verion-render-io = { version = "0.0.0", path = "../verion-render-io" }
+verion-scene = { version = "0.0.0", path = "../verion-scene" }
+verion-stylization = { version = "0.0.0", path = "../verion-stylization" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+verion-gpu-metal = { version = "0.0.0", path = "../verion-gpu-metal" }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+verion-gpu-vulkan = { version = "0.0.0", path = "../verion-gpu-vulkan" }
 
 [lints]
 workspace = true

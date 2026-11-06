@@ -2703,6 +2703,13 @@ version = "0.0.0"
 dependencies = [
  "numpy",
  "pyo3",
+ "verion-gpu",
+ "verion-gpu-metal",
+ "verion-gpu-vulkan",
+ "verion-render",
+ "verion-render-io",
+ "verion-scene",
+ "verion-stylization",
 ]
 
 [[package]]

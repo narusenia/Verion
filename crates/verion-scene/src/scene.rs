@@ -242,6 +242,11 @@ impl Scene {
         MaterialId(self.materials.len() as u32 - 1)
     }
 
+    /// The id of the `index`-th mesh, for tools that list meshes by position.
+    pub fn mesh_id(&self, index: usize) -> Option<MeshId> {
+        (index < self.meshes.len()).then_some(MeshId(index as u32))
+    }
+
     /// The id of the `index`-th material, for tools that list materials by position.
     pub fn material_id(&self, index: usize) -> Option<MaterialId> {
         (index < self.materials.len()).then_some(MaterialId(index as u32))

@@ -13,6 +13,18 @@ pub const NAME: &str = "VERION_materials_stylization";
 /// is an image that cannot be used (the layer is skipped with a warning).
 pub type ResolveTexture<'a> = &'a mut dyn FnMut(usize) -> Result<Option<ImageId>, String>;
 
+/// `parse` for the extension's JSON text, for front ends that build materials without a glTF file
+/// (the Blender add-on). `resolve` maps a texture index in the text to an image of the scene.
+pub fn parse_json(
+    text: &str,
+    space: ColorSpace,
+    resolve: ResolveTexture,
+) -> Result<(Vec<StylizationLayer>, Vec<String>), String> {
+    let value =
+        gltf::json::deserialize::from_str(text).map_err(|e| format!("invalid JSON: {e}"))?;
+    parse(&value, space, resolve)
+}
+
 /// Layers plus warnings for unknown properties. `Err` carries a message for the import error.
 pub fn parse(
     value: &Value,

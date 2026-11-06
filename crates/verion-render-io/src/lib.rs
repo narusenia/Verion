@@ -10,3 +10,4 @@ pub use gltf_import::{
     Error, Import, load_gltf, load_gltf_in, load_gltf_slice, load_gltf_slice_in,
 };
 pub use hdri::{HdriError, load_hdri};
+pub use stylization_ext::{ResolveTexture, parse_json as parse_stylization_json};

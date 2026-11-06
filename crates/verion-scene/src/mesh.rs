@@ -80,6 +80,54 @@ impl Mesh {
         })
     }
 
+    /// Builds a mesh from the way DCC tools store one: shared vertex positions and, per triangle
+    /// corner (3 per triangle, in `tri_vertices` order), a normal and a UV. Corners that share a
+    /// vertex and have the same normal and UV become one vertex, so smooth shading welds and hard
+    /// edges and UV seams split.
+    pub fn from_corners(
+        positions: &[[f32; 3]],
+        tri_vertices: &[u32],
+        normals: Option<&[[f32; 3]]>,
+        uvs: Option<&[[f32; 2]]>,
+    ) -> Result<Self, MeshError> {
+        let corners = tri_vertices.len();
+        let check = |attribute, actual: Option<usize>| match actual {
+            Some(actual) if actual != corners => Err(MeshError::AttributeLength {
+                attribute,
+                expected: corners,
+                actual,
+            }),
+            _ => Ok(()),
+        };
+        check("normals", normals.map(<[_]>::len))?;
+        check("uvs", uvs.map(<[_]>::len))?;
+        let mut seen = std::collections::HashMap::<(u32, [u32; 3], [u32; 2]), u32>::new();
+        let (mut p, mut n, mut t) = (Vec::new(), Vec::new(), Vec::new());
+        let mut indices = Vec::with_capacity(corners);
+        for (c, &v) in tri_vertices.iter().enumerate() {
+            let pos = *positions
+                .get(v as usize)
+                .ok_or(MeshError::IndexOutOfRange {
+                    index: v,
+                    vertices: positions.len(),
+                })?;
+            let (nc, uc) = (normals.map(|a| a[c]), uvs.map(|a| a[c]));
+            let key = (
+                v,
+                nc.map_or([0; 3], |a| a.map(f32::to_bits)),
+                uc.map_or([0; 2], |a| a.map(f32::to_bits)),
+            );
+            let next = p.len() as u32;
+            indices.push(*seen.entry(key).or_insert_with(|| {
+                p.push(pos);
+                n.extend(nc);
+                t.extend(uc);
+                next
+            }));
+        }
+        Self::new(p, normals.map(|_| n), uvs.map(|_| t), indices)
+    }
+
     pub fn positions(&self) -> &[[f32; 3]] {
         &self.positions
     }
@@ -106,6 +154,39 @@ mod tests {
     #[test]
     fn accepts_a_valid_triangle() {
         assert!(Mesh::new(TRI.to_vec(), None, None, vec![0, 1, 2]).is_ok());
+    }
+
+    #[test]
+    fn from_corners_welds_equal_corners_and_splits_the_rest() {
+        // Two triangles sharing the edge 1-2. Smooth normals on the shared edge weld; a different
+        // normal at vertex 1 in the second triangle splits it.
+        let pos = [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]];
+        let up = [0.0, 0.0, 1.0];
+        let tilt = [0.0, 0.6, 0.8];
+        let m = Mesh::from_corners(&pos, &[0, 1, 2, 1, 3, 2], Some(&[up; 6]), None).unwrap();
+        assert_eq!((m.positions().len(), m.indices().len()), (4, 6));
+        let mut normals = [up; 6];
+        normals[3] = tilt;
+        let m = Mesh::from_corners(&pos, &[0, 1, 2, 1, 3, 2], Some(&normals), None).unwrap();
+        assert_eq!(m.positions().len(), 5);
+        let uv = [
+            [0.0; 2],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [0.0, 1.0],
+        ];
+        let m = Mesh::from_corners(&pos, &[0, 1, 2, 1, 3, 2], None, Some(&uv)).unwrap();
+        assert_eq!((m.positions().len(), m.uvs().unwrap().len()), (4, 4));
+        assert_eq!(
+            Mesh::from_corners(&pos, &[0, 1, 9], None, None),
+            Err(MeshError::IndexOutOfRange {
+                index: 9,
+                vertices: 4
+            })
+        );
+        assert!(Mesh::from_corners(&pos, &[0, 1, 2], Some(&[up]), None).is_err());
     }
 
     #[test]

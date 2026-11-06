@@ -1,13 +1,17 @@
-use numpy::{IntoPyArray, PyArray2, PyReadonlyArray2};
-use pyo3::prelude::*;
+//! Python extension `verion`: builds the Scene IR from numpy arrays and renders it on the GPU
+//! (REQ-DCC-001). The logic lives in the Rust core; this layer only converts types and keeps the
+//! GPU on its own thread so a DCC's UI never waits on a render (ADR-0019).
 
-#[pyfunction]
-fn double<'py>(py: Python<'py>, a: PyReadonlyArray2<'py, f32>) -> Bound<'py, PyArray2<f32>> {
-    let v = a.as_array().mapv(|x| x * 2.0);
-    v.into_pyarray(py)
-}
+mod engine;
+mod scene;
+mod settings;
+
+use pyo3::prelude::*;
 
 #[pymodule]
 fn verion(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(double, m)?)
+    m.add_class::<scene::Scene>()?;
+    m.add_class::<engine::Engine>()?;
+    m.add_class::<engine::Job>()?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))
 }
