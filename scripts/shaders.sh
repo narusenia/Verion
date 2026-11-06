@@ -13,7 +13,7 @@ vulkan=crates/verion-gpu-vulkan/shaders
 sources_sum() {
   for f in shaders/*.slang shaders/include/*.slang; do
     printf '%s ' "$f"
-    tr -d '' < "$f" | cksum
+    tr -d '\r' < "$f" | cksum
   done
 }
 
