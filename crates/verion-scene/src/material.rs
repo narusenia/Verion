@@ -36,6 +36,9 @@ pub struct BaseBsdf {
     /// (alpha). 1 = opaque. Stochastic, so it converges with the samples. Shadow rays follow the same
     /// rule, so a translucent surface casts a partial shadow.
     pub opacity: f32,
+    /// Multiplies `opacity` with the image's red channel (alpha stored as a gray image; glTF `BLEND` and `MASK`
+    /// take it from the base color texture's alpha). Leaves, fences and hair cards need it.
+    pub opacity_texture: Option<ImageId>,
     pub emission: [f32; 3],
     /// Textures multiply the factors above (glTF semantics) and hold linear values. Sampling is
     /// repeat-wrapped trilinear; UVs come from the mesh. The image ids must come from the same scene.
@@ -63,6 +66,7 @@ impl Default for BaseBsdf {
             sheen_roughness: 0.0,
             dispersion: 0.0,
             opacity: 1.0,
+            opacity_texture: None,
             emission: [0.0; 3],
             base_color_texture: None,
             metallic_roughness_texture: None,

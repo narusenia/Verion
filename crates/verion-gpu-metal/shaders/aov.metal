@@ -58,39 +58,39 @@ struct KernelContext_0
 };
 
 
-#line 55
+#line 74
 float3 pixelDir_0(float2 px_0, uint w_0, uint h_0, float t_0, float aspect_0, float3 thread* dir_0, KernelContext_0 thread* kernelContext_0)
 {
 
 
     float3 d_0 = normalize(float3((2.0f * px_0.x / float(w_0) - 1.0f + kernelContext_0->camera_0[int(16)]) * aspect_0 * t_0, (1.0f - 2.0f * px_0.y / float(h_0) + kernelContext_0->camera_0[int(17)]) * t_0, -1.0f));
 
-#line 59
+#line 78
     uint r_0 = 0U;
     for(;;)
     {
 
-#line 60
+#line 79
         if(r_0 < 3U)
         {
         }
         else
         {
 
-#line 60
+#line 79
             break;
         }
 
-#line 61
+#line 80
         uint _S1 = 4U * r_0;
 
-#line 61
+#line 80
         (*dir_0)[r_0] = kernelContext_0->camera_0[4U + _S1] * d_0.x + kernelContext_0->camera_0[5U + _S1] * d_0.y + kernelContext_0->camera_0[6U + _S1] * d_0.z;
 
-#line 60
+#line 79
         r_0 = r_0 + 1U;
 
-#line 60
+#line 79
     }
 
     return d_0;
@@ -197,6 +197,70 @@ float3 bilinear_0(uint base_2, uint w_2, uint h_2, float2 uv_0, KernelContext_0 
 }
 
 
+
+float opacityAt_0(uint instIdx_0, uint prim_0, float2 bary_0, KernelContext_0 thread* kernelContext_4)
+{
+    uint _S16 = instIdx_0 * 16U;
+
+#line 58
+    uint mi_0 = kernelContext_4->instances_0[_S16 + 2U] * 24U;
+    float op_0 = kernelContext_4->materials_0[mi_0 + 22U];
+    uint tex_0 = uint(kernelContext_4->materials_0[mi_0 + 23U]);
+
+#line 60
+    bool _S17;
+    if(tex_0 > 0U)
+    {
+
+#line 61
+        _S17 = op_0 > 0.0f;
+
+#line 61
+    }
+    else
+    {
+
+#line 61
+        _S17 = false;
+
+#line 61
+    }
+
+#line 61
+    float op_1;
+
+#line 61
+    if(_S17)
+    {
+        uint tri_0 = kernelContext_4->instances_0[_S16 + 1U] + 3U * prim_0;
+        uint vo_0 = kernelContext_4->instances_0[_S16];
+        float2 uv0_0 = float2(kernelContext_4->uvs_0[2U * (kernelContext_4->indices_0[tri_0] + vo_0)], kernelContext_4->uvs_0[2U * (kernelContext_4->indices_0[tri_0] + vo_0) + 1U]);
+        uint _S18 = tri_0 + 1U;
+        uint _S19 = tri_0 + 2U;
+        uint ti_0 = (tex_0 - 1U) * 4U;
+
+#line 68
+        float3 _S20 = bilinear_0(kernelContext_4->texInfo_0[ti_0], kernelContext_4->texInfo_0[ti_0 + 1U], kernelContext_4->texInfo_0[ti_0 + 2U], uv0_0 + float2(bary_0.x)  * (float2(kernelContext_4->uvs_0[2U * (kernelContext_4->indices_0[_S18] + vo_0)], kernelContext_4->uvs_0[2U * (kernelContext_4->indices_0[_S18] + vo_0) + 1U]) - uv0_0) + float2(bary_0.y)  * (float2(kernelContext_4->uvs_0[2U * (kernelContext_4->indices_0[_S19] + vo_0)], kernelContext_4->uvs_0[2U * (kernelContext_4->indices_0[_S19] + vo_0) + 1U]) - uv0_0), kernelContext_4);
+
+#line 68
+        op_1 = op_0 * _S20.x;
+
+#line 61
+    }
+    else
+    {
+
+#line 61
+        op_1 = op_0;
+
+#line 61
+    }
+
+#line 71
+    return op_1;
+}
+
+
 #line 20995 "hlsl.meta.slang"
 struct RayDesc_0
 {
@@ -207,291 +271,291 @@ struct RayDesc_0
 };
 
 
-#line 67 "shaders/aov.slang"
+#line 86 "shaders/aov.slang"
 [[kernel]] void aov(uint3 tid_0 [[thread_position_in_grid]], float device* camera_1 [[buffer(4)]], metal::raytracing::acceleration_structure<metal::raytracing::instancing> scene_1 [[buffer(0)]], uint device* instances_1 [[buffer(3)]], float device* materials_1 [[buffer(5)]], uint device* indices_1 [[buffer(2)]], float device* positions_1 [[buffer(1)]], float device* uvs_1 [[buffer(6)]], uint device* texInfo_1 [[buffer(7)]], float device* texels_1 [[buffer(8)]], float device* coverage_1 [[buffer(12)]], float device* albedoDepth_1 [[buffer(9)]], uint device* objectIds_1 [[buffer(10)]], uint device* materialIds_1 [[buffer(11)]])
 {
 
-#line 67
-    thread KernelContext_0 kernelContext_4;
+#line 86
+    thread KernelContext_0 kernelContext_5;
 
-#line 67
-    (&kernelContext_4)->camera_0 = camera_1;
+#line 86
+    (&kernelContext_5)->camera_0 = camera_1;
 
-#line 67
-    (&kernelContext_4)->scene_0 = scene_1;
+#line 86
+    (&kernelContext_5)->scene_0 = scene_1;
 
-#line 67
-    (&kernelContext_4)->instances_0 = instances_1;
+#line 86
+    (&kernelContext_5)->instances_0 = instances_1;
 
-#line 67
-    (&kernelContext_4)->materials_0 = materials_1;
+#line 86
+    (&kernelContext_5)->materials_0 = materials_1;
 
-#line 67
-    (&kernelContext_4)->indices_0 = indices_1;
+#line 86
+    (&kernelContext_5)->indices_0 = indices_1;
 
-#line 67
-    (&kernelContext_4)->positions_0 = positions_1;
+#line 86
+    (&kernelContext_5)->positions_0 = positions_1;
 
-#line 67
-    (&kernelContext_4)->uvs_0 = uvs_1;
+#line 86
+    (&kernelContext_5)->uvs_0 = uvs_1;
 
-#line 67
-    (&kernelContext_4)->texInfo_0 = texInfo_1;
+#line 86
+    (&kernelContext_5)->texInfo_0 = texInfo_1;
 
-#line 67
-    (&kernelContext_4)->texels_0 = texels_1;
+#line 86
+    (&kernelContext_5)->texels_0 = texels_1;
 
-#line 67
-    (&kernelContext_4)->coverage_0 = coverage_1;
+#line 86
+    (&kernelContext_5)->coverage_0 = coverage_1;
 
-#line 67
-    (&kernelContext_4)->albedoDepth_0 = albedoDepth_1;
+#line 86
+    (&kernelContext_5)->albedoDepth_0 = albedoDepth_1;
 
-#line 67
-    (&kernelContext_4)->objectIds_0 = objectIds_1;
+#line 86
+    (&kernelContext_5)->objectIds_0 = objectIds_1;
 
-#line 67
-    (&kernelContext_4)->materialIds_0 = materialIds_1;
+#line 86
+    (&kernelContext_5)->materialIds_0 = materialIds_1;
 
     uint w_3 = uint(camera_1[int(0)]);
     uint h_3 = uint(camera_1[int(1)]);
-    uint _S16 = tid_0.x;
+    uint _S21 = tid_0.x;
 
-#line 71
-    bool _S17;
+#line 90
+    bool _S22;
 
-#line 71
-    if(_S16 >= w_3)
+#line 90
+    if(_S21 >= w_3)
     {
 
-#line 71
-        _S17 = true;
+#line 90
+        _S22 = true;
 
-#line 71
+#line 90
     }
     else
     {
 
-#line 71
-        _S17 = (tid_0.y) >= h_3;
+#line 90
+        _S22 = (tid_0.y) >= h_3;
 
-#line 71
+#line 90
     }
 
-#line 71
-    if(_S17)
+#line 90
+    if(_S22)
     {
 
-#line 72
+#line 91
         return;
     }
-    float t_1 = (&kernelContext_4)->camera_0[int(2)];
-    float aspect_1 = (&kernelContext_4)->camera_0[int(0)] / (&kernelContext_4)->camera_0[int(1)];
-    float _S18 = float(_S16);
+    float t_1 = (&kernelContext_5)->camera_0[int(2)];
+    float aspect_1 = (&kernelContext_5)->camera_0[int(0)] / (&kernelContext_5)->camera_0[int(1)];
+    float _S23 = float(_S21);
 
-#line 76
-    uint _S19 = tid_0.y;
+#line 95
+    uint _S24 = tid_0.y;
 
-#line 76
-    float _S20 = float(_S19);
+#line 95
+    float _S25 = float(_S24);
 
-#line 76
-    float2 px_1 = float2(_S18 + 0.5f, _S20 + 0.5f);
+#line 95
+    float2 px_1 = float2(_S23 + 0.5f, _S25 + 0.5f);
 
 
     thread RayDesc_0 ray_0;
     (&ray_0)->TMin_0 = 0.0f;
     (&ray_0)->TMax_0 = 1.00000001504746622e+30f;
-    float3 org_0 = float3((&kernelContext_4)->camera_0[int(7)], (&kernelContext_4)->camera_0[int(11)], (&kernelContext_4)->camera_0[int(15)]);
+    float3 org_0 = float3((&kernelContext_5)->camera_0[int(7)], (&kernelContext_5)->camera_0[int(11)], (&kernelContext_5)->camera_0[int(15)]);
 
-#line 78
+#line 97
     thread float3 dir_1;
 
-#line 78
-    float3 _S21 = pixelDir_0(px_1, w_3, h_3, t_1, aspect_1, &dir_1, &kernelContext_4);
+#line 97
+    float3 _S26 = pixelDir_0(px_1, w_3, h_3, t_1, aspect_1, &dir_1, &kernelContext_5);
 
-#line 84
+#line 103
     (&ray_0)->Origin_0 = org_0;
     (&ray_0)->Direction_0 = normalize(dir_1);
 
     thread raytracing::intersection_query<raytracing::triangle_data, raytracing::instancing> q_0;
-    (&q_0)->reset({ (ray_0.Origin_0), (ray_0.Direction_0), (ray_0.TMin_0), (ray_0.TMax_0) }, ((&kernelContext_4)->scene_0), (255U), _slang_ray_flags_to_intersection_params((1U)));
+    (&q_0)->reset({ (ray_0.Origin_0), (ray_0.Direction_0), (ray_0.TMin_0), (ray_0.TMax_0) }, ((&kernelContext_5)->scene_0), (255U), _slang_ray_flags_to_intersection_params((1U)));
     for(;;)
     {
 
-#line 89
-        bool _S22 = ((&q_0)->next());
+#line 108
+        bool _S27 = ((&q_0)->next());
 
-#line 89
-        if(_S22)
+#line 108
+        if(_S27)
         {
         }
         else
         {
 
-#line 89
+#line 108
             break;
         }
 
-#line 89
+#line 108
     }
 
-    float3 _S23 = float3(0.0f) ;
+    float3 _S28 = float3(0.0f) ;
 
 
 
-    uint _S24 = (_slang_committed_intersection_type_to_uint((&q_0)->get_committed_intersection_type()));
+    uint _S29 = (_slang_committed_intersection_type_to_uint((&q_0)->get_committed_intersection_type()));
 
-#line 95
+#line 114
     float3 albedo_0;
 
-#line 95
+#line 114
     float depth_0;
 
-#line 95
+#line 114
     uint id_0;
 
-#line 95
+#line 114
     uint matId_0;
 
-#line 95
-    if(_S24 == 1U)
+#line 114
+    if(_S29 == 1U)
     {
         uint instance_0 = ((&q_0)->get_committed_instance_id());
         uint inst_0 = instance_0 * 16U;
-        uint _S25 = (&kernelContext_4)->instances_0[inst_0 + 1U];
+        uint _S30 = (&kernelContext_5)->instances_0[inst_0 + 1U];
 
-#line 99
-        uint _S26 = ((&q_0)->get_committed_primitive_id());
+#line 118
+        uint _S31 = ((&q_0)->get_committed_primitive_id());
 
-#line 99
-        uint tri_0 = _S25 + 3U * _S26;
-        uint vo_0 = (&kernelContext_4)->instances_0[inst_0];
-        uint _S27 = instance_0 + 1U;
-        uint _S28 = inst_0 + 2U;
+#line 118
+        uint tri_1 = _S30 + 3U * _S31;
+        uint vo_1 = (&kernelContext_5)->instances_0[inst_0];
+        uint _S32 = instance_0 + 1U;
+        uint _S33 = inst_0 + 2U;
 
-#line 102
-        uint _S29 = (&kernelContext_4)->instances_0[_S28] + 1U;
-        float _S30 = ((&q_0)->get_committed_distance());
+#line 121
+        uint _S34 = (&kernelContext_5)->instances_0[_S33] + 1U;
+        float _S35 = ((&q_0)->get_committed_distance());
 
-#line 103
-        float _S31 = _S30 * - _S21.z;
+#line 122
+        float _S36 = _S35 * - _S26.z;
 
-        uint mi_0 = (&kernelContext_4)->instances_0[_S28] * 23U;
-        float3 albedo_1 = float3((&kernelContext_4)->materials_0[mi_0], (&kernelContext_4)->materials_0[mi_0 + 1U], (&kernelContext_4)->materials_0[mi_0 + 2U]);
-        uint texBase_0 = uint((&kernelContext_4)->materials_0[mi_0 + 10U]);
+        uint mi_1 = (&kernelContext_5)->instances_0[_S33] * 24U;
+        float3 albedo_1 = float3((&kernelContext_5)->materials_0[mi_1], (&kernelContext_5)->materials_0[mi_1 + 1U], (&kernelContext_5)->materials_0[mi_1 + 2U]);
+        uint texBase_0 = uint((&kernelContext_5)->materials_0[mi_1 + 10U]);
         if(texBase_0 > 0U)
         {
-            uint _S32 = inst_0 + 4U;
+            uint _S37 = inst_0 + 4U;
 
-#line 110
-            float3 _S33 = vertex_0((&kernelContext_4)->indices_0[tri_0] + vo_0, &kernelContext_4);
+#line 129
+            float3 _S38 = vertex_0((&kernelContext_5)->indices_0[tri_1] + vo_1, &kernelContext_5);
 
-#line 110
-            float3 p0_0 = transformPoint_0((&kernelContext_4)->instances_0, _S32, _S33);
-            uint _S34 = tri_0 + 1U;
+#line 129
+            float3 p0_0 = transformPoint_0((&kernelContext_5)->instances_0, _S37, _S38);
+            uint _S39 = tri_1 + 1U;
 
-#line 111
-            float3 _S35 = vertex_0((&kernelContext_4)->indices_0[_S34] + vo_0, &kernelContext_4);
+#line 130
+            float3 _S40 = vertex_0((&kernelContext_5)->indices_0[_S39] + vo_1, &kernelContext_5);
 
-#line 111
-            float3 p1_0 = transformPoint_0((&kernelContext_4)->instances_0, _S32, _S35);
-            uint _S36 = tri_0 + 2U;
+#line 130
+            float3 p1_0 = transformPoint_0((&kernelContext_5)->instances_0, _S37, _S40);
+            uint _S41 = tri_1 + 2U;
 
-#line 112
-            float3 _S37 = vertex_0((&kernelContext_4)->indices_0[_S36] + vo_0, &kernelContext_4);
+#line 131
+            float3 _S42 = vertex_0((&kernelContext_5)->indices_0[_S41] + vo_1, &kernelContext_5);
             float3 e1_0 = p1_0 - p0_0;
-            float3 e2_0 = transformPoint_0((&kernelContext_4)->instances_0, _S32, _S37) - p0_0;
-            float _S38 = ((&q_0)->get_committed_distance());
+            float3 e2_0 = transformPoint_0((&kernelContext_5)->instances_0, _S37, _S42) - p0_0;
+            float _S43 = ((&q_0)->get_committed_distance());
 
-#line 115
-            float3 e3_0 = org_0 + (&ray_0)->Direction_0 * float3(_S38)  - p0_0;
+#line 134
+            float3 e3_0 = org_0 + (&ray_0)->Direction_0 * float3(_S43)  - p0_0;
             float d11_0 = dot(e1_0, e1_0);
             float d12_0 = dot(e1_0, e2_0);
             float d22_0 = dot(e2_0, e2_0);
-            float _S39 = max(d11_0 * d22_0 - d12_0 * d12_0, 9.99999968265522539e-21f);
-            float _S40 = dot(e3_0, e1_0);
+            float _S44 = max(d11_0 * d22_0 - d12_0 * d12_0, 9.99999968265522539e-21f);
+            float _S45 = dot(e3_0, e1_0);
 
-#line 120
-            float _S41 = dot(e3_0, e2_0);
+#line 139
+            float _S46 = dot(e3_0, e2_0);
 
-            float2 uv0_0 = float2((&kernelContext_4)->uvs_0[2U * ((&kernelContext_4)->indices_0[tri_0] + vo_0)], (&kernelContext_4)->uvs_0[2U * ((&kernelContext_4)->indices_0[tri_0] + vo_0) + 1U]);
+            float2 uv0_1 = float2((&kernelContext_5)->uvs_0[2U * ((&kernelContext_5)->indices_0[tri_1] + vo_1)], (&kernelContext_5)->uvs_0[2U * ((&kernelContext_5)->indices_0[tri_1] + vo_1) + 1U]);
 
 
 
-            uint ti_0 = (texBase_0 - 1U) * 4U;
+            uint ti_1 = (texBase_0 - 1U) * 4U;
 
-#line 126
-            float3 _S42 = bilinear_0((&kernelContext_4)->texInfo_0[ti_0], (&kernelContext_4)->texInfo_0[ti_0 + 1U], (&kernelContext_4)->texInfo_0[ti_0 + 2U], uv0_0 + float2(((d22_0 * _S40 - d12_0 * _S41) / _S39))  * (float2((&kernelContext_4)->uvs_0[2U * ((&kernelContext_4)->indices_0[_S34] + vo_0)], (&kernelContext_4)->uvs_0[2U * ((&kernelContext_4)->indices_0[_S34] + vo_0) + 1U]) - uv0_0) + float2(((d11_0 * _S41 - d12_0 * _S40) / _S39))  * (float2((&kernelContext_4)->uvs_0[2U * ((&kernelContext_4)->indices_0[_S36] + vo_0)], (&kernelContext_4)->uvs_0[2U * ((&kernelContext_4)->indices_0[_S36] + vo_0) + 1U]) - uv0_0), &kernelContext_4);
+#line 145
+            float3 _S47 = bilinear_0((&kernelContext_5)->texInfo_0[ti_1], (&kernelContext_5)->texInfo_0[ti_1 + 1U], (&kernelContext_5)->texInfo_0[ti_1 + 2U], uv0_1 + float2(((d22_0 * _S45 - d12_0 * _S46) / _S44))  * (float2((&kernelContext_5)->uvs_0[2U * ((&kernelContext_5)->indices_0[_S39] + vo_1)], (&kernelContext_5)->uvs_0[2U * ((&kernelContext_5)->indices_0[_S39] + vo_1) + 1U]) - uv0_1) + float2(((d11_0 * _S46 - d12_0 * _S45) / _S44))  * (float2((&kernelContext_5)->uvs_0[2U * ((&kernelContext_5)->indices_0[_S41] + vo_1)], (&kernelContext_5)->uvs_0[2U * ((&kernelContext_5)->indices_0[_S41] + vo_1) + 1U]) - uv0_1), &kernelContext_5);
 
-#line 126
-            albedo_0 = albedo_1 * _S42;
+#line 145
+            albedo_0 = albedo_1 * _S47;
 
-#line 108
+#line 127
         }
         else
         {
 
-#line 108
+#line 127
             albedo_0 = albedo_1;
 
-#line 108
+#line 127
         }
 
-#line 108
-        depth_0 = _S31;
+#line 127
+        depth_0 = _S36;
 
-#line 108
-        id_0 = _S27;
+#line 127
+        id_0 = _S32;
 
-#line 108
-        matId_0 = _S29;
+#line 127
+        matId_0 = _S34;
 
-#line 95
+#line 114
     }
     else
     {
 
-#line 95
+#line 114
         depth_0 = 0.0f;
 
-#line 95
+#line 114
         id_0 = 0U;
 
-#line 95
+#line 114
         matId_0 = 0U;
 
-#line 95
-        albedo_0 = _S23;
+#line 114
+        albedo_0 = _S28;
 
-#line 95
+#line 114
     }
 
-#line 95
+#line 114
     uint k_0 = 0U;
 
-#line 95
+#line 114
     float cover_0 = 0.0f;
 
-#line 133
+#line 152
     for(;;)
     {
 
-#line 133
+#line 152
         if(k_0 < 16U)
         {
         }
         else
         {
 
-#line 133
+#line 152
             break;
         }
 
         thread float3 sdir_0;
 
-#line 136
-        float3 _S43 = pixelDir_0(float2(_S18 + (float(k_0 % 4U) + 0.5f) / 4.0f, _S20 + (float(k_0 / 4U) + 0.5f) / 4.0f), w_3, h_3, t_1, aspect_1, &sdir_0, &kernelContext_4);
+#line 155
+        float3 _S48 = pixelDir_0(float2(_S23 + (float(k_0 % 4U) + 0.5f) / 4.0f, _S25 + (float(k_0 / 4U) + 0.5f) / 4.0f), w_3, h_3, t_1, aspect_1, &sdir_0, &kernelContext_5);
 
         thread RayDesc_0 sr_0;
         (&sr_0)->Origin_0 = org_0;
@@ -499,13 +563,13 @@ struct RayDesc_0
         (&sr_0)->TMin_0 = 0.0f;
         (&sr_0)->TMax_0 = 1.00000001504746622e+30f;
 
-#line 142
+#line 161
         uint layer_0 = 0U;
 
-#line 142
+#line 161
         float through_0 = 1.0f;
 
-#line 142
+#line 161
         float seen_0 = 0.0f;
 
 
@@ -513,113 +577,119 @@ struct RayDesc_0
         for(;;)
         {
 
-#line 146
+#line 165
             if(layer_0 < 8U)
             {
 
-#line 146
-                _S17 = through_0 > 0.0f;
+#line 165
+                _S22 = through_0 > 0.0f;
 
-#line 146
+#line 165
             }
             else
             {
 
-#line 146
-                _S17 = false;
+#line 165
+                _S22 = false;
 
-#line 146
+#line 165
             }
 
-#line 146
-            if(_S17)
+#line 165
+            if(_S22)
             {
             }
             else
             {
 
-#line 146
+#line 165
                 break;
             }
             thread raytracing::intersection_query<raytracing::triangle_data, raytracing::instancing> sq_0;
-            (&sq_0)->reset({ (sr_0.Origin_0), (sr_0.Direction_0), (sr_0.TMin_0), (sr_0.TMax_0) }, ((&kernelContext_4)->scene_0), (255U), _slang_ray_flags_to_intersection_params((1U)));
+            (&sq_0)->reset({ (sr_0.Origin_0), (sr_0.Direction_0), (sr_0.TMin_0), (sr_0.TMax_0) }, ((&kernelContext_5)->scene_0), (255U), _slang_ray_flags_to_intersection_params((1U)));
             for(;;)
             {
 
-#line 150
-                bool _S44 = ((&sq_0)->next());
+#line 169
+                bool _S49 = ((&sq_0)->next());
 
-#line 150
-                if(_S44)
+#line 169
+                if(_S49)
                 {
                 }
                 else
                 {
 
-#line 150
+#line 169
                     break;
                 }
 
-#line 150
+#line 169
             }
-            uint _S45 = (_slang_committed_intersection_type_to_uint((&sq_0)->get_committed_intersection_type()));
+            uint _S50 = (_slang_committed_intersection_type_to_uint((&sq_0)->get_committed_intersection_type()));
 
-#line 151
-            if(_S45 != 1U)
+#line 170
+            if(_S50 != 1U)
             {
 
-#line 152
+#line 171
                 break;
             }
 
-#line 153
-            uint _S46 = ((&sq_0)->get_committed_instance_id());
+#line 172
+            uint _S51 = ((&sq_0)->get_committed_instance_id());
 
-#line 153
-            float op_0 = (&kernelContext_4)->materials_0[(&kernelContext_4)->instances_0[_S46 * 16U + 2U] * 23U + 22U];
-            float seen_1 = seen_0 + through_0 * op_0;
-            float through_1 = through_0 * (1.0f - op_0);
-            float _S47 = ((&sq_0)->get_committed_distance());
+#line 172
+            uint _S52 = ((&sq_0)->get_committed_primitive_id());
 
-#line 156
-            (&sr_0)->Origin_0 = (&sr_0)->Origin_0 + (&sr_0)->Direction_0 * float3((_S47 + 9.9999997473787516e-05f)) ;
+#line 172
+            float2 _S53 = ((&sq_0)->get_committed_triangle_barycentric_coord());
 
-#line 146
+#line 172
+            float _S54 = opacityAt_0(_S51, _S52, _S53, &kernelContext_5);
+            float seen_1 = seen_0 + through_0 * _S54;
+            float through_1 = through_0 * (1.0f - _S54);
+            float _S55 = ((&sq_0)->get_committed_distance());
+
+#line 175
+            (&sr_0)->Origin_0 = (&sr_0)->Origin_0 + (&sr_0)->Direction_0 * float3((_S55 + 9.9999997473787516e-05f)) ;
+
+#line 165
             layer_0 = layer_0 + 1U;
 
-#line 146
+#line 165
             through_0 = through_1;
 
-#line 146
+#line 165
             seen_0 = seen_1;
 
-#line 146
+#line 165
         }
 
-#line 158
+#line 177
         float cover_1 = cover_0 + seen_0;
 
-#line 133
+#line 152
         k_0 = k_0 + 1U;
 
-#line 133
+#line 152
         cover_0 = cover_1;
 
-#line 133
+#line 152
     }
 
-#line 161
-    uint pixel_0 = _S19 * w_3 + _S16;
-    *((&kernelContext_4)->coverage_0+pixel_0) = cover_0 / 16.0f;
-    uint _S48 = 4U * pixel_0;
+#line 180
+    uint pixel_0 = _S24 * w_3 + _S21;
+    *((&kernelContext_5)->coverage_0+pixel_0) = cover_0 / 16.0f;
+    uint _S56 = 4U * pixel_0;
 
-#line 163
-    *((&kernelContext_4)->albedoDepth_0+_S48) = albedo_0.x;
-    *((&kernelContext_4)->albedoDepth_0+(_S48 + 1U)) = albedo_0.y;
-    *((&kernelContext_4)->albedoDepth_0+(_S48 + 2U)) = albedo_0.z;
-    *((&kernelContext_4)->albedoDepth_0+(_S48 + 3U)) = depth_0;
-    *((&kernelContext_4)->objectIds_0+pixel_0) = id_0;
-    *((&kernelContext_4)->materialIds_0+pixel_0) = matId_0;
+#line 182
+    *((&kernelContext_5)->albedoDepth_0+_S56) = albedo_0.x;
+    *((&kernelContext_5)->albedoDepth_0+(_S56 + 1U)) = albedo_0.y;
+    *((&kernelContext_5)->albedoDepth_0+(_S56 + 2U)) = albedo_0.z;
+    *((&kernelContext_5)->albedoDepth_0+(_S56 + 3U)) = depth_0;
+    *((&kernelContext_5)->objectIds_0+pixel_0) = id_0;
+    *((&kernelContext_5)->materialIds_0+pixel_0) = matId_0;
     return;
 }
 

@@ -13,7 +13,7 @@ use crate::{Adaptive, Restir};
 pub const MAX_DEPTH: u32 = 8;
 /// Words of the parameter block; must match `params` in `shaders/include/pt_core.slang`.
 pub const PARAM_WORDS: usize = 43;
-pub const MATERIAL_WORDS: usize = 23;
+pub const MATERIAL_WORDS: usize = 24;
 pub const LIGHT_WORDS: usize = 16;
 
 /// The directional-albedo tables of the BSDF (GGX, sheen, rough dielectric), little-endian float32, in the order
@@ -435,6 +435,7 @@ pub fn pack_materials(scene: &Scene, textures: bool) -> Result<Materials, String
             texture(b.emission_texture)?,
         ];
         let normal_texture = texture(b.normal_texture)?;
+        let opacity_texture = texture(b.opacity_texture)?;
         materials.extend([
             c[0],
             c[1],
@@ -459,6 +460,7 @@ pub fn pack_materials(scene: &Scene, textures: bool) -> Result<Materials, String
             b.sheen_color[2],
             b.dispersion,
             b.opacity,
+            opacity_texture,
         ]);
     }
     debug_assert_eq!(materials.len(), scene.materials().len() * MATERIAL_WORDS);

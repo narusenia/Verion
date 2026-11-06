@@ -13,9 +13,9 @@ RaytracingAccelerationStructure scene;
 StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
 StructuredBuffer<uint> instances;   // 16 words: vertex offset, index offset, material, emitter base + 1 (0 = not emissive), 12 floats (row-major 3x4)
-StructuredBuffer<float> materials;  // 23 words: base color rgb, emission rgb, metallic, roughness, transmission, ior,
+StructuredBuffer<float> materials;  // 24 words: base color rgb, emission rgb, metallic, roughness, transmission, ior,
                                     // base color / metallic-roughness / emission / normal texture + 1 (0 = none), normal scale,
-                                    // clearcoat, clearcoat roughness, sheen roughness, sheen color rgb, dispersion
+                                    // clearcoat, clearcoat roughness, sheen roughness, sheen color rgb, dispersion, opacity, opacity texture + 1 (0 = none; its red channel multiplies opacity)
 StructuredBuffer<uint> lights;      // 16 words: kind (0 point, 1 directional, 2 spot), color rgb, intensity, position or travel direction xyz,
                                     // spot axis xyz, spot falloff scale, spot falloff offset, 3 pad (floats as bits)
                                     // (14 light-link mask, 15 IES profile offset + 1 or 0). After the light table: the albedo tables
@@ -556,6 +556,25 @@ float reflectivePdf(Surface s, float3 woL, float3 wiL)
     return q;
 }
 
+// Opacity of the triangle `prim` of instance `instIdx` at barycentrics `bary` (weights of vertices 1 and 2): the
+// material factor times the opacity texture's red channel at the hit's UV (finest level, so a cutout stays sharp).
+float opacityAt(uint instIdx, uint prim, float2 bary)
+{
+    uint mi = instances[instIdx * 16 + 2] * 24;
+    float op = materials[mi + 22];
+    uint tex = uint(materials[mi + 23]);
+    if (tex > 0 && op > 0.0)
+    {
+        uint tri = instances[instIdx * 16 + 1] + 3 * prim;
+        uint vo = instances[instIdx * 16];
+        float2 uv0 = float2(uvs[2 * (indices[tri] + vo)], uvs[2 * (indices[tri] + vo) + 1]);
+        float2 uv1 = float2(uvs[2 * (indices[tri + 1] + vo)], uvs[2 * (indices[tri + 1] + vo) + 1]);
+        float2 uv2 = float2(uvs[2 * (indices[tri + 2] + vo)], uvs[2 * (indices[tri + 2] + vo) + 1]);
+        op *= sampleTexture(tex - 1, uv0 + bary.x * (uv1 - uv0) + bary.y * (uv2 - uv0), 0.0).x;
+    }
+    return op;
+}
+
 // Shadow ray. A translucent occluder (opacity < 1) stops it with chance `opacity`; the roll is a hash of
 // the ray, so it needs no random stream and differs between samples because the ray does.
 bool occluded(float3 o, float3 d, float tmax)
@@ -572,7 +591,7 @@ bool occluded(float3 o, float3 d, float tmax)
         while (q.Proceed()) { }
         if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
             return false;
-        float opacity = materials[instances[q.CommittedInstanceIndex() * 16 + 2] * 23 + 22];
+        float opacity = opacityAt(q.CommittedInstanceIndex(), q.CommittedPrimitiveIndex(), q.CommittedTriangleBarycentrics());
         if (opacity >= 1.0)
             return true;
         uint h = asuint(o.x) * 73856093u ^ asuint(o.y) * 19349663u ^ asuint(o.z) * 83492791u
@@ -1031,7 +1050,18 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
         float3 hit = org + dir * pHitT;
         // Alpha: with chance 1 - opacity the surface lets the ray pass, unchanged and without shading.
         // Shadow rays follow the same rule in `occluded`.
-        float opacity = materials[instances[inst + 2] * 23 + 22];
+        // Barycentric weights of vertices 1 and 2 at the hit.
+        float3 e1 = p1 - p0;
+        float3 e2 = p2 - p0;
+        float3 e3 = hit - p0;
+        float d11 = dot(e1, e1);
+        float d12 = dot(e1, e2);
+        float d22 = dot(e2, e2);
+        float den = max(d11 * d22 - d12 * d12, 1.0e-20);
+        float b1 = (d22 * dot(e3, e1) - d12 * dot(e3, e2)) / den;
+        float b2 = (d11 * dot(e3, e2) - d12 * dot(e3, e1)) / den;
+
+        float opacity = opacityAt(hq.inst, hq.prim, float2(b1, b2));
         if (opacity < 1.0 && rng.next() >= opacity)
         {
             org = hit + dir * 1.0e-4;
@@ -1051,17 +1081,6 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
             restir[restirScratch(pixel) + 22] = asfloat(1u);
         }
 
-        // Barycentric weights of vertices 1 and 2 at the hit.
-        float3 e1 = p1 - p0;
-        float3 e2 = p2 - p0;
-        float3 e3 = hit - p0;
-        float d11 = dot(e1, e1);
-        float d12 = dot(e1, e2);
-        float d22 = dot(e2, e2);
-        float den = max(d11 * d22 - d12 * d12, 1.0e-20);
-        float b1 = (d22 * dot(e3, e1) - d12 * dot(e3, e2)) / den;
-        float b2 = (d11 * dot(e3, e2) - d12 * dot(e3, e1)) / den;
-
         // Shading normal: interpolated vertex normals, on the same side as the geometric normal.
         // Meshes without normals (zero vectors) shade with the geometric normal.
         float3 nsObj = (1.0 - b1 - b2) * vertexNormal(indices[tri] + vo) + b1 * vertexNormal(indices[tri + 1] + vo) + b2 * vertexNormal(indices[tri + 2] + vo);
@@ -1074,7 +1093,7 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
         }
         float3 n = outside ? ns : -ns;
 
-        uint mi = instances[inst + 2] * 23;
+        uint mi = instances[inst + 2] * 24;
         float3 albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
         // Textures multiply the material factors. The filter footprint comes from the ray cone.
         uint texBase = uint(materials[mi + 10]);

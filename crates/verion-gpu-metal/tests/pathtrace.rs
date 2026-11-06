@@ -1677,6 +1677,56 @@ fn opacity_lets_rays_and_shadows_through() {
     );
 }
 
+#[test]
+fn opacity_texture_cuts_out_camera_rays_and_shadows() {
+    let Some(ctx) = context() else { return };
+    // A black plane in front of a white sky: what shows is the sky through the cutout, 1 - opacity.
+    // 2x2 opacity texture: opaque, open / open, half.
+    let tex = Image::new(2, 2, vec![[1.0; 3], [0.0; 3], [0.0; 3], [0.5; 3]]).unwrap();
+    let s = texture_scene(textured_plane(0.5, 1.0), tex, |t| BaseBsdf {
+        base_color: [0.0; 3],
+        ior: 1.0,
+        opacity_texture: Some(t),
+        ..BaseBsdf::default()
+    });
+    let img = Renderer::new(&ctx, &s)
+        .unwrap()
+        .render(65, 65, 128)
+        .unwrap();
+    let at = |x: usize, y: usize| img[y * 65 + x][0];
+    // The texture is bilinear, so a pixel off its texel's center takes a little of the neighbours.
+    assert!(at(26, 26) < 0.15, "opaque texel: {}", at(26, 26));
+    assert!(at(39, 26) > 0.85, "open texel: {}", at(39, 26));
+    assert!(at(26, 39) > 0.85, "open texel: {}", at(26, 39));
+    assert!(
+        (at(39, 39) - 0.5).abs() < 0.15,
+        "half texel: {}",
+        at(39, 39)
+    );
+
+    // Shadow rays: the occluder of `floor_scene` (no UVs, so texel 0) casts a shadow by its texture value.
+    let light = Light::Point {
+        position: [1.0, 0.0, 1.0],
+        color: [1.0; 3],
+        intensity: std::f32::consts::PI * 2.0 * 2.0f32.sqrt(),
+    };
+    let lit = |texel: f32| {
+        let mut s = floor_scene(light, true);
+        let image = s.add_image(Image::new(1, 1, vec![[texel; 3]]).unwrap());
+        let id = s.material_id(1).unwrap();
+        let mut m = s.materials()[id.index()].clone();
+        m.base.opacity_texture = Some(image);
+        s.set_material(id, m);
+        center_pixel(&ctx, &s)
+    };
+    let (open, full, shut) = (lit(0.0), floor_value(&ctx), lit(1.0));
+    assert!(
+        (open - full).abs() < 0.02 * full,
+        "texel 0: {open} vs {full}"
+    );
+    assert!(shut < 0.02 * full, "texel 1: {shut}");
+}
+
 /// The floor without the occluder.
 fn floor_value(ctx: &MetalContext) -> f32 {
     let light = Light::Point {

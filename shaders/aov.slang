@@ -8,7 +8,7 @@ StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
 StructuredBuffer<uint> instances;   // 16 words each: vertex offset, index offset, material, emitter base, 12 floats (row-major 3x4)
 StructuredBuffer<float> camera;     // width, height, tan(fov/2), pad, 12 floats (camera-to-world 3x4)
-StructuredBuffer<float> materials;  // 23 words each; 0..2 base color, 10 = base color texture + 1 (0 = none), 15 clearcoat, 16 its roughness, 17 sheen roughness, 18..20 sheen color, 21 dispersion, 22 opacity
+StructuredBuffer<float> materials;  // 24 words each; 0..2 base color, 10 = base color texture + 1 (0 = none), 15 clearcoat, 16 its roughness, 17 sheen roughness, 18..20 sheen color, 21 dispersion, 22 opacity, 23 opacity texture + 1
 StructuredBuffer<float> uvs;        // uv per vertex (zero when a mesh has none)
 StructuredBuffer<uint> texInfo;     // 4 words per texture: texel offset, width, height, mip level count
 StructuredBuffer<float> texels;     // rgb texels, each texture's mip chain level 0 first
@@ -52,6 +52,25 @@ float3 bilinear(uint base, uint w, uint h, float2 uv)
 }
 
 // Camera-space unit direction through pixel position `px` (in pixels), and its world-space direction in `dir`.
+// Opacity of a triangle hit: the material factor times the opacity texture's red channel at the hit's UV.
+float opacityAt(uint instIdx, uint prim, float2 bary)
+{
+    uint mi = instances[instIdx * 16 + 2] * 24;
+    float op = materials[mi + 22];
+    uint tex = uint(materials[mi + 23]);
+    if (tex > 0 && op > 0.0)
+    {
+        uint tri = instances[instIdx * 16 + 1] + 3 * prim;
+        uint vo = instances[instIdx * 16];
+        float2 uv0 = float2(uvs[2 * (indices[tri] + vo)], uvs[2 * (indices[tri] + vo) + 1]);
+        float2 uv1 = float2(uvs[2 * (indices[tri + 1] + vo)], uvs[2 * (indices[tri + 1] + vo) + 1]);
+        float2 uv2 = float2(uvs[2 * (indices[tri + 2] + vo)], uvs[2 * (indices[tri + 2] + vo) + 1]);
+        uint ti = (tex - 1) * 4;
+        op *= bilinear(texInfo[ti], texInfo[ti + 1], texInfo[ti + 2], uv0 + bary.x * (uv1 - uv0) + bary.y * (uv2 - uv0)).x;
+    }
+    return op;
+}
+
 float3 pixelDir(float2 px, uint w, uint h, float t, float aspect, out float3 dir)
 {
     float u = (2.0 * px.x / w - 1.0 + camera[16]) * aspect * t;
@@ -102,7 +121,7 @@ void aov(uint3 tid : SV_DispatchThreadID)
         matId = instances[inst + 2] + 1;
         depth = q.CommittedRayT() * -d.z; // d is unit length in camera space, so -d.z is the forward component
 
-        uint mi = instances[inst + 2] * 23;
+        uint mi = instances[inst + 2] * 24;
         albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
         uint texBase = uint(materials[mi + 10]);
         if (texBase > 0)
@@ -150,7 +169,7 @@ void aov(uint3 tid : SV_DispatchThreadID)
             while (sq.Proceed()) { }
             if (sq.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
                 break;
-            float op = materials[instances[sq.CommittedInstanceIndex() * 16 + 2] * 23 + 22];
+            float op = opacityAt(sq.CommittedInstanceIndex(), sq.CommittedPrimitiveIndex(), sq.CommittedTriangleBarycentrics());
             seen += through * op;
             through *= 1.0 - op;
             sr.Origin = sr.Origin + sr.Direction * (sq.CommittedRayT() + 1.0e-4);
