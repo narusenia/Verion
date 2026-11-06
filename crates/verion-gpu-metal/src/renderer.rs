@@ -299,6 +299,7 @@ impl Renderer {
             self.info.light_count = (table.lights.len() / pack::LIGHT_WORDS) as u32;
             self.info.sky = table.sky;
             self.info.virtual_light = table.virtual_light;
+            self.info.transparent_background = table.transparent_background;
             let key = pack::env_key(scene);
             if key != self.env_key {
                 let env = pack::pack_env(scene).map_err(Error::Scene)?;
@@ -701,6 +702,7 @@ impl RayTracingBackend for Renderer {
         let albedo_depth = buffer(pixels * size_of::<[f32; 4]>())?;
         let ids = buffer(pixels * size_of::<u32>())?;
         let material_ids = buffer(pixels * size_of::<u32>())?;
+        let coverage = buffer(pixels * size_of::<f32>())?;
 
         let cb = self
             .ctx
@@ -715,7 +717,7 @@ impl RayTracingBackend for Renderer {
             enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
         }
         // SAFETY: indices match the `[[buffer(n)]]` order in the generated MSL (scene, positions,
-        // indices, instances, camera, materials, uvs, texInfo, texels, albedoDepth, objectIds, materialIds).
+        // indices, instances, camera, materials, uvs, texInfo, texels, albedoDepth, objectIds, materialIds, coverage).
         unsafe {
             enc.setAccelerationStructure_atBufferIndex(Some(self.tlas.raw()), 0);
             enc.setBuffer_offset_atIndex(Some(&self.positions), 0, 1);
@@ -729,6 +731,7 @@ impl RayTracingBackend for Renderer {
             enc.setBuffer_offset_atIndex(Some(&albedo_depth), 0, 9);
             enc.setBuffer_offset_atIndex(Some(&ids), 0, 10);
             enc.setBuffer_offset_atIndex(Some(&material_ids), 0, 11);
+            enc.setBuffer_offset_atIndex(Some(&coverage), 0, 12);
         }
         enc.dispatchThreads_threadsPerThreadgroup(
             MTLSize {
@@ -747,7 +750,7 @@ impl RayTracingBackend for Renderer {
         cb.waitUntilCompleted();
 
         // SAFETY: the buffers hold `pixels` float4 and u32 values and the command buffer has completed.
-        let (ad, ids, mids) = unsafe {
+        let (ad, ids, mids, cov) = unsafe {
             (
                 std::slice::from_raw_parts(
                     albedo_depth.contents().as_ptr().cast::<f32>(),
@@ -755,6 +758,7 @@ impl RayTracingBackend for Renderer {
                 ),
                 std::slice::from_raw_parts(ids.contents().as_ptr().cast::<u32>(), pixels),
                 std::slice::from_raw_parts(material_ids.contents().as_ptr().cast::<u32>(), pixels),
+                std::slice::from_raw_parts(coverage.contents().as_ptr().cast::<f32>(), pixels),
             )
         };
         let ad = ad.as_chunks::<4>().0;
@@ -763,6 +767,7 @@ impl RayTracingBackend for Renderer {
             depth: ad.iter().map(|p| p[3]).collect(),
             object_id: ids.to_vec(),
             material_id: mids.to_vec(),
+            coverage: cov.to_vec(),
         })
     }
 

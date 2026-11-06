@@ -12,6 +12,17 @@ import numpy as np
 from . import images, stylization
 
 DEFAULT = dict(base_color=[0.8, 0.8, 0.8], metallic=0.0, roughness=0.5)
+# Transparent BSDF: a surface that stops no ray. `_clear` marks it for `blend_clear`.
+CLEAR = dict(base_color=[1.0, 1.0, 1.0], metallic=0.0, roughness=1.0, opacity=0.0, _clear=True)
+
+
+def blend_clear(solid, weight):
+    """`solid` with `weight` of its rays passing straight through, as a Mix with a Transparent BSDF.
+
+    shortcut: a cutout from an alpha texture is not supported (the alpha of an image is not read)."""
+    out = dict(solid)
+    out["opacity"] = out.get("opacity", 1.0) * (1.0 - weight)
+    return out
 
 
 def _active_output(tree):
@@ -46,6 +57,7 @@ class Converter:
 
     def params(self, material):
         p = self.surface_params(material)
+        p.pop("_clear", None)
         st = stylization.material_style(material, self.image_index, self.warn) if material is not None else None
         if st is not None:
             p["stylization"], p["stylization_images"] = st
@@ -81,6 +93,8 @@ class Converter:
         if t == "ShaderNodeEmission":
             return dict(base_color=[0.0, 0.0, 0.0], metallic=0.0, roughness=1.0,
                         emission=self.emission(node.inputs["Color"], node.inputs["Strength"], material))
+        if t == "ShaderNodeBsdfTransparent":
+            return dict(CLEAR)
         if t == "ShaderNodeMixShader":
             return self.mix(node, material)
         self.warn(f"Material '{name}': shader node {node.bl_idname} is not supported; using grey")
@@ -100,9 +114,14 @@ class Converter:
         a, b = subs
         if a is None and b is None:
             return dict(DEFAULT)
-        if a is None or b is None:  # a closure against nothing (Transparent is not supported)
+        if a is None or b is None:  # a closure against nothing (an unsupported node)
             self.warn(f"Material '{material.name}': Mix Shader with an empty or unsupported side; using the other shader")
             return a or b
+        if a.get("_clear") or b.get("_clear"):
+            if a.get("_clear") and b.get("_clear"):
+                return a
+            solid, w = (b, 1.0 - f) if a.get("_clear") else (a, f)
+            return blend_clear(solid, w)
         keys = {"metallic", "roughness", "transmission", "ior", "clearcoat", "clearcoat_roughness", "sheen_roughness"}
         out = {}
         for k in set(a) | set(b):
@@ -134,8 +153,9 @@ class Converter:
             p["sheen_roughness"] = v("Sheen Roughness")
         if v("Subsurface Weight", "Subsurface") > 0:
             self.warn(f"Material '{material.name}': subsurface scattering is not supported")
-        if get("Alpha") is not None and (get("Alpha").is_linked or get("Alpha").default_value < 1.0):
-            self.warn(f"Material '{material.name}': alpha is not supported yet; rendering opaque")
+        alpha = get("Alpha")
+        if alpha is not None and alpha.is_linked:
+            self.warn(f"Material '{material.name}': an alpha texture (cutout) is not supported; rendering opaque")
         p["base_color"] = self.color(i["Base Color"], material, True)
         tex = self.texture_of(i["Base Color"], material)
         if tex is not None:
@@ -151,6 +171,8 @@ class Converter:
                 p["emission"] = [float(strength.default_value if strength is not None else 1.0)] * 3
         p.update(self.metallic_roughness(i, p, material))
         p.update(self.normal_params(node, material))
+        if alpha is not None and not alpha.is_linked and alpha.default_value < 1.0:
+            p = blend_clear(p, 1.0 - float(alpha.default_value))
         return p
 
     # -- sockets --------------------------------------------------------------------------------

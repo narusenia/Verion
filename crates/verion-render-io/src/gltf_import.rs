@@ -362,9 +362,19 @@ impl Importer<'_> {
                 ));
             }
         }
-        if m.alpha_mode() != gltf::material::AlphaMode::Opaque {
+        // Alpha comes from the base color factor only: BLEND is the opacity, MASK is all or nothing
+        // at the cutoff. The alpha of the base color texture is not read.
+        let alpha = m.pbr_metallic_roughness().base_color_factor()[3];
+        base.opacity = match m.alpha_mode() {
+            gltf::material::AlphaMode::Opaque => 1.0,
+            gltf::material::AlphaMode::Blend => alpha,
+            gltf::material::AlphaMode::Mask => f32::from(alpha >= m.alpha_cutoff().unwrap_or(0.5)),
+        };
+        if m.alpha_mode() != gltf::material::AlphaMode::Opaque
+            && m.pbr_metallic_roughness().base_color_texture().is_some()
+        {
             self.warnings.push(format!(
-                "material {name}: alpha mode is not supported; rendered as opaque"
+                "material {name}: the alpha of the base color texture is not read"
             ));
         }
 
@@ -703,6 +713,30 @@ mod tests {
             warnings,
             ["material 0: sheenRoughnessTexture is not supported yet and was ignored"]
         );
+    }
+
+    #[test]
+    fn imports_alpha_as_opacity() {
+        let blend = JSON.replace(
+            r#""baseColorFactor": [1, 0, 0, 1]"#,
+            r#""baseColorFactor": [1, 0, 0, 0.25]"#,
+        );
+        let opacity = |json: &str| {
+            let Import { scene, .. } = load_gltf_slice(&glb(json, &[])).unwrap();
+            scene.materials()[0].base.opacity
+        };
+        assert_eq!(opacity(JSON), 1.0);
+        assert_eq!(opacity(&blend), 1.0, "OPAQUE ignores the alpha");
+        let json = blend.replace(
+            r#""pbrMetallicRoughness""#,
+            r#""alphaMode": "BLEND", "pbrMetallicRoughness""#,
+        );
+        assert_eq!(opacity(&json), 0.25);
+        let json = blend.replace(
+            r#""pbrMetallicRoughness""#,
+            r#""alphaMode": "MASK", "pbrMetallicRoughness""#,
+        );
+        assert_eq!(opacity(&json), 0.0, "0.25 is under the default cutoff 0.5");
     }
 
     #[test]

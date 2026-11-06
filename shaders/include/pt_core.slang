@@ -13,7 +13,7 @@ RaytracingAccelerationStructure scene;
 StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
 StructuredBuffer<uint> instances;   // 16 words: vertex offset, index offset, material, emitter base + 1 (0 = not emissive), 12 floats (row-major 3x4)
-StructuredBuffer<float> materials;  // 22 words: base color rgb, emission rgb, metallic, roughness, transmission, ior,
+StructuredBuffer<float> materials;  // 23 words: base color rgb, emission rgb, metallic, roughness, transmission, ior,
                                     // base color / metallic-roughness / emission / normal texture + 1 (0 = none), normal scale,
                                     // clearcoat, clearcoat roughness, sheen roughness, sheen color rgb, dispersion
 StructuredBuffer<uint> lights;      // 16 words: kind (0 point, 1 directional, 2 spot), color rgb, intensity, position or travel direction xyz,
@@ -23,7 +23,7 @@ StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 apertu
                                     // 30 / 31 wavefront depth and path count, 32 adaptive sampling enable, 33 adaptive threshold
                                     // (float), 34 adaptive minimum samples, 35 megakernel samples per dispatch, 36 ReSTIR DI enable,
                                     // 37 ReSTIR initial candidates per pixel, 38 ReSTIR history cap (samples a reused reservoir counts for),
-                                    // 39 / 40 lens shift x and y (floats, half-image extents), 41 virtual main light present
+                                    // 39 / 40 lens shift x and y (floats, half-image extents), 41 virtual main light present, 42 transparent background
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
 StructuredBuffer<float> emitters;   // 16 words per emissive world-space triangle: p0, p1, p2, radiance rgb, area, selection pdf, 2 pad
 StructuredBuffer<float> emitCdf;    // cumulative selection probability per emitter triangle, last entry 1
@@ -519,17 +519,41 @@ float reflectivePdf(Surface s, float3 woL, float3 wiL)
     return q;
 }
 
+// Shadow ray. A translucent occluder (opacity < 1) stops it with chance `opacity`; the roll is a hash of
+// the ray, so it needs no random stream and differs between samples because the ray does.
 bool occluded(float3 o, float3 d, float tmax)
 {
-    RayDesc ray;
-    ray.Origin = o;
-    ray.Direction = d;
-    ray.TMin = 0.0;
-    ray.TMax = tmax;
-    RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
-    q.TraceRayInline(scene, 0, 0xFF, ray);
-    while (q.Proceed()) { }
-    return q.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+    for (uint layer = 0; layer < 8; layer++)
+    {
+        RayDesc ray;
+        ray.Origin = o;
+        ray.Direction = d;
+        ray.TMin = 0.0;
+        ray.TMax = tmax;
+        RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
+        q.TraceRayInline(scene, 0, 0xFF, ray);
+        while (q.Proceed()) { }
+        if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+            return false;
+        float opacity = materials[instances[q.CommittedInstanceIndex() * 16 + 2] * 23 + 22];
+        if (opacity >= 1.0)
+            return true;
+        uint h = asuint(o.x) * 73856093u ^ asuint(o.y) * 19349663u ^ asuint(o.z) * 83492791u
+            ^ asuint(d.x) * 2654435761u ^ asuint(d.y) * 40503u ^ asuint(d.z) * 2246822519u ^ layer * 3266489917u;
+        h ^= h >> 16;
+        h *= 0x7feb352du;
+        h ^= h >> 15;
+        h *= 0x846ca68bu;
+        h ^= h >> 16;
+        if (float(h >> 8) * (1.0 / 16777216.0) < opacity)
+            return true;
+        float adv = q.CommittedRayT() + 1.0e-4;
+        o += d * adv;
+        tmax -= adv;
+        if (tmax <= 0.0)
+            return false;
+    }
+    return true;
 }
 
 // Everything one path carries between bounces.
@@ -929,6 +953,12 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
         {
             if (restirCompiled && depth == 0 && params[36] != 0)
                 restirClear(pixel);
+            // A transparent film shows nothing where a camera ray leaves the scene (the sky still lights it).
+            if (depth == 0 && params[42] != 0)
+            {
+                alive = false;
+                break;
+            }
             // Uniform sky is reached by cosine sampling, so it needs no light sampling.
             st.parts.add(depth, cls, thr * sky);
             if (hasEnv)
@@ -959,6 +989,14 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
         float pHitT = hq.t;
         st.pathLen += pHitT;
         float3 hit = org + dir * pHitT;
+        // Alpha: with chance 1 - opacity the surface lets the ray pass, unchanged and without shading.
+        // Shadow rays follow the same rule in `occluded`.
+        float opacity = materials[instances[inst + 2] * 23 + 22];
+        if (opacity < 1.0 && rng.next() >= opacity)
+        {
+            org = hit + dir * 1.0e-4;
+            break;
+        }
         // shortcut: fixed 1e-4 ray offset assumes unit-scale scenes, scale it with scene bounds later.
         float3 p = hit + ng * 1.0e-4;
         if (depth == 1 && st.gi)
@@ -996,7 +1034,7 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
         }
         float3 n = outside ? ns : -ns;
 
-        uint mi = instances[inst + 2] * 22;
+        uint mi = instances[inst + 2] * 23;
         float3 albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
         // Textures multiply the material factors. The filter footprint comes from the ray cone.
         uint texBase = uint(materials[mi + 10]);

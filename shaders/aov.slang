@@ -8,13 +8,14 @@ StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
 StructuredBuffer<uint> instances;   // 16 words each: vertex offset, index offset, material, emitter base, 12 floats (row-major 3x4)
 StructuredBuffer<float> camera;     // width, height, tan(fov/2), pad, 12 floats (camera-to-world 3x4)
-StructuredBuffer<float> materials;  // 22 words each; 0..2 base color, 10 = base color texture + 1 (0 = none), 15 clearcoat, 16 its roughness, 17 sheen roughness, 18..20 sheen color, 21 dispersion
+StructuredBuffer<float> materials;  // 23 words each; 0..2 base color, 10 = base color texture + 1 (0 = none), 15 clearcoat, 16 its roughness, 17 sheen roughness, 18..20 sheen color, 21 dispersion, 22 opacity
 StructuredBuffer<float> uvs;        // uv per vertex (zero when a mesh has none)
 StructuredBuffer<uint> texInfo;     // 4 words per texture: texel offset, width, height, mip level count
 StructuredBuffer<float> texels;     // rgb texels, each texture's mip chain level 0 first
 RWStructuredBuffer<float> albedoDepth; // rgb albedo then depth (distance along the camera's forward axis), per pixel
 RWStructuredBuffer<uint> objectIds;    // instance index + 1 per pixel, 0 where the ray misses
 RWStructuredBuffer<uint> materialIds;  // material index + 1 per pixel, 0 where the ray misses
+RWStructuredBuffer<float> coverage;    // fraction of 16 stratified rays through the pixel that hit something (anti-aliased alpha)
 
 float3 vertex(uint v) { return float3(positions[3 * v], positions[3 * v + 1], positions[3 * v + 2]); }
 
@@ -50,6 +51,17 @@ float3 bilinear(uint base, uint w, uint h, float2 uv)
     return lerp(a, b, ty);
 }
 
+// Camera-space unit direction through pixel position `px` (in pixels), and its world-space direction in `dir`.
+float3 pixelDir(float2 px, uint w, uint h, float t, float aspect, out float3 dir)
+{
+    float u = (2.0 * px.x / w - 1.0 + camera[16]) * aspect * t;
+    float v = (1.0 - 2.0 * px.y / h + camera[17]) * t;
+    float3 d = normalize(float3(u, v, -1.0));
+    for (uint r = 0; r < 3; r++)
+        dir[r] = camera[4 + 4 * r] * d.x + camera[5 + 4 * r] * d.y + camera[6 + 4 * r] * d.z;
+    return d;
+}
+
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void aov(uint3 tid : SV_DispatchThreadID)
@@ -61,22 +73,16 @@ void aov(uint3 tid : SV_DispatchThreadID)
 
     float t = camera[2];
     float aspect = camera[0] / camera[1];
-    float u = (2.0 * (tid.x + 0.5) / w - 1.0 + camera[16]) * aspect * t;
-    float v = (1.0 - 2.0 * (tid.y + 0.5) / h + camera[17]) * t;
-    float3 d = normalize(float3(u, v, -1.0));
-
+    float2 px = float2(tid.x + 0.5, tid.y + 0.5);
+    float3 d;
     float3 dir, org;
-    for (uint r = 0; r < 3; r++)
-    {
-        dir[r] = camera[4 + 4 * r] * d.x + camera[5 + 4 * r] * d.y + camera[6 + 4 * r] * d.z;
-        org[r] = camera[7 + 4 * r];
-    }
-
     RayDesc ray;
-    ray.Origin = org;
-    ray.Direction = normalize(dir);
     ray.TMin = 0.0;
     ray.TMax = 1.0e30;
+    org = float3(camera[7], camera[11], camera[15]);
+    d = pixelDir(px, w, h, t, aspect, dir);
+    ray.Origin = org;
+    ray.Direction = normalize(dir);
 
     RayQuery<RAY_FLAG_FORCE_OPAQUE> q;
     q.TraceRayInline(scene, 0, 0xFF, ray);
@@ -96,7 +102,7 @@ void aov(uint3 tid : SV_DispatchThreadID)
         matId = instances[inst + 2] + 1;
         depth = q.CommittedRayT() * -d.z; // d is unit length in camera space, so -d.z is the forward component
 
-        uint mi = instances[inst + 2] * 22;
+        uint mi = instances[inst + 2] * 23;
         albedo = float3(materials[mi], materials[mi + 1], materials[mi + 2]);
         uint texBase = uint(materials[mi + 10]);
         if (texBase > 0)
@@ -122,7 +128,38 @@ void aov(uint3 tid : SV_DispatchThreadID)
         }
     }
 
+    // Coverage: a 4x4 stratified grid inside the pixel, so an edge gets partial alpha.
+    float cover = 0.0;
+    for (uint k = 0; k < 16; k++)
+    {
+        float2 sp = float2(tid.x + (k % 4 + 0.5) / 4.0, tid.y + (k / 4 + 0.5) / 4.0);
+        float3 sdir;
+        pixelDir(sp, w, h, t, aspect, sdir);
+        RayDesc sr;
+        sr.Origin = org;
+        sr.Direction = normalize(sdir);
+        sr.TMin = 0.0;
+        sr.TMax = 1.0e30;
+        // Follow the ray through translucent surfaces: what is left is the light that reaches the camera.
+        float seen = 0.0;
+        float through = 1.0;
+        for (uint layer = 0; layer < 8 && through > 0.0; layer++)
+        {
+            RayQuery<RAY_FLAG_FORCE_OPAQUE> sq;
+            sq.TraceRayInline(scene, 0, 0xFF, sr);
+            while (sq.Proceed()) { }
+            if (sq.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+                break;
+            float op = materials[instances[sq.CommittedInstanceIndex() * 16 + 2] * 23 + 22];
+            seen += through * op;
+            through *= 1.0 - op;
+            sr.Origin = sr.Origin + sr.Direction * (sq.CommittedRayT() + 1.0e-4);
+        }
+        cover += seen;
+    }
+
     uint pixel = tid.y * w + tid.x;
+    coverage[pixel] = cover / 16.0;
     albedoDepth[4 * pixel] = albedo.x;
     albedoDepth[4 * pixel + 1] = albedo.y;
     albedoDepth[4 * pixel + 2] = albedo.z;

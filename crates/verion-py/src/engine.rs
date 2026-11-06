@@ -396,7 +396,7 @@ impl Job {
     }
 
     /// Waits for the job and returns its image and AOVs as numpy arrays (first row on top, in the
-    /// scene's working space): `combined`, `normal`, `albedo`, `depth`, `object_id`, `material_id`,
+    /// scene's working space): `combined`, `normal`, `albedo`, `depth`, `object_id`, `material_id`, `coverage`,
     /// `sample_count` (adaptive sampling only), the lighting split (`direct_diffuse`,
     /// `indirect_diffuse`, `specular`, `transmission`, `emission`, `visibility`; Stylized mode or
     /// `lighting_aovs`) and `info`. Can be read once.
@@ -416,6 +416,7 @@ impl Job {
             put(py, &d, "depth", f.depth, &[h, w])?;
             put(py, &d, "object_id", f.object_id, &[h, w])?;
             put(py, &d, "material_id", f.material_id, &[h, w])?;
+            put(py, &d, "coverage", f.coverage, &[h, w])?;
         }
         if let Some(c) = f.sample_count {
             put(py, &d, "sample_count", c, &[h, w])?;

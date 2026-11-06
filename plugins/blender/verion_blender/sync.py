@@ -170,6 +170,10 @@ class Sync:
             mats[i] = k or "None"
         return objects, mats, assets
 
+    def catcher_ids(self):
+        """IR instance indices of the objects marked Shadow Catcher."""
+        return [i for recs in self.instances.values() for i, _m, _s, ob in recs if ob.original.is_shadow_catcher]
+
     def keys(self, depsgraph):
         return {self.instance_key(i) for i in depsgraph.object_instances if i.object.type in GEOMETRY | {"LIGHT"}}
 

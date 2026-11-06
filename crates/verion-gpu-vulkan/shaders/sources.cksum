@@ -1,4 +1,4 @@
-shaders/aov.slang 818382651 5783
+shaders/aov.slang 3905870203 7448
 shaders/normals.slang 3106127268 4763
 shaders/pathtrace.slang 2358497555 989
 shaders/wf_args.slang 4231570597 886
@@ -7,6 +7,6 @@ shaders/wf_select.slang 3332485939 496
 shaders/wf_shade.slang 1734737300 871
 shaders/include/dielectric_albedo.slang 3517935046 42810
 shaders/include/ggx_albedo.slang 2532298999 10504
-shaders/include/pt_core.slang 4074252393 65737
+shaders/include/pt_core.slang 2920107514 67388
 shaders/include/sheen_albedo.slang 232368318 2765
 shaders/include/wf_state.slang 930236722 4054

@@ -123,6 +123,8 @@ class VerionRenderEngine(bpy.types.RenderEngine):
         self.update_stats("", "Verion: building the scene")
         sync = Sync(nat, self._warn)
         vscene = sync.build(depsgraph, width, height)
+        transparent = scene.render.film_transparent
+        vscene.set_transparent_background(transparent)
         self.update_stats("", "Verion: starting the GPU")
         engine = nat.Engine(vscene)
         try:
@@ -131,6 +133,8 @@ class VerionRenderEngine(bpy.types.RenderEngine):
             need = [p for p in PASSES if getattr(layer, p[4], False)]
             if need and cfg["mode"] != "stylized":
                 cfg["lighting_aovs"] = any(p[3] in {"direct_diffuse", "indirect_diffuse", "emission"} for p in need)
+            if transparent and sync.catcher_ids():
+                cfg["lighting_aovs"] = True  # the shadow catcher reads the visibility
             job = engine.start(cfg)
             total = cfg["spp"]
             while not job.wait(0.1):
@@ -148,7 +152,7 @@ class VerionRenderEngine(bpy.types.RenderEngine):
             return
         finally:
             engine.close()
-        self._write(result, layer, scene, width, height, sync)
+        self._write(result, layer, scene, width, height, sync, transparent)
         self.update_progress(1.0)
 
     @staticmethod
@@ -170,7 +174,7 @@ class VerionRenderEngine(bpy.types.RenderEngine):
         res.layers[0].passes["Combined"].rect.foreach_set(np.ascontiguousarray(crop[::-1]).ravel())
         self.end_result(res, highlight=True)
 
-    def _write(self, result, layer, scene, width, height, sync=None):
+    def _write(self, result, layer, scene, width, height, sync=None, transparent=False):
         x0, y0, x1, y1 = self._region(scene, width, height)
         # Blender places the border region itself: tile coordinates start at its corner.
         res = self.begin_result(0, 0, x1 - x0, y1 - y0, layer=layer.name)
@@ -185,7 +189,7 @@ class VerionRenderEngine(bpy.types.RenderEngine):
                     names = {"Object": objects, "Material": mats, "Asset": assets}[kind]
                     ids = result["material_id"] if kind == "Material" else result["object_id"]
                     crypto[f"Crypto{kind}00"] = (4, cryptomatte.layer_pass(ids, names), kind, names)
-        arrays = pass_arrays(result, set(passes.keys()))
+        arrays = pass_arrays(result, set(passes.keys()), transparent, sync.catcher_ids() if sync else ())
         arrays.update({k: v[:2] for k, v in crypto.items()})
         for name, (_n, arr) in arrays.items():
             crop = arr[top : top + (y1 - y0), x0:x1]
@@ -200,10 +204,25 @@ class VerionRenderEngine(bpy.types.RenderEngine):
             compat.stamp_field(final, scene, key, value)
 
 
-def pass_arrays(result, available):
-    """{Blender pass name: (channels, array (H, W, channels))} for the passes in `available`."""
+def combined_rgba(result, transparent=False, catchers=()):
+    """(H, W, 4) Combined. A transparent film takes alpha from the coverage of the scene (the sky was
+    already dropped for camera rays). A shadow catcher shows black with the shadow as alpha: one minus
+    the share of direct light that reaches it (the Visibility AOV)."""
     c = result["combined"]
-    out = {"Combined": (4, np.concatenate([c, np.ones(c.shape[:2] + (1,), np.float32)], axis=2))}
+    a = np.ones(c.shape[:2], np.float32)
+    if transparent and "coverage" in result:
+        a = np.asarray(result["coverage"], np.float32)
+        if len(catchers) and "visibility" in result:
+            m = np.isin(result["object_id"], np.asarray(list(catchers)) + 1)
+            shadow = 1.0 - np.clip(result["visibility"], 0.0, 1.0)
+            c = np.where(m[..., None], 0.0, c)
+            a = np.where(m, shadow * a, a)
+    return np.concatenate([c, a[..., None]], axis=2).astype(np.float32)
+
+
+def pass_arrays(result, available, transparent=False, catchers=()):
+    """{Blender pass name: (channels, array (H, W, channels))} for the passes in `available`."""
+    out = {"Combined": (4, combined_rgba(result, transparent, catchers))}
     for name, _chan, n, key, _flag in PASSES:
         if name in available and key in result:
             a = np.asarray(result[key], dtype=np.float32)

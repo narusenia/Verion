@@ -32,6 +32,10 @@ pub struct BaseBsdf {
     /// Spreads the IOR of the transmission per color channel: red `ior - h`, green `ior`, blue
     /// `ior + h` with `h = (ior - 1) * 0.025 * dispersion`.
     pub dispersion: f32,
+    /// Chance that a ray is stopped by the surface, in `0..=1`; otherwise it passes straight through
+    /// (alpha). 1 = opaque. Stochastic, so it converges with the samples. Shadow rays follow the same
+    /// rule, so a translucent surface casts a partial shadow.
+    pub opacity: f32,
     pub emission: [f32; 3],
     /// Textures multiply the factors above (glTF semantics) and hold linear values. Sampling is
     /// repeat-wrapped trilinear; UVs come from the mesh. The image ids must come from the same scene.
@@ -58,6 +62,7 @@ impl Default for BaseBsdf {
             sheen_color: [0.0; 3],
             sheen_roughness: 0.0,
             dispersion: 0.0,
+            opacity: 1.0,
             emission: [0.0; 3],
             base_color_texture: None,
             metallic_roughness_texture: None,

@@ -88,6 +88,14 @@ fn reports_albedo_depth_and_ids() {
     assert_eq!(aov.albedo[r], [0.9, 0.1, 0.3]);
     assert!((aov.depth[r] - 4.0).abs() < 1e-3, "{}", aov.depth[r]);
 
+    // Coverage: full inside a triangle, zero on a miss, and fractional along an edge (the diagonal
+    // edge of the small triangle crosses pixels).
+    assert_eq!((aov.coverage[c], aov.coverage[at(1, 1)]), (1.0, 0.0));
+    assert!(
+        aov.coverage.iter().any(|&v| v > 0.0 && v < 1.0),
+        "an anti-aliased edge has partial coverage"
+    );
+
     // Top-left corner: nothing there.
     let m = at(1, 1);
     assert_eq!(

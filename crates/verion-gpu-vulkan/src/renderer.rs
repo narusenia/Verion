@@ -461,6 +461,7 @@ impl RayTracingBackend for Renderer {
             self.info.light_count = (table.lights.len() / pack::LIGHT_WORDS) as u32;
             self.info.sky = table.sky;
             self.info.virtual_light = table.virtual_light;
+            self.info.transparent_background = table.transparent_background;
             let key = pack::env_key(scene);
             if key != self.env_key {
                 let env = pack::pack_env(scene).map_err(Error::Scene)?;
@@ -886,6 +887,7 @@ impl RayTracingBackend for Renderer {
             .zeroed(pixels as u64 * 16, RESULT, "albedo and depth")?;
         let ids = self.ctx.zeroed(pixels as u64 * 4, RESULT, "object ids")?;
         let material_ids = self.ctx.zeroed(pixels as u64 * 4, RESULT, "material ids")?;
+        let coverage = self.ctx.zeroed(pixels as u64 * 4, RESULT, "coverage")?;
         self.run_once(
             &self.aov,
             &[
@@ -901,6 +903,7 @@ impl RayTracingBackend for Renderer {
                 (9, Res::Buffer(&albedo_depth)),
                 (10, Res::Buffer(&ids)),
                 (11, Res::Buffer(&material_ids)),
+                (12, Res::Buffer(&coverage)),
             ],
             (width, height),
         )?;
@@ -911,6 +914,7 @@ impl RayTracingBackend for Renderer {
             depth: ad.iter().map(|p| p[3]).collect(),
             object_id: self.ctx.read_u32(&ids, pixels)?,
             material_id: self.ctx.read_u32(&material_ids, pixels)?,
+            coverage: self.ctx.read_f32(&coverage, pixels)?,
         })
     }
 }

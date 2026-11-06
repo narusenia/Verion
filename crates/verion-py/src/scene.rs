@@ -140,6 +140,7 @@ fn material_from(
             "clearcoat_roughness" => b.clearcoat_roughness = v.extract()?,
             "sheen_roughness" => b.sheen_roughness = v.extract()?,
             "dispersion" => b.dispersion = v.extract()?,
+            "opacity" => b.opacity = v.extract::<f32>()?.clamp(0.0, 1.0),
             "normal_scale" => b.normal_scale = v.extract()?,
             "base_color_texture" => b.base_color_texture = opt_image(s, &v)?,
             "metallic_roughness_texture" => b.metallic_roughness_texture = opt_image(s, &v)?,
@@ -365,7 +366,7 @@ impl Scene {
     }
 
     /// Keywords: base_color, metallic, roughness, transmission, ior, clearcoat, clearcoat_roughness,
-    /// sheen_color, sheen_roughness, dispersion, emission, normal_scale, the `*_texture` image
+    /// sheen_color, sheen_roughness, dispersion, opacity, emission, normal_scale, the `*_texture` image
     /// indices (base_color, metallic_roughness, emission, normal), `stylization` (the JSON of a
     /// `VERION_materials_stylization` object) and `stylization_images` (image indices for the
     /// textures that JSON names). Returns the material index.
@@ -471,6 +472,11 @@ impl Scene {
         )?;
         s.set_light(id, l);
         Ok(())
+    }
+
+    /// Camera rays that leave the scene return black (a transparent film); the sky still lights it.
+    fn set_transparent_background(&self, on: bool) {
+        self.lock().set_transparent_background(on);
     }
 
     /// The virtual main light that Toon bands take from the environment map (ADR-0020).

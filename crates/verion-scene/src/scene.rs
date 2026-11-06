@@ -183,6 +183,7 @@ pub struct Scene {
     lights: Vec<Light>,
     camera: Camera,
     stylization_world: StylizationWorld,
+    transparent_background: bool,
     working_space: ColorSpace,
     revisions: Revisions,
     changes: Changes,
@@ -343,6 +344,18 @@ impl Scene {
 
     pub fn stylization_world(&self) -> StylizationWorld {
         self.stylization_world
+    }
+
+    /// Camera rays that leave the scene return black instead of the sky (a transparent film). The
+    /// sky still lights the scene.
+    pub fn transparent_background(&self) -> bool {
+        self.transparent_background
+    }
+
+    pub fn set_transparent_background(&mut self, on: bool) {
+        self.revisions.lighting += 1;
+        self.changes.lights = true;
+        self.transparent_background = on;
     }
 
     pub fn set_stylization_world(&mut self, world: StylizationWorld) {

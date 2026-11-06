@@ -171,6 +171,8 @@ pub struct Aovs {
     pub object_id: Vec<u32>,
     /// Material index plus one.
     pub material_id: Vec<u32>,
+    /// Fraction of 16 stratified rays through the pixel that hit the scene (anti-aliased alpha).
+    pub coverage: Vec<f32>,
 }
 
 /// First-hit lighting split (REQ-STY-006), mean per pixel, row-major from the top-left. Radiance

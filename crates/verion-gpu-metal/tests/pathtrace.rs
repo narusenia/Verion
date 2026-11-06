@@ -1616,3 +1616,73 @@ fn virtual_main_light_on_the_bundled_hdris() {
         assert_eq!(v.is_none(), name == "uniform", "{name}");
     }
 }
+
+#[test]
+fn transparent_background_hides_the_sky_from_camera_rays_only() {
+    let Some(ctx) = context() else { return };
+    let build = |transparent: bool| {
+        let mut s = Scene::new();
+        let mesh = s.add_mesh(cube(0.5));
+        let mat = s.add_material(material([1.0; 3], [0.0; 3]));
+        s.add_instance(Instance {
+            mesh,
+            material: mat,
+            transform: IDENTITY,
+        })
+        .unwrap();
+        s.add_light(Light::Environment { color: [1.0; 3] });
+        s.set_camera(camera_at_z(3.0));
+        s.set_transparent_background(transparent);
+        s
+    };
+    let render = |s: &Scene| Renderer::new(&ctx, s).unwrap().render(32, 32, 64).unwrap();
+    let (on, off) = (render(&build(true)), render(&build(false)));
+    // The corner sees the sky, which a transparent film drops; the cube, lit by that sky, stays.
+    assert!(
+        (off[0][0] - 1.0).abs() < 0.01 && on[0] == [0.0; 3],
+        "{:?} {:?}",
+        off[0],
+        on[0]
+    );
+    let (a, b) = (center_mean(&on, 32, 6), center_mean(&off, 32, 6));
+    assert!((a - b).abs() < 0.02, "cube {a} vs {b}");
+}
+
+#[test]
+fn opacity_lets_rays_and_shadows_through() {
+    let Some(ctx) = context() else { return };
+    let light = Light::Point {
+        position: [1.0, 0.0, 1.0],
+        color: [1.0; 3],
+        intensity: std::f32::consts::PI * 2.0 * 2.0f32.sqrt(),
+    };
+    // The floor lit by the point light, with the black triangle of `floor_scene` between them.
+    let lit = |opacity: f32| {
+        let mut s = floor_scene(light, true);
+        let id = s.material_id(1).unwrap();
+        let mut m = s.materials()[id.index()].clone();
+        m.base.opacity = opacity;
+        s.set_material(id, m);
+        center_pixel(&ctx, &s)
+    };
+    let (open, full, half, shut) = (lit(0.0), floor_value(&ctx), lit(0.5), lit(1.0));
+    assert!(
+        (open - full).abs() < 0.02 * full,
+        "opacity 0: {open} vs {full}"
+    );
+    assert!(shut < 0.02 * full, "opacity 1: {shut}");
+    assert!(
+        (half - 0.5 * full).abs() < 0.08 * full,
+        "opacity 0.5: {half} vs {full}"
+    );
+}
+
+/// The floor without the occluder.
+fn floor_value(ctx: &MetalContext) -> f32 {
+    let light = Light::Point {
+        position: [1.0, 0.0, 1.0],
+        color: [1.0; 3],
+        intensity: std::f32::consts::PI * 2.0 * 2.0f32.sqrt(),
+    };
+    center_pixel(ctx, &floor_scene(light, false))
+}

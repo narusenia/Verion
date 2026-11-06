@@ -127,6 +127,8 @@ pub struct Frame {
     pub depth: Vec<f32>,
     pub object_id: Vec<u32>,
     pub material_id: Vec<u32>,
+    /// Fraction of each pixel the scene covers (alpha when the background is transparent).
+    pub coverage: Vec<f32>,
     pub sample_count: Option<Vec<u32>>,
     pub lighting: Option<LightingAovs>,
     pub physical: bool,
@@ -287,13 +289,14 @@ impl<B: RayTracingBackend> Session<B> {
                 lighting.as_mut(),
             )?;
         }
-        let (normal, albedo, depth, object_id, material_id) = match run.aovs.as_ref() {
+        let (normal, albedo, depth, object_id, material_id, coverage) = match run.aovs.as_ref() {
             Some((n, a)) => (
                 n.clone(),
                 a.albedo.clone(),
                 a.depth.clone(),
                 a.object_id.clone(),
                 a.material_id.clone(),
+                a.coverage.clone(),
             ),
             None => Default::default(),
         };
@@ -307,6 +310,7 @@ impl<B: RayTracingBackend> Session<B> {
             depth,
             object_id,
             material_id,
+            coverage,
             sample_count: run.acc.sample_counts(),
             lighting,
             physical: s.physical(),

@@ -12,8 +12,8 @@ use crate::{Adaptive, Restir};
 /// Path length limit. Radiance beyond it is dropped, so closed furnaces read slightly dark.
 pub const MAX_DEPTH: u32 = 8;
 /// Words of the parameter block; must match `params` in `shaders/include/pt_core.slang`.
-pub const PARAM_WORDS: usize = 42;
-pub const MATERIAL_WORDS: usize = 22;
+pub const PARAM_WORDS: usize = 43;
+pub const MATERIAL_WORDS: usize = 23;
 pub const LIGHT_WORDS: usize = 16;
 /// Words per emissive triangle; must match `shaders/include/pt_core.slang`.
 pub const EMITTER_WORDS: usize = 16;
@@ -53,6 +53,8 @@ pub struct SceneInfo {
     pub sky: [f32; 3],
     /// The light table ends with the virtual main light, which owns slot 3 instead of the environment map.
     pub virtual_light: bool,
+    /// Camera rays that miss return black (`Scene::transparent_background`).
+    pub transparent_background: bool,
 }
 
 /// The camera as the shaders read it, replaceable without touching the rest of the scene.
@@ -439,6 +441,7 @@ pub fn pack_materials(scene: &Scene, textures: bool) -> Result<Materials, String
             b.sheen_color[1],
             b.sheen_color[2],
             b.dispersion,
+            b.opacity,
         ]);
     }
     debug_assert_eq!(materials.len(), scene.materials().len() * MATERIAL_WORDS);
@@ -455,6 +458,7 @@ pub struct LightTable {
     pub lights: Vec<u32>,
     pub sky: [f32; 3],
     pub virtual_light: bool,
+    pub transparent_background: bool,
 }
 
 /// Kind word of the virtual main light in the table: a directional light for the Stylization slot only.
@@ -630,6 +634,7 @@ pub fn pack_lights(scene: &Scene) -> LightTable {
         lights,
         sky,
         virtual_light: virtual_light.is_some(),
+        transparent_background: scene.transparent_background(),
     }
 }
 
@@ -643,6 +648,7 @@ pub fn scene_info(light_table: &LightTable, emitters: &Emitters, env: &Env) -> S
         env_pdf_scale: env.pdf_scale,
         sky: light_table.sky,
         virtual_light: light_table.virtual_light,
+        transparent_background: light_table.transparent_background,
     }
 }
 
@@ -793,6 +799,7 @@ pub fn base_params(
     // Footprint of one pixel per unit of travelled distance, for texture filtering.
     params[27] = (2.0 * view.camera[2] / height as f32).to_bits();
     params[41] = info.virtual_light as u32;
+    params[42] = info.transparent_background as u32;
     params[39] = view.shift[0].to_bits();
     params[40] = view.shift[1].to_bits();
     params[28] = lighting as u32;
@@ -904,6 +911,7 @@ mod tests {
             env_pdf_scale: 0.0,
             sky: [0.1, 0.2, 0.3],
             virtual_light: false,
+            transparent_background: false,
         };
         let view = View::new(&Camera::default());
         let p = base_params(
