@@ -12,6 +12,11 @@ class VerionSceneSettings(bpy.types.PropertyGroup):
     mode: EnumProperty(name="Mode", items=MODES, default="REFERENCE")
     samples: IntProperty(name="Samples", description="Samples per pixel of a final render", default=64, min=1, soft_max=4096)
     viewport_samples: IntProperty(name="Viewport Samples", default=256, min=1, soft_max=4096)
+    viewport_scale: EnumProperty(
+        name="Viewport Resolution",
+        items=[("1.0", "100%", ""), ("0.5", "50%", ""), ("0.25", "25%", "")],
+        default="1.0",
+    )
     clean_samples: IntProperty(
         name="Clean Preview Samples",
         description="Samples after which a viewport frame counts as a clean preview (reported in the status bar)",

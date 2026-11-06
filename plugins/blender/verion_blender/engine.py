@@ -1,8 +1,11 @@
 import bpy
+import gpu
+from gpu_extras.batch import batch_for_shader
 import numpy as np
 
 from . import compat, native
 from .sync import Sync
+from .viewport import View, Viewport
 
 
 def render_size(scene):
@@ -33,6 +36,8 @@ class VerionRenderEngine(bpy.types.RenderEngine):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.session = None
+        self.viewport = None
+        self.draw_data = None
 
     def __del__(self):
         try:
@@ -41,10 +46,10 @@ class VerionRenderEngine(bpy.types.RenderEngine):
             pass  # the engine struct is already gone
 
     def _close(self):
-        s = getattr(self, "session", None)
-        if s is not None:
-            s["engine"].close()
-            self.session = None
+        vp = getattr(self, "viewport", None)
+        if vp is not None:
+            vp.close()
+            self.viewport = None
 
     def _warn(self, level, msg):
         self.report({level}, msg)
@@ -56,6 +61,38 @@ class VerionRenderEngine(bpy.types.RenderEngine):
         for name, chan, n, _key, flag in PASSES:
             if getattr(renderlayer, flag, False):
                 self.register_pass(scene, renderlayer, name, n, chan, "VALUE" if n == 1 else "VECTOR" if chan == "XYZ" else "COLOR")
+
+    # -- viewport ----------------------------------------------------------------------------------
+
+    def view_update(self, context, depsgraph):
+        try:
+            if self.viewport is None:
+                self.viewport = Viewport(native.load(), self._warn)
+            view = View.from_region(context.region_data, context.region)
+            self.viewport.update(depsgraph, view, depsgraph.scene.verion)
+        except (native.NativeError, RuntimeError) as e:
+            self.report({"ERROR"}, str(e))
+            return
+        self.tag_redraw()
+
+    def view_draw(self, context, depsgraph):
+        vp = self.viewport
+        if vp is None:
+            return
+        scene = depsgraph.scene
+        view = View.from_region(context.region_data, context.region)
+        vp.set_view(view, scene.verion)
+        if vp.poll() is not None or self.draw_data is None:
+            self.draw_data = _upload(vp.image)
+        self.update_stats("Verion", vp.status())
+        if self.draw_data is not None:
+            gpu.state.blend_set("ALPHA_PREMULT")
+            self.bind_display_space_shader(scene)
+            _draw(self.draw_data, context.region)
+            self.unbind_display_space_shader()
+            gpu.state.blend_set("NONE")
+        if vp.job is not None and not vp.job.done():
+            self.tag_redraw()  # more frames are coming
 
     # -- final render -----------------------------------------------------------------------------
 
@@ -160,3 +197,26 @@ def stamp_fields(settings, info):
     if settings.denoise:
         f["Verion Denoiser"] = "oidn"
     return f
+
+
+def _upload(image):
+    """A float RGBA texture of a viewport frame `(version, samples, (h, w, 4) array)`."""
+    if image is None:
+        return None
+    rgba = np.ascontiguousarray(image[2][::-1], dtype=np.float32)  # texture row 0 is the bottom
+    h, w = rgba.shape[:2]
+    buf = gpu.types.Buffer("FLOAT", w * h * 4, rgba.ravel())
+    return gpu.types.GPUTexture((w, h), format="RGBA32F", data=buf)
+
+
+def _draw(texture, region):
+    """Draws the texture over the whole region (it is stretched when rendered at a lower resolution)."""
+    shader = gpu.shader.from_builtin("IMAGE")
+    coords = ((0, 0), (1, 0), (1, 1), (0, 1))
+    batch = batch_for_shader(shader, "TRI_FAN", {"pos": coords, "texCoord": coords})
+    with gpu.matrix.push_pop():
+        gpu.matrix.translate((0, 0))
+        gpu.matrix.scale((region.width, region.height))
+        shader.bind()
+        shader.uniform_sampler("image", texture)
+        batch.draw(shader)

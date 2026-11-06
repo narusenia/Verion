@@ -109,7 +109,7 @@ class Sync:
 
     # -- the whole scene ------------------------------------------------------------------------
 
-    def build(self, depsgraph, width, height, cam_ob=None):
+    def build(self, depsgraph, width, height, cam_ob=None, with_camera=True):
         scene = depsgraph.scene
         for inst in depsgraph.object_instances:
             ob = inst.object
@@ -124,7 +124,9 @@ class Sync:
         self.world_desc = world_mod.describe(scene.world, self.warn)
         self.world_light = world_mod.apply(self.scene, self.world_desc, self.warn, {})
         cam_ob = cam_ob or scene.camera
-        if cam_ob is None:
+        if not with_camera:
+            pass  # the viewport sets the camera from the 3D view
+        elif cam_ob is None:
             self.warn("The scene has no camera")
             self.scene.frame_camera()
         else:
