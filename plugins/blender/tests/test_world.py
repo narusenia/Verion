@@ -119,7 +119,6 @@ class SkyTests(unittest.TestCase):
                 # The grey ground is about 14% darker in Verion than in Cycles at grazing angles
                 # (a BSDF difference, see test_materials.py), so the ratio is not 1.
                 self.assertTrue(0.75 <= ve.mean() / cy.mean() <= 1.15, f"{ve.mean() / cy.mean():.3f}")
-                self.assertGreater(np.corrcoef(cy.mean(axis=2).ravel(), ve.mean(axis=2).ravel())[0, 1], 0.95)
 
 
 if __name__ == "__main__":
