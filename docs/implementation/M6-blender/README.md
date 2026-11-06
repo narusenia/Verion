@@ -10,7 +10,7 @@
 | 1 | Blender の本体を用意する（4.5 LTS と 5.x。`blender -b` で Python を実行できること） | — | 済（`~/Applications/Blender/stable/` に 4.5.15 LTS と 5.2.3 LTS。Python は 3.11.15 と 3.13.13、numpy は 1.26.4 と 2.3.4） |
 | 2 | `verion-py`（PyO3、abi3）: Scene IR の構築 API（メッシュ・Instance・材質・ライト・カメラを numpy で受ける）、Renderer と Accumulation、結果を numpy で返す。`maturin` でビルド。Blender 抜きの Python スクリプトで glTF と同じ画像になる | REQ-DCC-001 | 未着手 |
 | 3 | アドオンの骨格 `plugins/blender/`: `RenderEngine` の登録、プロパティ（spp・モード・ReSTIR・Adaptive・デノイズ）、拡張の読み込みと版の確認。4.5 LTS と 5.x の API 差は薄い層に閉じる | REQ-DCC-001 | 未着手 |
-| 4 | シーン同期（Final）: depsgraph からメッシュ（三角形化・法線・UV）、Instance（Transform・材質の割り当て）、カメラ（センサーフィット・シフト・被写界深度）、ライト（Point / Spot / Sun / Area）、ワールド（色・HDRI）。同じシーンを glTF 経由の `render-cli` と比べて一致する | REQ-DCC-001 / REQ-CORE-001 | 未着手 |
+| 4 | シーン同期（Final）: depsgraph からメッシュ（三角形化・法線・UV）、Instance（Transform・材質の割り当て）、カメラ（センサーフィット・シフト・被写界深度）、ライト（Point / Spot / Sun / Area）、ワールド（色・HDRI。手続き型の Sky Texture は HDRI へベイク）。ライトの W は Cycles の換算に合わせ、ライト種別ごとに Cycles との明るさを比べて記録する。同じシーンを glTF 経由の `render-cli` と比べて一致する | REQ-DCC-001 / REQ-CORE-001 | 未着手 |
 | 5 | 材質変換: Principled BSDF を Base BSDF に変換（色・金属・粗さ・透過・IOR・発光・コート・シーン・アルファ・ノーマルマップ・画像）。非対応ノードは警告して代替値にし、プロシージャルはベイク | REQ-DCC-003 | 未着手 |
 | 6 | Final 出力: Render Result に Combined と AOV（Lighting AOV・Depth・Normal・Albedo・SampleCount）。進捗とキャンセル、OIDN のデノイズ、EXR のメタデータ（非物理の印） | REQ-DCC-001 / REQ-ACC-001 | 未着手 |
 | 7 | ビューポートレンダ: `view_update` を `Changes` に変換して `update` を呼び、`view_draw` で表示する。Interactive モード（ReSTIR）を使う。描画中も UI を止めない（GIL を放して別スレッド）。First Clean Preview を計測して記録する | REQ-DCC-002 / REQ-VIEW-003 | 未着手 |
@@ -19,7 +19,7 @@
 | 10 | Cryptomatte: Object・Material・Asset の ID（規格どおりのハッシュ）を Render Result と EXR に出す | REQ-DCC-001 | 未着手 |
 | 11 | Shadow Catcher とアルファ合成 | REQ-DCC-001 | 未着手 |
 | 12 | UDIM・タイル化したテクスチャ | REQ-IO-004 | 未着手 |
-| 13 | 環境光だけで照明したときの Toon の段（HDRI から求めた支配的な光の方向を仮想の主光源にする案。overview.md の未決事項）。M6 の最初に方針を決め、ADR に記録する | REQ-STY | 未着手 |
+| 13 | 環境光だけで照明したときの Toon の段: HDRI から支配的な光の方向を求めて仮想の主光源にする（ADR-0020）。上書き（方向・強さ・無効化）、影の光線 1 本、一様な空では出さない。太陽のない HDRI で段が出る検証 | REQ-STY | 方針決定済み（ADR-0020）、実装は未着手 |
 | 14 | DCC 間の一貫性: 同じシーンを Blender 経由と glTF 経由で描いて閾値内で一致する。Cycles との比較は参考値として記録する | REQ-QA | 未着手 |
 | 15 | 配布: アドオン zip（macOS Apple silicon・Windows x64）。ネイティブライブラリと OIDN の CPU 版・ライセンス文書を同梱（ADR-0018）。GPU 版 OIDN を足す導線（GUI） | REQ-INFRA-003 | 未着手 |
 | 16 | Windows（Vulkan）での確認: Blender 5.x と 4.5 LTS で、項目 4〜7 の画像が Metal と一致する | REQ-GPU-007 | 未着手（Windows 機の作業。`docs/handoff/` に手順を残す） |
@@ -29,13 +29,14 @@
 - Rust コアと同じプロセスで動かす（PyO3）。対応は Blender 4.5 LTS と 5.x、拡張は abi3 の 1 本（ADR-0019）
 - アダプタは Blender のデータの読み取りと表示だけを持ち、ロジックは Rust に置く。Scene IR を直接作る（glTF を経由しない。経由する場合は検証用の比較だけ）
 - 画像は最初は CPU のバッファで渡す。GPU テクスチャの共有は First Clean Preview の計測で足りないと分かってから
+- ライトの W は Cycles の換算に合わせる。手続き型の空は HDRI へベイクする。環境光だけの Toon の段は HDRI から仮想の主光源を求める（ADR-0019、ADR-0020）
 - OIDN は CPU 版だけを同梱し、GPU 版は利用者が足す（ADR-0018）
 - 開発機の Blender は 4.5.15 LTS（Python 3.11、numpy 1.26）と 5.2.3 LTS（Python 3.13、numpy 2.3）。numpy の主な版が違うので、`numpy` クレートは両方の ABI で動くことを項目 2 で確かめる
 - 新しい依存は PyO3・maturin・`numpy` クレートまで（利用者が許可）。それ以外は追加のたびに確認する
 
 ## 要確認（利用者）
 
-- 項目 13: 環境光だけの Toon の段の方針（案が複数あるため、M6 の最初に決める）
+- 仕様書 `gltf-stylization-extension.md` への、仮想の主光源の上書き項目の追加（スキーマの変更。項目 13 の実装時）と、`overview.md` の未決事項の更新
 - Octane との比較は、この M6 の後に Blender 用の無料版で行う（M5 の持ち越し。REQ-ACC-002）
 
 ## 完了条件
