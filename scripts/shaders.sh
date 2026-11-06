@@ -42,7 +42,7 @@ if [ "$mode" = check ]; then
   for f in "$tmp"/metal/*.metal; do
     cmp -s "$f" "$metal/$(basename "$f")" || { echo "stale: $metal/$(basename "$f") (run: mise run shaders)" >&2; status=1; }
   done
-  [ "$(sources_sum)" = "$(cat "$vulkan/sources.cksum")" ] || { echo "stale: $vulkan/*.spv (run: mise run shaders)" >&2; status=1; }
+  [ "$(sources_sum)" = "$(tr -d '\r' < "$vulkan/sources.cksum")" ] || { echo "stale: $vulkan/*.spv (run: mise run shaders)" >&2; status=1; }
   rm -rf "$tmp"
   exit $status
 fi
