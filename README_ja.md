@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/banner_dark.png">
+    <img alt="Verion: 3D Rendering Engine" src="assets/brand/banner_light.png" width="640">
+  </picture>
+</p>
+
 # Verion
 
 > English: [`README.md`](README.md)
