@@ -1,7 +1,7 @@
 """The Blender World to Verion lights."""
 import numpy as np
 
-from . import images
+from . import bake_world, images
 
 
 def _background(world):
@@ -25,8 +25,7 @@ def describe(world, warn):
         return ("color", tuple(world.color))
     bg = _background(world)
     if bg is None:
-        warn("World: only a Background node is supported; the world is black")
-        return ("none",)
+        return ("baked", world, 1.0)  # other shader trees are rendered as they are
     strength = bg.inputs["Strength"]
     if strength.is_linked:
         warn("World: a linked Strength is not supported; using its default")
@@ -50,7 +49,12 @@ def describe(world, warn):
             else:
                 warn("World: the texture coordinates of the Environment Texture are not supported")
         return ("image", src.image, s, rot)
-    return ("unsupported", src.bl_idname, s)
+    # Anything procedural (Sky Texture, gradients, noise, mixes): rendered to an HDRI by Cycles.
+    return ("baked", world, 1.0)
+
+
+def _to_rgba(px):
+    return np.ascontiguousarray(np.concatenate([px, np.ones(px.shape[:2] + (1,), np.float32)], axis=2))
 
 
 def apply(scene, desc, warn, state):
@@ -73,6 +77,11 @@ def apply(scene, desc, warn, state):
         px = np.roll(px, shift, axis=1)
         idx = scene.add_image(np.ascontiguousarray(px))
         return scene.add_light("environment_map", intensity=strength, image=idx)
-    if kind == "unsupported":
-        warn(f"World: color from {desc[1]} is not supported; the world is black")
+    if kind == "baked":
+        try:
+            px = bake_world.bake(desc[1])
+        except RuntimeError as e:
+            warn(f"World: {e}; the world is black")
+            return None
+        return scene.add_light("environment_map", intensity=desc[2], image=scene.add_image(_to_rgba(np.roll(px, px.shape[1] // 4, axis=1))))
     return None

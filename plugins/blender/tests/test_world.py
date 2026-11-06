@@ -89,5 +89,38 @@ class WorldTests(unittest.TestCase):
                     np.testing.assert_allclose(got["VERION"], got["CYCLES"], atol=0.15, err_msg=f"{got}")
 
 
+
+
+class SkyTests(unittest.TestCase):
+    def test_sky_texture_is_baked_and_matches_cycles(self):
+        def sky_world():
+            w = bpy.data.worlds.new("sky")
+            w.use_nodes = True
+            nt = w.node_tree
+            sky = nt.nodes.new("ShaderNodeTexSky")
+            kinds = {e.identifier for e in sky.bl_rna.properties["sky_type"].enum_items}
+            sky.sky_type = "NISHITA" if "NISHITA" in kinds else "MULTIPLE_SCATTERING"  # renamed in 5.0
+            sky.sun_elevation = np.radians(35)
+            sky.sun_rotation = np.radians(70)
+            nt.links.new(sky.outputs["Color"], nt.nodes["Background"].inputs["Color"])
+            bpy.context.scene.world = w
+
+        def lit(engine, look):
+            scene_for(look)
+            common.add_plane(size=60, z=-0.5, color=(0.5, 0.5, 0.5), name="ground")
+            sky_world()
+            return common.render(engine, os.path.join(TMP, "sky.exr"), 24, 24, 32)
+
+        # The sky away from the sun (a 0.5 degree disc is sub-pixel noise in a direct view), and a
+        # ground lit by the sun and the sky, which is where the sun's energy shows.
+        for look in [(-1, -0.3, 0.2), (-0.3, 1, 0.5), (0, -1, 0.1), (0.5, 0.5, -0.4), (1, 0.3, -0.7)]:
+            with self.subTest(look=look):
+                cy, ve = lit("CYCLES", look), lit("VERION", look)
+                # The grey ground is about 14% darker in Verion than in Cycles at grazing angles
+                # (a BSDF difference, see test_materials.py), so the ratio is not 1.
+                self.assertTrue(0.75 <= ve.mean() / cy.mean() <= 1.15, f"{ve.mean() / cy.mean():.3f}")
+                self.assertGreater(np.corrcoef(cy.mean(axis=2).ravel(), ve.mean(axis=2).ravel())[0, 1], 0.95)
+
+
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])
