@@ -13,12 +13,12 @@
 | 4 | Vulkan の `update`（同じ計画に従う） | REQ-ACC-003 / REQ-GPU-006 | Windows 待ち（Mac では Vulkan をビルドできないため、Windows 機で実装と確認を行う） |
 | 5 | 検証: 更新後の画像が完全再構築と一致する。Cornell Box の壁の色を変えて反対側の面の間接光まで変わること（遠距離伝播）、更新で BLAS を作り直さないことを数える | REQ-ACC-003 | 済（`tests/update.rs`。壁の色を変えた更新と再構築の画像がビット一致し、編集していない面の画像が変わることも確かめる。BLAS と TLAS の再構築数は `UpdateReport` で数える） |
 | 6 | Viewer の IPR: 材質・ライト・Instance の移動の編集を `update` で反映し、First Clean Preview（編集から N spp まで）を計測して記録する | REQ-VIEW-003 | 済（Viewer は `rebuild` をやめて `update` を呼び、Instances 欄で位置を動かせる。計測は下の表） |
-| 7 | ReSTIR DI（Emitter 三角形と環境マップ）: 初期候補の RIS、Temporal / Spatial 再利用、最終シェードで可視性を再確認。鏡面・屈折・被写界深度・Lighting AOV では Fallback し、Reference では無効 | REQ-ACC-002 | 未 |
+| 7 | ReSTIR DI（Emitter 三角形）: 初期候補の RIS、前フレームの同じ画素と近傍の再利用、勝者の影を 1 本で確認。鏡面・屈折・被写界深度では Fallback し、Reference では使えない（環境マップは通常の光サンプリングのまま） | REQ-ACC-002 | 済（ADR-0016。`tests/restir.rs`: 通常の画像へ収束（平均 3% 以内）、両積分器でビット一致、鋭い面は ReSTIR の有無でビット一致。`render-cli --mode interactive`、Viewer のスイッチ） |
 | 8 | ReSTIR DI の Vulkan 版（同じ Slang を使う） | REQ-ACC-002 / REQ-GPU-006 | Windows 待ち（Slang と共通のホスト側は Mac で済ませ、Vulkan のバインドと実機確認を Windows で行う） |
-| 9 | 多光源の評価シーンと、同画質到達時間の実測（`scripts/eval_restir.sh`） | REQ-ACC-002 / REQ-PERF-001 | 未 |
-| 10 | ReSTIR GI（1 回目の間接光）と検証サンプル | REQ-ACC-002 | 未 |
-| 11 | ReSTIR PT の扱いの決定（ADR-0016 に記録） | REQ-ACC-002 | 未 |
-| 12 | metrics に Reservoir の時間とメモリ、出力メタデータに ReSTIR の有効・非物理の印 | REQ-GPU-004 / REQ-CORE | 未 |
+| 9 | 多光源の評価シーンと、同画質到達時間の実測（`scripts/eval_restir.sh`） | REQ-ACC-002 / REQ-PERF-001 | 済（`scenes/many_lights*.gltf`。結果は下の表と ADR-0016） |
+| 10 | ReSTIR GI（1 回目の間接光） | REQ-ACC-002 | 済（ADR-0016。つなぎ替えと Jacobian、可視性の確認。テスト: 通常の画像へ収束、両積分器で一致、鋭い面は無変化。間接光が支配的な室内で同誤差まで 3〜5 倍） |
+| 11 | ReSTIR PT の扱いの決定 | REQ-ACC-002 | 決定済（ADR-0016: M5 では入れず、M7 の NRC の測定と並べて判断。REQ-ACC-002 の書き換えは利用者の確認待ち） |
+| 12 | metrics に Reservoir のメモリ、出力メタデータに ReSTIR の有効・非物理の印 | REQ-GPU-004 / REQ-CORE | 済（`restir_bytes`、EXR の `verion/restir`。Reservoir だけの時間は、シェードの中で処理されるため分離できず `gpu_s` に含まれる） |
 
 ## 差分更新の計測（2026-11-06、Apple M4 Pro、`update_bench`、512×384 の 4 spp）
 
@@ -35,22 +35,37 @@
 
 材質の更新は、参照する画像が変わらない限りミップ連鎖を作り直さない。最初の実装は 4K テクスチャを毎回作り直して 0.48 s かかっていた。
 
+## 同画質到達時間（2026-11-06、Apple M4 Pro、512×384、参照 4096 spp）
+
+`sh scripts/eval_restir.sh`。Reference の 128 spp の誤差（mae/mean）に届くまでの GPU 時間。
+
+| シーン | Reference | ReSTIR DI のみ | DI + GI |
+|---|---|---|---|
+| many_lights（間接光が支配的） | 0.903 s | 0.932 s（0.97 倍） | 0.184 s（4.90 倍） |
+| many_lights_dark（直接光が支配的） | 0.415 s | 0.225 s（1.84 倍） | 0.222 s（1.87 倍） |
+| cornell_box（光源 1 枚） | 0.610 s | 0.822 s（0.74 倍） | 0.210 s（2.91 倍） |
+| showcase（HDRI だけ） | 0.388 s | 0.411 s（0.94 倍） | 0.436 s（0.89 倍） |
+
+高 spp では偏りと相関で誤差の下限が出る（ADR-0016）。ReSTIR は低 spp の速さのための機能で、最終品質は Reference で出す。
+
 ## 決めてあること
 
 - 履歴は変更で無効にする（ADR-0017）。光源・材質・形状のどれかが変わったら Reservoir と蓄積を捨てる。キャッシュの永続は M7 の NRC で扱う
-- ReSTIR は選択式で既定は無効。Reference モードは通らない（REQ-CORE）。再利用は偏りを持つので、有効なら出力に非物理の印を付ける
-- BSDF サンプリングで Emitter に当たった寄与は、ReSTIR の画素では 0 とする（光源サンプルが全 Emitter を覆うため）。つや消し以上の面だけを対象にするのはこのため
+- ReSTIR は選択式で既定は無効（CLI は `--mode interactive` で DI と GI が有効）。Reference モードは通らない（REQ-CORE）。再利用は偏りを持つので、有効なら出力に非物理の印を付ける
+- BSDF サンプリングで Emitter に当たる寄与は、光サンプリングの密度との Power Heuristic で重みを付けたまま残す（ADR-0016。外した版は外れ値が出た）
 - 変形メッシュの BLAS は再構築する（refit はしない）。形状の品質低下と実装の分岐を避ける
 
 ## 要確認（利用者）
 
 - Octane との同画質到達時間の比較（環境は保留中）
-- RTX 3080 機での Vulkan の実機確認（ReSTIR と `update`。この開発機は Mac のため、コンパイルと SPIR-V の生成までしか確認できない）
+- RTX 3080 機での Vulkan の移植と実機確認（`update`、ReSTIR のバインディング。Mac では Vulkan のクレートをビルドできない。手順は `docs/handoff/2026-11-06-m5-windows.md`）
+- Metal の画像が ReSTIR 無効時に変わっていないことは、既存の Metal テスト 48 件とベンチ（`mise run bench` が基準内）で確認済み
 
 ## 完了条件
 
-- [ ] 変更種別ごとの再利用範囲が表のとおりに動く
-- [ ] 間接光の遠距離伝播に対する検証サンプルがある
-- [ ] Camera・Material・Light・Transform の変更に Viewer が追従する
-- [ ] 同画質到達時間が改善することを実測する（多光源シーン）
-- [ ] 鏡面・屈折・DoF では Fallback する
+- [x] 変更種別ごとの再利用範囲が表のとおりに動く（Metal。`UpdateReport` で数える）
+- [x] 間接光の遠距離伝播に対する検証がある（壁の色の更新と再構築の画像がビット一致し、編集していない面が変わる。ADR-0017）
+- [x] Camera・Material・Light・Transform の変更に Viewer が追従する
+- [x] 同画質到達時間が改善することを実測する（上の表。多光源または間接光が支配的なシーンで 1.8〜4.9 倍）
+- [x] 鏡面・屈折・DoF では Fallback する（テスト）
+- [ ] Vulkan で同じことが動く（Windows 待ち）
