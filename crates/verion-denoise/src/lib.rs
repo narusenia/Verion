@@ -13,7 +13,25 @@ use libloading::{Library, Symbol};
 /// OIDN device / filter handles are opaque pointers.
 type Handle = *mut c_void;
 
-const DEVICE_TYPE_CPU: i32 = 1;
+/// Where OIDN runs. The CUDA device needs an OIDN package that ships its CUDA module (the Windows
+/// and Linux release zips do) and an NVIDIA GPU; asking for it elsewhere is an `Error::Oidn`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Device {
+    #[default]
+    Cpu,
+    Cuda,
+}
+
+impl Device {
+    /// `OIDNDeviceType` of `oidn.h`.
+    fn raw(self) -> i32 {
+        match self {
+            Device::Cpu => 1,
+            Device::Cuda => 3,
+        }
+    }
+}
+
 const FORMAT_FLOAT3: i32 = 3;
 
 #[derive(Debug)]
@@ -65,6 +83,7 @@ pub struct Aux<'a> {
 pub struct Denoiser {
     lib: Library,
     device: Handle,
+    kind: Device,
 }
 
 // SAFETY: OIDN devices are thread-safe for use from one thread at a time; `&mut self` on
@@ -72,31 +91,42 @@ pub struct Denoiser {
 unsafe impl Send for Denoiser {}
 
 impl Denoiser {
+    /// A CPU device.
     pub fn load() -> Result<Self, Error> {
+        Self::load_on(Device::Cpu)
+    }
+
+    pub fn load_on(device: Device) -> Result<Self, Error> {
         let mut last = String::new();
         for name in candidates() {
             // SAFETY: loading OIDN runs only its own initialisers.
             match unsafe { Library::new(&name) } {
-                Ok(lib) => return Self::with_library(lib),
+                Ok(lib) => return Self::with_library(lib, device),
                 Err(e) => last = format!("{name}: {e}"),
             }
         }
         Err(Error::Load(last))
     }
 
-    fn with_library(lib: Library) -> Result<Self, Error> {
+    fn with_library(lib: Library, device_kind: Device) -> Result<Self, Error> {
         // SAFETY: signatures match `OpenImageDenoise/oidn.h` (2.x).
         let device = unsafe {
             let new: Symbol<unsafe extern "C" fn(i32) -> Handle> = sym(&lib, b"oidnNewDevice\0")?;
             let commit: Symbol<unsafe extern "C" fn(Handle)> = sym(&lib, b"oidnCommitDevice\0")?;
-            let d = new(DEVICE_TYPE_CPU);
+            let d = new(device_kind.raw());
             if d.is_null() {
-                return Err(Error::Oidn("could not create a CPU device".into()));
+                return Err(Error::Oidn(format!(
+                    "could not create a {device_kind:?} device"
+                )));
             }
             commit(d);
             d
         };
-        let me = Self { lib, device };
+        let me = Self {
+            lib,
+            device,
+            kind: device_kind,
+        };
         me.check()?;
         Ok(me)
     }
@@ -170,27 +200,76 @@ impl Denoiser {
                 self.check()?;
                 return Err(Error::Oidn("could not create the RT filter".into()));
             }
-            let image = |name: &str, ptr: *const [f32; 3]| {
-                let name = CString::new(name).unwrap();
-                set_image(
-                    filter,
-                    name.as_ptr(),
-                    ptr.cast_mut().cast(),
-                    FORMAT_FLOAT3,
-                    width,
-                    height,
-                    0,
-                    0,
-                    0,
-                );
+            // The CPU device reads and writes the host images in place. A GPU device cannot see host
+            // memory, so each image goes through an OIDN buffer: copied in, and the output copied back.
+            let new_buffer: Symbol<unsafe extern "C" fn(Handle, usize) -> Handle> =
+                sym(&self.lib, b"oidnNewBuffer\0")?;
+            let write_buffer: Symbol<unsafe extern "C" fn(Handle, usize, usize, *const c_void)> =
+                sym(&self.lib, b"oidnWriteBuffer\0")?;
+            let read_buffer: Symbol<unsafe extern "C" fn(Handle, usize, usize, *mut c_void)> =
+                sym(&self.lib, b"oidnReadBuffer\0")?;
+            let release_buffer: Symbol<unsafe extern "C" fn(Handle)> =
+                sym(&self.lib, b"oidnReleaseBuffer\0")?;
+            let set_buffer_image: Symbol<
+                unsafe extern "C" fn(
+                    Handle,
+                    *const c_char,
+                    Handle,
+                    i32,
+                    usize,
+                    usize,
+                    usize,
+                    usize,
+                    usize,
+                ),
+            > = sym(&self.lib, b"oidnSetFilterImage\0")?;
+            let bytes = n * size_of::<[f32; 3]>();
+            let mut buffers: Vec<Handle> = Vec::new();
+            let mut output_buffer: Handle = std::ptr::null_mut();
+            let mut image = |name: &str, ptr: *const [f32; 3], is_output: bool| {
+                let cname = CString::new(name).unwrap();
+                if self.kind == Device::Cpu {
+                    set_image(
+                        filter,
+                        cname.as_ptr(),
+                        ptr.cast_mut().cast(),
+                        FORMAT_FLOAT3,
+                        width,
+                        height,
+                        0,
+                        0,
+                        0,
+                    );
+                    return;
+                }
+                let buffer = new_buffer(self.device, bytes);
+                if !buffer.is_null() {
+                    if is_output {
+                        output_buffer = buffer;
+                    } else {
+                        write_buffer(buffer, 0, bytes, ptr.cast());
+                    }
+                    buffers.push(buffer);
+                    set_buffer_image(
+                        filter,
+                        cname.as_ptr(),
+                        buffer,
+                        FORMAT_FLOAT3,
+                        width,
+                        height,
+                        0,
+                        0,
+                        0,
+                    );
+                }
             };
-            image("color", color.as_ptr());
-            image("output", color.as_ptr());
+            image("color", color.as_ptr(), false);
+            image("output", color.as_ptr(), true);
             if let Some(a) = aux.albedo {
-                image("albedo", a.as_ptr());
+                image("albedo", a.as_ptr(), false);
             }
             if let Some(a) = normal {
-                image("normal", a.as_ptr());
+                image("normal", a.as_ptr(), false);
             }
             set_bool(filter, c"hdr".as_ptr(), true);
             // Our albedo and normal come from one noise-free primary ray per pixel.
@@ -199,8 +278,15 @@ impl Denoiser {
             let result = self.check();
             if result.is_ok() {
                 exec(filter);
+                if !output_buffer.is_null() {
+                    // The read waits for the filter to finish.
+                    read_buffer(output_buffer, 0, bytes, color.as_mut_ptr().cast());
+                }
             }
             release(filter);
+            for buffer in buffers {
+                release_buffer(buffer);
+            }
             result.and_then(|_| self.check())
         }
     }

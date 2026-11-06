@@ -42,6 +42,14 @@ enum IntegratorArg {
     Wavefront,
 }
 
+/// The OIDN device `--denoise` runs on.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum DenoiseDevice {
+    Cpu,
+    /// NVIDIA GPU through OIDN's CUDA module
+    Cuda,
+}
+
 /// Where `--denoise` filters a stylized render (ADR-0013). Reference renders denoise the beauty.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum DenoiseStage {
@@ -116,6 +124,9 @@ struct Args {
     /// Denoise with Intel Open Image Denoise (loaded at run time; marks the output non-physical)
     #[arg(long)]
     denoise: bool,
+    /// OIDN device for `--denoise`
+    #[arg(long, value_enum, default_value_t = DenoiseDevice::Cpu)]
+    denoise_device: DenoiseDevice,
     /// What `--denoise` filters in `--mode stylized`
     #[arg(long, value_enum, default_value_t = DenoiseStage::Input)]
     denoise_stage: DenoiseStage,
@@ -312,7 +323,13 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
 
     let t = Instant::now();
     let mut denoiser = if args.denoise {
-        Some(verion_denoise::Denoiser::load().map_err(|e| e.to_string())?)
+        Some(
+            verion_denoise::Denoiser::load_on(match args.denoise_device {
+                DenoiseDevice::Cpu => verion_denoise::Device::Cpu,
+                DenoiseDevice::Cuda => verion_denoise::Device::Cuda,
+            })
+            .map_err(|e| e.to_string())?,
+        )
     } else {
         None
     };
