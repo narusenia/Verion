@@ -39,8 +39,16 @@ Mac で `blender_test.sh` と `package_blender.sh` を回して、上の変更�
 - Windows の 4.5 LTS の GUI は未確認。Mac の 4.5 LTS では確認済みなので、急がない
 - Windows の GPU 版 OIDN（CUDA）は Viewport Denoise の GUI でしか見ていない。`--denoise-device` 相当を `render-cli` で見る手順は未整備
 
+## VRAM の固定費を消した（Mac で確認が要る）
+
+Windows で 1 ビューポートが約 4.2 GB の VRAM を使っていた。内訳は、Engine が約 0.4 GB、最初のジョブの固定費が約 3 GB（画像サイズ・シーン・積分器に依存しない）。原因は、BSDF の albedo 表（GGX・sheen・粗い誘電体、合計 5888 float）が Slang の `static const` 配列で、呼び出し箇所ごとにスレッドごとのローカル変数になっていたこと（SPIR-V の関数内変数が 245 KB）。NVIDIA のドライバは、スレッドごとのローカルメモリ × 同時に動くスレッド数を確保する（RTX 3080 で約 3 GB）。
+
+直し方: 表を `lights` バッファのライト表の直後に置き、シェーダーは `albedoAt` で読む（バインディングも `params` の語数も増やさない）。`recvMask` / `emitMask` の位置は表の分だけずれる。表の元データは `crates/verion-gpu/tables/*.f32`、生成スクリプトは `scripts/gen_*_albedo.py` が `.f32` と定数だけの `.slang` を出す。
+
+結果（Windows、Vulkan）: 最初のジョブの VRAM が約 3 GB → ほぼ 0。関数内変数は 245 KB → 3 KB。画像は変更前後でビット単位まで一致（megakernel と wavefront）。副産物として、変更前は `ERROR_DEVICE_LOST` で落ちた「多重散乱オン + 粗い透過材質」が描画できるようになった。`test:gpu` の所要時間も縮んだ（例: 18.5 s → 2.1 s。他の負荷の影響があり得る参考値）。
+
+**Mac でやること**: MSL（`crates/verion-gpu-metal/shaders/*.metal`）は Windows で再生成してコミットしたが、Metal では動かしていない。`mise run check`、Metal のテスト、`blender_test.sh` を回し、画像が変わっていないこと（Metal の既存の基準との一致）を確かめてほしい。`mise run shaders:check` で SPIR-V の鮮度は見られる。
+
 ## 利用者の確認が要るもの
 
 `2026-11-06-m6-device-checks.md` の「3. 利用者の確認が要るもの」から変わらない。
-
-追加で 1 件: 1 ビューポートの VRAM が約 4.2 GB（1280×720 の `test_scene.blend`、Vulkan）と大きい。内訳は未調査。VRAM が 10 GB の機では、ブラウザなど他のアプリが使っていると、エンジンが 1 つでも足りなくなることがある。バッファの内訳を調べて削れるか見るかどうかを決めてほしい。
