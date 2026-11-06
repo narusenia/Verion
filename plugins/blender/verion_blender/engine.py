@@ -70,8 +70,11 @@ class VerionRenderEngine(bpy.types.RenderEngine):
                 self.viewport = Viewport(native.load(), self._warn)
             view = View.from_region(context.region_data, context.region)
             self.viewport.update(depsgraph, view, depsgraph.scene.verion)
-        except (native.NativeError, RuntimeError) as e:
-            self.report({"ERROR"}, str(e))
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            self.report({"ERROR"}, f"Verion: {e}")
             return
         self.tag_redraw()
 
@@ -97,6 +100,15 @@ class VerionRenderEngine(bpy.types.RenderEngine):
     # -- final render -----------------------------------------------------------------------------
 
     def render(self, depsgraph):
+        try:
+            self._render(depsgraph)
+        except Exception as e:  # an exception here takes Blender down in background mode
+            import traceback
+
+            traceback.print_exc()
+            self.report({"ERROR"}, f"Verion: {e}")
+
+    def _render(self, depsgraph):
         scene = depsgraph.scene
         settings = scene.verion
         width, height = render_size(scene)

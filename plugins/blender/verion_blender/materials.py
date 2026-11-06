@@ -4,8 +4,9 @@ Supported: Principled BSDF (color, metallic, roughness, transmission, IOR, emiss
 normal map, image textures), plus Diffuse, Glossy, Glass, Emission and a constant-factor Mix Shader
 of those. Anything else is reported through `warn` and replaced by its default value.
 """
-import json
+import os
 
+import bpy
 import numpy as np
 
 from . import images
@@ -180,11 +181,68 @@ class Converter:
         n = socket.links[0].from_node
         if n.bl_idname == "ShaderNodeTexImage" and n.image is not None:
             if n.image.source == "TILED":
-                if not quiet:
-                    self.warn(f"Material '{material.name}': UDIM tiles are not supported yet")
-                return None
+                return self.udim_index(n.image, material, quiet)
             return self.image_index(n.image)
         return None
+
+    # -- UDIM ---------------------------------------------------------------------------------------
+
+    def udim_layout(self, material):
+        """{tile number: (column, row)} and the grid size of the first UDIM image a material uses, or None.
+
+        UDIM tiles become one atlas image (tile (col, row) at that cell) and the mesh UVs are moved
+        into the atlas (`atlas_uvs`), so the renderer needs no tiled textures."""
+        if material is None or not material.use_nodes or material.node_tree is None:
+            return None
+        for n in material.node_tree.nodes:
+            if n.bl_idname == "ShaderNodeTexImage" and n.image is not None and n.image.source == "TILED":
+                nums = sorted(t.number for t in n.image.tiles)
+                cells = {num: ((num - 1001) % 10, (num - 1001) // 10) for num in nums}
+                return cells, max(c for c, _ in cells.values()) + 1, max(r for _, r in cells.values()) + 1
+        return None
+
+    def udim_index(self, image, material, quiet):
+        key = (image.name_full, "udim")
+        if key in self.images:
+            return self.images[key]
+        layout = self.udim_layout_of(image)
+        cells, cols, rows = layout
+        tiles = {}
+        for t in image.tiles:
+            path = bpy.path.abspath(image.filepath).replace("<UDIM>", str(t.number))
+            if not os.path.exists(path):
+                if not quiet:
+                    self.warn(f"Material '{material.name}': UDIM tile {t.number} is missing ({path})")
+                continue
+            im = bpy.data.images.load(path, check_existing=False)
+            try:
+                im.colorspace_settings.name = image.colorspace_settings.name
+                tiles[t.number] = images.pixels(im)
+            finally:
+                bpy.data.images.remove(im)
+        if not tiles:
+            return None
+        th = max(p.shape[0] for p in tiles.values())
+        tw = max(p.shape[1] for p in tiles.values())
+        atlas = np.zeros((rows * th, cols * tw, 4), np.float32)
+        atlas[..., 3] = 1.0
+        for num, px in tiles.items():
+            c, r = cells[num]
+            if px.shape[:2] != (th, tw):
+                yy = (np.arange(th) * px.shape[0] // th)[:, None]
+                xx = (np.arange(tw) * px.shape[1] // tw)[None, :]
+                px = px[yy, xx]
+            # `px` has its top row first; tile row r counts from the bottom of the atlas.
+            y0 = (rows - 1 - r) * th
+            atlas[y0 : y0 + th, c * tw : (c + 1) * tw] = px
+        self.images[key] = self.scene.add_image(atlas)
+        return self.images[key]
+
+    @staticmethod
+    def udim_layout_of(image):
+        nums = sorted(t.number for t in image.tiles)
+        cells = {num: ((num - 1001) % 10, (num - 1001) // 10) for num in nums}
+        return cells, max(c for c, _ in cells.values()) + 1, max(r for _, r in cells.values()) + 1
 
     def metallic_roughness(self, inputs, params, material):
         """glTF packs roughness (G) and metallic (B) in one image; build it from the two textures."""
@@ -232,3 +290,9 @@ class Converter:
 def stylization_json(material):
     """The `stylization` JSON of a material (item 8 fills this in)."""
     return None
+
+
+def atlas_uvs(uvs, cols, rows):
+    """Blender's UV space puts tile (c, r) at [c, c+1] x [r, r+1]; the atlas has the same cells scaled
+    to the unit square, so a UDIM material's UVs only need dividing by the grid size."""
+    return uvs / np.array([cols, rows], np.float32)

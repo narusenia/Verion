@@ -39,12 +39,16 @@ class Sync:
         base = ob.original.name_full
         return (base, tuple(inst.persistent_id)) if inst.is_instance else (base,)
 
-    @staticmethod
-    def mesh_key(ob):
+    def mesh_key(self, ob):
         orig = ob.original
         data = orig.data.name_full if orig.data is not None else orig.name_full
-        # Modifiers make the evaluated mesh per object even when the data is shared.
-        return (data, orig.name_full) if len(orig.modifiers) else (data,)
+        # Modifiers make the evaluated mesh per object even when the data is shared; UDIM materials
+        # move the UVs, so objects sharing the mesh with other materials get their own copy.
+        udim = tuple(
+            (m.name_full, lay[1:]) for m in (s.material for s in ob.material_slots)
+            if m is not None and (lay := self.materials.udim_layout(m)) is not None
+        )
+        return ((data, orig.name_full) if len(orig.modifiers) else (data,)) + udim
 
     # -- geometry -------------------------------------------------------------------------------
 
@@ -79,19 +83,24 @@ class Sync:
             parts = []
             for s in np.unique(slot):
                 sel = np.repeat(slot == s, 3)
-                parts.append((
-                    int(s), co, tv[sel],
-                    np.ascontiguousarray(normals[sel]),
-                    None if uvs is None else np.ascontiguousarray(uvs[sel]),
-                ))
+                part_uvs = None if uvs is None else np.ascontiguousarray(uvs[sel])
+                layout = self.materials.udim_layout(self.slot_blender_material(ob, int(s)))
+                if layout is not None and part_uvs is not None:
+                    part_uvs = materials.atlas_uvs(part_uvs, layout[1], layout[2])
+                if part_uvs is not None:
+                    part_uvs = np.stack([part_uvs[:, 0], 1.0 - part_uvs[:, 1]], axis=1)  # images are stored top row first
+                parts.append((int(s), co, tv[sel], np.ascontiguousarray(normals[sel]), part_uvs))
             return parts
         finally:
             ob.to_mesh_clear()
 
-    def slot_material(self, ob, slot):
+    @staticmethod
+    def slot_blender_material(ob, slot):
         slots = ob.material_slots
-        mat = slots[min(slot, len(slots) - 1)].material if len(slots) else None
-        return self.materials.material(mat)
+        return slots[min(slot, len(slots) - 1)].material if len(slots) else None
+
+    def slot_material(self, ob, slot):
+        return self.materials.material(self.slot_blender_material(ob, slot))
 
     def add_geometry(self, depsgraph, inst):
         ob, key = inst.object, self.instance_key(inst)
