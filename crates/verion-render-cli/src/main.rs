@@ -28,6 +28,14 @@ impl Mode {
         }
     }
 
+    fn core(self) -> verion_render::Mode {
+        match self {
+            Mode::Reference => verion_render::Mode::Reference,
+            Mode::Interactive => verion_render::Mode::Interactive,
+            Mode::Stylized => verion_render::Mode::Stylized,
+        }
+    }
+
     /// No non-physical processing in the output.
     fn physical(self) -> bool {
         match self {
@@ -359,7 +367,6 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
     let memory = Backend::memory(&ctx);
     peak = peak.max(memory.allocated);
 
-    let t = Instant::now();
     let mut denoiser = if args.denoise {
         Some(
             verion_denoise::Denoiser::load_on(match args.denoise_device {
@@ -371,73 +378,30 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
     } else {
         None
     };
-    let aux = verion_denoise::Aux {
-        albedo: Some(&aov.albedo),
-        normal: Some(&normals),
-    };
-    let (wu, hu) = (w as usize, h as usize);
-    if let Some(d) = denoiser.as_mut() {
-        let denoise_err = |e: verion_denoise::Error| format!("denoise: {e}");
-        match (args.mode, lighting.as_mut()) {
-            (Mode::Stylized, Some(l)) if args.denoise_stage == DenoiseStage::Input => l
-                .for_each_radiance(|p| d.denoise(p, aux, wu, hu))
-                .map_err(denoise_err)?,
-            (Mode::Reference | Mode::Interactive, _) => {
-                d.denoise(&mut beauty, aux, wu, hu).map_err(denoise_err)?
-            }
-            _ => {}
-        }
+    if args.mode == Mode::Stylized && scene.materials().iter().all(|m| m.stylization.is_empty()) {
+        eprintln!("warning: no material has stylization layers; the output equals Reference");
     }
-    let mut denoise_s = t.elapsed().as_secs_f64();
-
-    let t = Instant::now();
-    if let (Mode::Stylized, Some(l)) = (args.mode, &lighting) {
-        if scene.materials().iter().all(|m| m.stylization.is_empty()) {
-            eprintln!("warning: no material has stylization layers; the output equals Reference");
-        }
-        beauty = verion_stylization::stylize_image(
-            scene.materials(),
-            &verion_stylization::Frame {
-                direct_diffuse: &l.direct_diffuse,
-                indirect_diffuse: &l.indirect_diffuse,
-                specular: &l.specular,
-                transmission: &l.transmission,
-                emission: &l.emission,
-                light_u: &l.light_u,
-                light_response: &l.light_response,
-                light_s: &l.light_s,
-                light_dir: &l.light_dir,
-                light_lit: &l.light_lit,
-                normal: &normals,
-                albedo: &aov.albedo,
-                material_id: &aov.material_id,
-                images: scene.images(),
-                camera: *scene.camera(),
-                width: w as usize,
-            },
-        );
-        if let Some(d) = denoiser.as_mut()
-            && args.denoise_stage == DenoiseStage::Output
-        {
-            let t = Instant::now();
-            d.denoise(&mut beauty, aux, wu, hu)
-                .map_err(|e| format!("denoise: {e}"))?;
-            denoise_s += t.elapsed().as_secs_f64();
-        }
-        verion_stylization::outline(
-            scene.materials(),
-            &verion_stylization::PostFrame {
-                width: w as usize,
-                depth: &aov.depth,
-                normal: &normals,
-                object_id: &aov.object_id,
-                material_id: &aov.material_id,
-            },
-            &mut beauty,
-        );
-        verion_stylization::color_grade(&mut beauty, &grade);
-    }
-    let stylize_s = t.elapsed().as_secs_f64();
+    let times = verion_render::finish(
+        verion_render::PostInput {
+            scene: &scene,
+            mode: args.mode.core(),
+            width: w as usize,
+            height: h as usize,
+            normals: &normals,
+            aov: &aov,
+            grade: &grade,
+            denoise: denoiser.as_mut().map(|d| {
+                let stage = match args.denoise_stage {
+                    DenoiseStage::Input => verion_render::DenoiseStage::Input,
+                    DenoiseStage::Output => verion_render::DenoiseStage::Output,
+                };
+                (d, stage)
+            }),
+        },
+        &mut beauty,
+        lighting.as_mut(),
+    )?;
+    let (denoise_s, stylize_s) = (times.denoise_s, times.stylize_s);
 
     let space = scene.working_space();
     let frame = ExrFrame {

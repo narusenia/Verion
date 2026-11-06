@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 verion-gpu = { version = "0.0.0", path = "../verion-gpu" }
+verion-render = { version = "0.0.0", path = "../verion-render" }
 clap = { version = "4", features = ["derive"] }
 indicatif = "0.18"
 verion-render-io = { version = "0.0.0", path = "../verion-render-io" }

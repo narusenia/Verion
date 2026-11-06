@@ -1,0 +1,18 @@
+[package]
+name = "verion-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "verion"
+crate-type = ["cdylib"]
+
+[dependencies]
+# abi3-py311: one binary for Blender 4.5 LTS (Python 3.11) and 5.x (Python 3.13) (ADR-0019).
+pyo3 = { version = "0.30", features = ["abi3-py311"] }
+numpy = "0.30"
+
+[lints]
+workspace = true
