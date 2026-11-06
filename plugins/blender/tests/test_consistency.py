@@ -36,6 +36,44 @@ def build():
     sun.rotation_euler = (0.7, 0.2, 0.5)
     common.add_light("POINT", location=(2.5, -3.0, 3.5), energy=900.0, color=(1.0, 0.9, 0.8), name="lamp")
     common.set_world((0.0, 0.0, 0.0), 0.0)
+    add_leaf()
+
+
+def add_leaf():
+    """A board standing in front of the balls whose image alpha is a checker of holes: the cutout must come out
+    the same through the add-on (Principled Alpha from an image) and through glTF (alpha of the base color texture)."""
+    import bmesh
+
+    me = bpy.data.meshes.new("leaf")
+    bm = bmesh.new()
+    uv = bm.loops.layers.uv.verify()
+    verts = [bm.verts.new(p) for p in ((-1.5, 0, 0), (1.5, 0, 0), (1.5, 0, 2.2), (-1.5, 0, 2.2))]
+    face = bm.faces.new(verts)
+    for loop, uvs in zip(face.loops, ((0, 0), (1, 0), (1, 1), (0, 1))):
+        loop[uv].uv = uvs
+    bm.to_mesh(me)
+    bm.free()
+    ob = bpy.data.objects.new("leaf", me)
+    ob.location = (0, -1.8, 0)
+    bpy.context.scene.collection.objects.link(ob)
+    m = bpy.data.materials.new("leaf")
+    m.use_nodes = True
+    me.materials.append(m)
+    nt = m.node_tree
+    img = bpy.data.images.new("leaf", 64, 64, alpha=True)
+    yy, xx = np.mgrid[:64, :64]
+    px = np.ones((64, 64, 4), np.float32)
+    px[..., :3] = np.array([0.15, 0.6, 0.15])
+    px[..., 3] = ((xx // 16 + yy // 16) % 2).astype(np.float32)
+    img.pixels.foreach_set(px.ravel())
+    img.pack()
+    tex = nt.nodes.new("ShaderNodeTexImage")
+    tex.image = img
+    tex.interpolation = "Linear"
+    bsdf = nt.nodes["Principled BSDF"]
+    bsdf.inputs["Roughness"].default_value = 1.0
+    nt.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+    nt.links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
 
 
 def gltf_lights(path_gltf):
