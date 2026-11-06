@@ -44,10 +44,10 @@ M6 は Mac（Metal）で、実機確認が要る所まで終わった。状態�
 ## 3. 利用者の確認が要るもの（M6 の実装で残ったもの）
 
 - **拡張のライセンス欄**: `blender_manifest.toml` の `license` は仮置きの Apache-2.0。ADR-0004（ライセンスは未決）を外部配布の前に決める
-- **ADR-0018 の追記**: Blender のアドオンでは OIDN を同梱せず、Blender の同梱を使う（GPU 版の導線は Device の選択になった）。ADR の本文（CPU 版を同梱）と違うので、追記を確認してほしい。Blender の外（`render-cli`・Viewer）で配るときは本文どおり
-- **glTF 拡張へ仮想の主光源の上書き項目を足す**（ADR-0020）: Scene IR・Python・Blender には入れた。glTF のスキーマ（`gltf-stylization-extension.md` と JSON Schema）の変更は、確認を取ってから
-- **画像のアルファによる切り抜き**: 材質の `opacity`（定数のアルファ、Transparent BSDF）は入れた。アルファテクスチャ（葉の切り抜きなど）は、IR の画像がアルファを持たないため未対応で、警告して不透明にする。IR の画像にアルファを足し、`opacity` に掛ける作業になる。次の段階に入れるか判断してほしい
-- **ノード版の次の段階**: Verion Material ツリーは Surface・Image・Output まで。スタイライズ層（Toon Ramp、Rim Light など）のノード化は未着手。パネルと JSON の仕組みが既にあるので、パネルとノードのどちらを正にするかを決めてから着手する。専用ツリーを別アドオン（`verion-nodes`）に切り出すかも、ノード版が育ってから判断する
+- **ADR-0018 の追記**: Blender のアドオンでは OIDN を同梱せず、Blender の同梱を使う（GPU 版の導線は Device の選択になった）。ADR の本文（CPU 版を同梱）と違うが、追記は承認済み。Blender の外（`render-cli`・Viewer）で配るときは本文どおり
+- **glTF 拡張へ仮想の主光源の上書き項目を足す**（ADR-0020）: Scene IR・Python・Blender には入れた。glTF のスキーマへの追加は見送りに決めた。render-cli や Viewer で必要になったとき、シーン単位の拡張として設計する
+- **画像のアルファによる切り抜き**: 材質の `opacity`（定数のアルファ、Transparent BSDF）は入れた。アルファテクスチャ（葉の切り抜きなど）は、IR の画像がアルファを持たないため未対応で、警告して不透明にする。IR の画像にアルファを足し、`opacity` に掛ける作業になる。M7 の前に入れると決めた（`docs/implementation/M7-nrc-adaptive-integrator/README.md`）
+- **ノード版**: Stylization の層もノードにした（ツリーを紐付けた材質はノードが正、パネルは隠れる）。専用ツリーを別アドオン（`verion-nodes`）に切り出すかは、ノード版が育ってから判断する
 - **Blender の Light Linking のブロッカー**（影を落とす側の絞り込み）は未対応で警告する
 - **Octane との比較**は M6 の後に Blender 用の無料版で行う（M5 の持ち越し。REQ-ACC-002）
 - `git push` は毎回確認を取る（AGENTS.md）

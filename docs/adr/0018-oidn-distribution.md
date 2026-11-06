@@ -30,7 +30,7 @@ M4 から持ち越している判断が 2 つあった。OIDN の DLL をどう�
 - GPU 版の導線の実装と、GPU 版を足したときの動作確認（M4 では Windows の CUDA で確認済み）は、配布形態を決めるときに計画へ入れる
 - GPU 版を同梱に変える場合は、ベンダーのランタイムの再配布条件を原文で確認してから、この ADR を改める
 
-## 追記（2026-11-06、M6 の配布）
+## 追記（2026-11-06、M6 の配布。利用者が承認）
 
 Blender のアドオンでは、OIDN を同梱しない。Blender が自分の OIDN（CPU のモジュールと、その環境の GPU モジュール。macOS は Metal、Windows と Linux は CUDA・HIP など）を同梱しているので、アドオンはその場所を `verion.set_oidn_library` で渡して使う（`native.py`。探す順は `VERION_OIDN_LIB`、Blender の同梱、システムの既定）。
 
