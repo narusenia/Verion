@@ -31,6 +31,9 @@ pub struct RenderInfo {
     /// then the most any pixel took. Stopping on a pixel's own noise estimate biases it, so an
     /// adaptive frame is not physical.
     pub adaptive_threshold: Option<f32>,
+    /// ReSTIR DI was on (written as `verion/restir`). Its reuse is biased near shadow edges, so
+    /// the frame is not physical.
+    pub restir: bool,
 }
 
 /// Optional primary-ray AOVs (all the same size as the frame).
@@ -220,8 +223,9 @@ pub fn write_exr(
             (frame.info.physical
                 && untouched
                 && frame.info.denoiser.is_none()
-                && frame.info.adaptive_threshold.is_none())
-            .to_string(),
+                && frame.info.adaptive_threshold.is_none()
+                && !frame.info.restir)
+                .to_string(),
         ),
     );
     other.insert(
@@ -240,6 +244,9 @@ pub fn write_exr(
             Text::from("verion/adaptiveThreshold"),
             AttributeValue::F32(t),
         );
+    }
+    if frame.info.restir {
+        other.insert(Text::from("verion/restir"), text("di".to_string()));
     }
     if let Some(g) = frame.info.grade {
         other.insert(
@@ -309,6 +316,7 @@ mod tests {
                 grade: None,
                 denoiser: None,
                 adaptive_threshold: None,
+                restir: false,
             },
         }
     }

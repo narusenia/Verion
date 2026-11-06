@@ -77,6 +77,8 @@ pub trait Accumulation {
     fn stage_seconds(&self) -> Option<[f64; 2]>;
     /// GPU memory of the wavefront queues and path state (0 until a wavefront `accumulate`).
     fn wavefront_bytes(&self) -> usize;
+    /// GPU memory of the ReSTIR reservoirs (0 when ReSTIR is off).
+    fn restir_bytes(&self) -> usize;
     /// Mean radiance per pixel, row-major from the top-left. All zero before the first sample.
     fn mean(&self) -> Vec<[f32; 3]>;
     /// Mean lighting split, or `None` unless made with `lighting`.

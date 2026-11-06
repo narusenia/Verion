@@ -533,7 +533,7 @@ struct PathState
     int chan;      // color channel this path follows after its first dispersive hit, -1 until then
     float pathLen; // distance travelled so far, widens the texture-filter cone
     bool misPrev;  // the previous bounce was a reflection that light sampling also covers
-    bool restir;   // the first hit took its emitter sample from ReSTIR, so BSDF hits on emitters add nothing after it
+    bool restir;   // the first hit took its emitter sample from ReSTIR: light sampling then has probability 1 at the next hit
     float qPrev;   // its density
     float visLit;
     float visTotal;
@@ -613,9 +613,10 @@ static const uint RESTIR_NEIGHBOURS = 2;
 
 uint restirBase(uint pixel, uint which) { return (which * params[0] * params[1] + pixel) * 16; }
 
-// The light arriving from point `x` of emitter `e` at `p` without the BSDF: Le cos(light) / d^2.
+// The light arriving from point `x` of emitter `e` at `p` without the BSDF: Le cos(light) / d^2,
+// and the density plain light sampling has for it.
 // False when the point is behind the surface or the light faces away.
-bool restirLight(uint e, float3 x, float3 p, float3 n, out float3 wi, out float dist, out float cosi, out float3 g)
+bool restirLight(uint e, float3 x, float3 p, float3 n, out float3 wi, out float dist, out float cosi, out float3 g, out float plsa)
 {
     uint o = e * 16;
     float3 a = float3(emitters[o], emitters[o + 1], emitters[o + 2]);
@@ -628,7 +629,17 @@ bool restirLight(uint e, float3 x, float3 p, float3 n, out float3 wi, out float 
     float cosl = abs(dot(normalize(cross(b - a, c - a)), wi));
     cosi = dot(n, wi);
     g = float3(emitters[o + 9], emitters[o + 10], emitters[o + 11]) * (cosl / max(d2, 1.0e-12));
+    // Density per solid angle of drawing this point by emitted power: what the BSDF-sampled hits
+    // on emitters are weighed against, as in plain light sampling.
+    plsa = emitters[o + 13] * d2 / (max(emitters[o + 12], 1.0e-30) * max(cosl, 1.0e-5));
     return cosi > 0.0 && cosl > 1.0e-5 && d2 > 1.0e-12;
+}
+
+// Power-heuristic weight of the light-sampling strategy, which the BSDF-sampled hits on emitters complement.
+float restirMis(Surface surf, float3 woL, float3 wiL, float plsa)
+{
+    float qb = reflectivePdf(surf, woL, wiL);
+    return plsa * plsa / max(plsa * plsa + qb * qb, 1.0e-30);
 }
 
 struct RestirPick
@@ -636,7 +647,7 @@ struct RestirPick
     bool valid;   // a sample was chosen
     uint e;       // its emitter
     float3 x;     // its point
-    float W;      // contribution weight: the unshadowed contribution times W estimates the direct light
+    float W;      // contribution weight: the unshadowed, MIS-weighted contribution times W estimates the direct light
     bool occ;     // the chosen sample is hidden from the shading point
 };
 
@@ -680,10 +691,13 @@ RestirPick restirDI(uint pixel, float3 p, float3 n, float pHitT, Surface surf, f
         float area = emitters[o + 12];
         float q = area > 0.0 ? emitters[o + 13] / area : 0.0; // density per unit area
         float3 wi, g;
-        float dist, cosi;
+        float dist, cosi, plsa;
         float phat = 0.0;
-        if (q > 0.0 && restirLight(lo, x, p, n, wi, dist, cosi, g))
-            phat = lum(evalReflective(surf, woL, float3(dot(wi, T), dot(wi, B), cosi)) * g);
+        if (q > 0.0 && restirLight(lo, x, p, n, wi, dist, cosi, g, plsa))
+        {
+            float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
+            phat = lum(evalReflective(surf, woL, wiL) * g) * restirMis(surf, woL, wiL, plsa);
+        }
         float wgt = phat / max(q, 1.0e-30);
         mTotal += 1.0;
         if (phat > 0.0)
@@ -723,10 +737,13 @@ RestirPick restirDI(uint pixel, float3 p, float3 n, float pHitT, Surface surf, f
             float3 xc = float3(restir[ro + 1], restir[ro + 2], restir[ro + 3]);
             float mc = min(restir[ro + 5], cap);
             float3 wi, g;
-            float dist, cosi;
+            float dist, cosi, plsa;
             float phat = 0.0;
-            if (restirLight(ei - 1, xc, p, n, wi, dist, cosi, g))
-                phat = lum(evalReflective(surf, woL, float3(dot(wi, T), dot(wi, B), cosi)) * g);
+            if (restirLight(ei - 1, xc, p, n, wi, dist, cosi, g, plsa))
+            {
+                float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
+                phat = lum(evalReflective(surf, woL, wiL) * g) * restirMis(surf, woL, wiL, plsa);
+            }
             float wgt = phat * restir[ro + 4] * mc;
             mTotal += mc;
             if (wgt > 0.0)
@@ -750,8 +767,8 @@ RestirPick restirDI(uint pixel, float3 p, float3 n, float pHitT, Surface surf, f
     if (r.valid)
     {
         float3 wi, g;
-        float dist, cosi;
-        restirLight(selE - 1, selX, p, n, wi, dist, cosi, g);
+        float dist, cosi, plsa;
+        restirLight(selE - 1, selX, p, n, wi, dist, cosi, g, plsa);
         r.occ = occluded(p, wi, dist * (1.0 - 1.0e-3));
     }
     uint co = restirBase(pixel, cur);
@@ -917,10 +934,8 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
             {
                 uint e = (eb - 1 + hq.prim) * 16;
                 float cosl = max(abs(dot(nOut, dir)), 1.0e-4);
-                float pl = (1.0 - pEnv) * emitters[e + 13] * pHitT * pHitT / (emitters[e + 12] * cosl);
+                float pl = (st.restir && depth == 1 ? 1.0 : 1.0 - pEnv) * emitters[e + 13] * pHitT * pHitT / (emitters[e + 12] * cosl);
                 wB = st.qPrev * st.qPrev / (st.qPrev * st.qPrev + pl * pl);
-                if (st.restir && depth == 1)
-                    wB = 0.0; // the first hit's ReSTIR samples already cover every sampled emitter
             }
             st.parts.add(depth, cls, thr * le * wB);
         }
@@ -1025,7 +1040,7 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
         }
 
         // ReSTIR DI at the first hit of surfaces it suits: emitters come from reservoirs, the
-        // environment map is always light sampled, and BSDF hits on emitters add nothing after it.
+        // environment map is always light sampled, and BSDF hits on emitters are weighed against that.
         bool reDI = false;
         if (depth == 0 && params[36] != 0)
         {
@@ -1041,14 +1056,16 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
             if (pick.valid)
             {
                 float3 wi, g;
-                float dist, cosi;
-                restirLight(pick.e - 1, pick.x, p, n, wi, dist, cosi, g);
+                float dist, cosi, plsa;
+                restirLight(pick.e - 1, pick.x, p, n, wi, dist, cosi, g, plsa);
                 bool track = lightingOn;
                 if (!pick.occ || track)
                 {
-                    Lobes l = evalLobes(surf, woL, float3(dot(wi, T), dot(wi, B), cosi));
-                    float3 cd = thr * l.diffuse * g * pick.W;
-                    float3 cs = thr * l.specular * g * pick.W;
+                    float3 wiL = float3(dot(wi, T), dot(wi, B), cosi);
+                    float wl = restirMis(surf, woL, wiL, plsa);
+                    Lobes l = evalLobes(surf, woL, wiL);
+                    float3 cd = thr * l.diffuse * g * (wl * pick.W);
+                    float3 cs = thr * l.specular * g * (wl * pick.W);
                     if (!pick.occ)
                         st.parts.addLight(depth, cls, cd + cs, cd, cs);
                     if (track)

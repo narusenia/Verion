@@ -485,6 +485,10 @@ impl verion_gpu::Accumulation for Accumulation {
         self.samples
     }
 
+    fn restir_bytes(&self) -> usize {
+        self.restir.as_ref().map_or(0, |r| r.0.length())
+    }
+
     /// GPU seconds spent in the wavefront's extend (closest hit, with the dispatch sizing) and shade
     /// (shading with its shadow rays) stages; `None` unless `Renderer::set_stage_timing` was on.
     fn stage_seconds(&self) -> Option<[f64; 2]> {

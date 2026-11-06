@@ -1,16 +1,19 @@
 //! `render-cli scene.gltf -o out.exr`: headless render (REQ-VIEW-001).
-//! `--mode reference` (default) is physical only (REQ-CORE-006); `--mode stylized` adds the Stylization Pass.
+//! `--mode reference` (default) is physical only (REQ-CORE-006); `--mode stylized` adds the Stylization Pass;
+//! `--mode interactive` turns on ReSTIR for a faster clean image (REQ-CORE-007).
 
 use std::{fs, path::PathBuf, time::Instant};
 
 use clap::Parser;
 
-/// Render mode. AI approximation (NRC, ReSTIR) does not exist yet; add variants here when it
-/// lands and set `physical` accordingly.
+/// Render mode. Approximations that bias the image (ReSTIR now, NRC later) live outside Reference.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
     /// Physical path tracing only (REQ-CORE-006).
     Reference,
+    /// Path tracing with ReSTIR DI: a faster route to a clean image in scenes with many emitters.
+    /// Not physical (the reuse is biased); no Stylization Pass (ADR-0016).
+    Interactive,
     /// Stylization Pass on the primary hit (REQ-STY-007). Not physical; needs the lighting AOVs,
     /// so it costs the extra GPU memory of `--lighting-aovs`.
     Stylized,
@@ -20,6 +23,7 @@ impl Mode {
     fn name(self) -> &'static str {
         match self {
             Mode::Reference => "reference",
+            Mode::Interactive => "interactive",
             Mode::Stylized => "stylized",
         }
     }
@@ -28,7 +32,7 @@ impl Mode {
     fn physical(self) -> bool {
         match self {
             Mode::Reference => true,
-            Mode::Stylized => false,
+            Mode::Interactive | Mode::Stylized => false,
         }
     }
 }
@@ -145,6 +149,19 @@ struct Args {
     /// Samples every pixel takes before `--adaptive` may stop it
     #[arg(long, default_value_t = 16)]
     adaptive_min_spp: u32,
+    /// ReSTIR DI: the first hit's emissive-triangle light sample comes from reservoirs that reuse
+    /// the previous samples of the pixel and its neighbours. Faster to a clean image in scenes with
+    /// many emitters; the reuse is biased, so the output is marked non-physical. Always on in
+    /// `--mode interactive`, rejected in reference mode. Sharp, transmissive and lens-blurred
+    /// surfaces use plain light sampling
+    #[arg(long)]
+    restir: bool,
+    /// Light samples drawn per pixel and frame before ReSTIR's reuse
+    #[arg(long, default_value_t = 4)]
+    restir_candidates: u32,
+    /// Most samples a reused ReSTIR reservoir counts for
+    #[arg(long, default_value_t = 20)]
+    restir_history: u32,
     /// Write timing metrics as JSON
     #[arg(long)]
     metrics: Option<PathBuf>,
@@ -227,7 +244,7 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
     backend: &str,
 ) -> Result<(), String> {
     use indicatif::{ProgressBar, ProgressStyle};
-    use verion_gpu::{Accumulation as _, Adaptive, Integrator};
+    use verion_gpu::{Accumulation as _, Adaptive, Integrator, Restir};
     use verion_render_io::{
         ExrAovs, ExrFrame, ExrLighting, GradeInfo, RenderInfo, load_gltf_in, load_hdri, write_exr,
     };
@@ -237,6 +254,13 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
         return Err("width, height and spp must be at least 1".into());
     }
     let grade = args.color_grade()?;
+    let restir = args.restir || args.mode == Mode::Interactive;
+    if restir && args.mode.physical() {
+        return Err("--restir is not allowed in reference mode (its reuse is biased)".into());
+    }
+    if restir && (args.restir_candidates == 0 || args.restir_history == 0) {
+        return Err("--restir-candidates and --restir-history must be at least 1".into());
+    }
     if args.adaptive.is_some_and(|t| !(t.is_finite() && t >= 0.0)) {
         return Err("--adaptive takes a threshold of 0 or more".into());
     }
@@ -268,6 +292,10 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
         IntegratorArg::Wavefront => Integrator::Wavefront,
     });
     renderer.set_stage_timing(args.stage_timing);
+    renderer.set_restir(restir.then_some(Restir {
+        candidates: args.restir_candidates,
+        history: args.restir_history,
+    }));
     renderer.set_adaptive(args.adaptive.map(|threshold| Adaptive {
         threshold,
         min_spp: args.adaptive_min_spp,
@@ -298,6 +326,7 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
     bar.finish_and_clear();
     let gpu_s = acc.gpu_seconds();
     let wavefront_bytes = acc.wavefront_bytes();
+    let restir_bytes = acc.restir_bytes();
     peak = peak.max(Backend::memory(&ctx).allocated);
     let stages = acc.stage_seconds().map_or(String::new(), |[e, s]| {
         format!("\"extend_s\":{e},\"shade_s\":{s},")
@@ -344,7 +373,9 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
             (Mode::Stylized, Some(l)) if args.denoise_stage == DenoiseStage::Input => l
                 .for_each_radiance(|p| d.denoise(p, aux, wu, hu))
                 .map_err(denoise_err)?,
-            (Mode::Reference, _) => d.denoise(&mut beauty, aux, wu, hu).map_err(denoise_err)?,
+            (Mode::Reference | Mode::Interactive, _) => {
+                d.denoise(&mut beauty, aux, wu, hu).map_err(denoise_err)?
+            }
             _ => {}
         }
     }
@@ -432,6 +463,7 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
             }),
             denoiser: args.denoise.then_some("oidn"),
             adaptive_threshold: args.adaptive,
+            restir,
         },
     };
     let t = Instant::now();
@@ -445,7 +477,7 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
 
     if let Some(path) = &args.metrics {
         let json = format!(
-            "{{\"backend\":{},\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\"integrator\":\"{:?}\",\"adaptive\":{},\"mean_spp\":{mean_spp},\"wavefront_bytes\":{wavefront_bytes},\"gpu_budget_bytes\":{},\"gpu_peak_bytes\":{peak},\"upload_bytes\":{},\
+            "{{\"backend\":{},\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\"integrator\":\"{:?}\",\"adaptive\":{},\"restir\":{},\"mean_spp\":{mean_spp},\"wavefront_bytes\":{wavefront_bytes},\"restir_bytes\":{restir_bytes},\"gpu_budget_bytes\":{},\"gpu_peak_bytes\":{peak},\"upload_bytes\":{},\
 \"load_s\":{load_s},\"build_s\":{build_s},\"render_s\":{render_s},\"gpu_s\":{gpu_s},{stages}\"aov_s\":{aov_s},\"denoise_s\":{denoise_s},\"stylize_s\":{stylize_s},\
 \"write_s\":{write_s},\"total_s\":{}}}\n",
             json_str(backend),
@@ -455,6 +487,7 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
             json_str(args.mode.name()),
             args.integrator,
             args.adaptive.map_or("null".into(), |t| t.to_string()),
+            restir,
             memory.budget,
             memory.uploaded,
             total.elapsed().as_secs_f64(),
