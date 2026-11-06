@@ -15,6 +15,18 @@ pub const MAX_DEPTH: u32 = 8;
 pub const PARAM_WORDS: usize = 43;
 pub const MATERIAL_WORDS: usize = 23;
 pub const LIGHT_WORDS: usize = 16;
+
+/// The directional-albedo tables of the BSDF (GGX, sheen, rough dielectric), little-endian float32, in the order
+/// `pt_core.slang` expects. Written by `scripts/gen_*_albedo.py`. They live in the `lights` buffer, not in the shader:
+/// a `static const` array in a shader becomes per-thread local memory.
+const ALBEDO_TABLES: [&[u8]; 3] = [
+    include_bytes!("../tables/ggx_albedo.f32"),
+    include_bytes!("../tables/sheen_albedo.f32"),
+    include_bytes!("../tables/dielectric_albedo.f32"),
+];
+
+/// Words of the albedo tables in `lights` (`ALBEDO_WORDS` in pt_core.slang).
+pub const ALBEDO_WORDS: usize = 1024 + 256 + 4608;
 /// Words per emissive triangle; must match `shaders/include/pt_core.slang`.
 pub const EMITTER_WORDS: usize = 16;
 /// Words per record in the instance table; must match `shaders/normals.slang`.
@@ -460,7 +472,7 @@ pub fn pack_materials(scene: &Scene, textures: bool) -> Result<Materials, String
 
 /// The next-event table of delta lights and the uniform sky.
 pub struct LightTable {
-    /// `LIGHT_WORDS` per light (`count` of them), then a light-link mask pair (receive, emit) per instance, then the IES
+    /// `LIGHT_WORDS` per light (`count` of them), then the albedo tables (`ALBEDO_WORDS`), then a light-link mask pair (receive, emit) per instance, then the IES
     /// profiles: nine frame floats and the table each, at the offsets the lights name in word 15.
     pub lights: Vec<u32>,
     /// Lights in the table, the virtual main light included.
@@ -650,6 +662,13 @@ pub fn pack_lights(scene: &Scene) -> LightTable {
         lights.extend(words);
     }
     let count = lights.len() / LIGHT_WORDS;
+    // The albedo tables follow the light table (`albedoAt` in pt_core.slang reads them from here).
+    lights.extend(
+        ALBEDO_TABLES
+            .iter()
+            .flat_map(|t| t.as_chunks::<4>().0)
+            .map(|b| u32::from_le_bytes(*b)),
+    );
     // Per instance: the lights that shine on it, and the group it emits as when it is an area light.
     for i in 0..scene.instances().len() {
         lights.push(scene.instance_light_mask(i));
@@ -866,6 +885,24 @@ mod tests {
         let image = s.add_image(Image::new(w as u32, h as u32, pixels).unwrap());
         s.add_light(Light::EnvironmentMap { image, scale: 1.0 });
         s
+    }
+
+    #[test]
+    fn albedo_tables_follow_the_light_table_and_precede_the_masks() {
+        let mut s = Scene::new();
+        s.add_light(Light::Point {
+            color: [1.0; 3],
+            intensity: 1.0,
+            position: [0.0; 3],
+        });
+        let t = pack_lights(&s);
+        let at = t.count * LIGHT_WORDS;
+        assert_eq!(
+            ALBEDO_TABLES.iter().map(|b| b.len() / 4).sum::<usize>(),
+            ALBEDO_WORDS
+        );
+        assert_eq!(t.lights.len(), at + ALBEDO_WORDS);
+        assert_eq!(f32::from_bits(t.lights[at]), 1.0); // GGX albedo at cos = 0, alpha = 0
     }
 
     #[test]

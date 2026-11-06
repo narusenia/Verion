@@ -18,8 +18,8 @@ StructuredBuffer<float> materials;  // 23 words: base color rgb, emission rgb, m
                                     // clearcoat, clearcoat roughness, sheen roughness, sheen color rgb, dispersion
 StructuredBuffer<uint> lights;      // 16 words: kind (0 point, 1 directional, 2 spot), color rgb, intensity, position or travel direction xyz,
                                     // spot axis xyz, spot falloff scale, spot falloff offset, 3 pad (floats as bits)
-                                    // (14 light-link mask, 15 IES profile offset + 1 or 0). After the light table: one link mask per
-                                    // instance, then the IES profiles (see `iesFactor`).
+                                    // (14 light-link mask, 15 IES profile offset + 1 or 0). After the light table: the albedo tables
+                                    // (`albedoAt`), then one link mask per instance, then the IES profiles (see `iesFactor`).
 StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 aperture radius, 4 focus distance (floats as bits),
                                     // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle, 28 lighting AOV enable, 29 multiple-scattering compensation enable,
                                     // 30 / 31 wavefront depth and path count, 32 adaptive sampling enable, 33 adaptive threshold
@@ -182,8 +182,17 @@ float lum(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
 
 // Light linking: per instance, after the light table, a pair of masks: the lights that shine on it and the
 // group it emits as when it is an area light. A light reaches an instance when their masks share a bit.
-uint recvMask(uint inst) { return lights[params[5] * 16 + 2 * inst]; }
-uint emitMask(uint inst) { return lights[params[5] * 16 + 2 * inst + 1]; }
+// The albedo tables (crates/verion-gpu/tables) follow the light table in `lights`, then the link masks and IES profiles.
+// They are read from the buffer, not declared as `static const` arrays: those become per-thread local memory, and the
+// driver reserves it for every thread that can be resident (about 3 GB on an RTX 3080).
+static const uint ALBEDO_GGX = 0;
+static const uint ALBEDO_SHEEN = GGX_ALBEDO_N * GGX_ALBEDO_N;
+static const uint ALBEDO_DIEL = ALBEDO_SHEEN + SHEEN_ALBEDO_N * SHEEN_ALBEDO_N;
+static const uint ALBEDO_WORDS = ALBEDO_DIEL + DIEL_ALBEDO_N * DIEL_ALBEDO_N * DIEL_ALBEDO_N_IOR * 2;
+float albedoAt(uint i) { return asfloat(lights[params[5] * 16 + i]); }
+
+uint recvMask(uint inst) { return lights[params[5] * 16 + ALBEDO_WORDS + 2 * inst]; }
+uint emitMask(uint inst) { return lights[params[5] * 16 + ALBEDO_WORDS + 2 * inst + 1]; }
 
 // IES profile at word offset `po` of `lights`: nine frame floats (rows x, y, z of the light's world
 // frame), then 361 horizontal rows of 181 vertical samples at one degree. `d` points from the light.
@@ -380,8 +389,8 @@ float ggxAlbedo(float cosO, float alpha)
     uint y0 = min(uint(y), GGX_ALBEDO_N - 2);
     float fx = x - x0;
     float fy = y - y0;
-    float a = lerp(GGX_ALBEDO[y0 * GGX_ALBEDO_N + x0], GGX_ALBEDO[y0 * GGX_ALBEDO_N + x0 + 1], fx);
-    float b = lerp(GGX_ALBEDO[(y0 + 1) * GGX_ALBEDO_N + x0], GGX_ALBEDO[(y0 + 1) * GGX_ALBEDO_N + x0 + 1], fx);
+    float a = lerp(albedoAt(ALBEDO_GGX + y0 * GGX_ALBEDO_N + x0), albedoAt(ALBEDO_GGX + y0 * GGX_ALBEDO_N + x0 + 1), fx);
+    float b = lerp(albedoAt(ALBEDO_GGX + (y0 + 1) * GGX_ALBEDO_N + x0), albedoAt(ALBEDO_GGX + (y0 + 1) * GGX_ALBEDO_N + x0 + 1), fx);
     return lerp(a, b, fy);
 }
 
@@ -414,8 +423,8 @@ float dielectricAlbedo(float cosO, float rough, float ior, bool outside)
     for (uint k = 0; k < 2; k++)
     {
         uint o = base + ((z0 + k) * DIEL_ALBEDO_N + y0) * DIEL_ALBEDO_N + x0;
-        float a = lerp(DIEL_ALBEDO[o], DIEL_ALBEDO[o + 1], fx);
-        float b = lerp(DIEL_ALBEDO[o + DIEL_ALBEDO_N], DIEL_ALBEDO[o + DIEL_ALBEDO_N + 1], fx);
+        float a = lerp(albedoAt(ALBEDO_DIEL + o), albedoAt(ALBEDO_DIEL + o + 1), fx);
+        float b = lerp(albedoAt(ALBEDO_DIEL + o + DIEL_ALBEDO_N), albedoAt(ALBEDO_DIEL + o + DIEL_ALBEDO_N + 1), fx);
         c[k] = lerp(a, b, fy);
     }
     return lerp(c[0], c[1], fz);
@@ -430,8 +439,8 @@ float sheenAlbedo(float cosO, float r)
     uint y0 = min(uint(y), SHEEN_ALBEDO_N - 2);
     float fx = x - x0;
     float fy = y - y0;
-    float a = lerp(SHEEN_ALBEDO[y0 * SHEEN_ALBEDO_N + x0], SHEEN_ALBEDO[y0 * SHEEN_ALBEDO_N + x0 + 1], fx);
-    float b = lerp(SHEEN_ALBEDO[(y0 + 1) * SHEEN_ALBEDO_N + x0], SHEEN_ALBEDO[(y0 + 1) * SHEEN_ALBEDO_N + x0 + 1], fx);
+    float a = lerp(albedoAt(ALBEDO_SHEEN + y0 * SHEEN_ALBEDO_N + x0), albedoAt(ALBEDO_SHEEN + y0 * SHEEN_ALBEDO_N + x0 + 1), fx);
+    float b = lerp(albedoAt(ALBEDO_SHEEN + (y0 + 1) * SHEEN_ALBEDO_N + x0), albedoAt(ALBEDO_SHEEN + (y0 + 1) * SHEEN_ALBEDO_N + x0 + 1), fx);
     return lerp(a, b, fy);
 }
 
