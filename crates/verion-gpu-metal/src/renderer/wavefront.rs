@@ -16,7 +16,7 @@ use verion_gpu::{
     wavefront::{GROUP, Sizes},
 };
 
-use super::{Accumulation, CommandBuffer, Encoder, Obj, Renderer, pipeline};
+use super::{Accumulation, CommandBuffer, Encoder, Obj, Renderer, pipeline, pipeline_with};
 use crate::{Error, MetalContext};
 
 const ARGS_MSL: &str = include_str!("../../shaders/wf_args.metal");
@@ -32,12 +32,12 @@ pub(super) struct Pipelines {
 }
 
 impl Pipelines {
-    pub(super) fn new(ctx: &MetalContext) -> Result<Self, Error> {
+    pub(super) fn new(ctx: &MetalContext, restir: bool) -> Result<Self, Error> {
         Ok(Self {
             args: pipeline(ctx, ARGS_MSL, "wf_args")?,
-            extend: pipeline(ctx, EXTEND_MSL, "wf_extend")?,
-            shade: pipeline(ctx, SHADE_MSL, "wf_shade")?,
-            select: pipeline(ctx, SELECT_MSL, "wf_select")?,
+            extend: pipeline_with(ctx, EXTEND_MSL, "wf_extend", restir)?,
+            shade: pipeline_with(ctx, SHADE_MSL, "wf_shade", restir)?,
+            select: pipeline_with(ctx, SELECT_MSL, "wf_select", restir)?,
         })
     }
 }
@@ -96,14 +96,16 @@ impl Renderer {
         params: &mut [u32; PARAM_WORDS],
         samples: u32,
     ) -> Result<(), Error> {
-        let p = self.wavefront.get_or_init(|| Pipelines::new(&self.ctx));
+        let restir = self.restir.is_some();
+        let p =
+            self.wavefront[usize::from(restir)].get_or_init(|| Pipelines::new(&self.ctx, restir));
         let p = p.as_ref().map_err(Clone::clone)?;
         let timed = self.stage_timing;
         let (w, h) = (acc.width as usize, acc.height as usize);
         params[31] = (w * h) as u32;
         // (stage, command buffer) in submission order; stage 0 is extend (with its args), 1 shade.
         let mut done: Vec<(usize, CommandBuffer)> = Vec::new();
-        let (mut cb, mut enc) = self.open_encoder(acc)?;
+        let (mut cb, mut enc) = self.open_encoder(acc, &p.extend)?;
         let mut stage_of_cb = 0;
         let b = acc
             .wavefront
@@ -123,7 +125,7 @@ impl Renderer {
                         enc.endEncoding();
                         cb.commit();
                         done.push((stage_of_cb, cb));
-                        (cb, enc) = self.open_encoder(acc)?;
+                        (cb, enc) = self.open_encoder(acc, &p.extend)?;
                     }
                     stage_of_cb = stage;
                     bind(&enc, b, params, d);

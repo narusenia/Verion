@@ -8,7 +8,8 @@ use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
 use objc2_metal::{
     MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder,
-    MTLComputePipelineState, MTLDevice, MTLLibrary, MTLResourceOptions, MTLResourceUsage, MTLSize,
+    MTLComputePipelineState, MTLDataType, MTLDevice, MTLFunctionConstantValues, MTLLibrary,
+    MTLResourceOptions, MTLResourceUsage, MTLSize,
 };
 use verion_scene::{Camera, Changes, Scene};
 
@@ -56,13 +57,39 @@ fn pipeline(
     msl: &str,
     entry: &str,
 ) -> Result<Obj<dyn MTLComputePipelineState>, Error> {
+    pipeline_with(ctx, msl, entry, true)
+}
+
+/// `restir_compiled` is the `restirCompiled` specialization constant (function constant 0) of the
+/// kernels that carry ReSTIR: false compiles it out, so a renderer without it pays nothing for its
+/// registers. The other kernels do not declare it and ignore the value.
+fn pipeline_with(
+    ctx: &MetalContext,
+    msl: &str,
+    entry: &str,
+    restir_compiled: bool,
+) -> Result<Obj<dyn MTLComputePipelineState>, Error> {
     let lib = ctx
         .device
         .newLibraryWithSource_options_error(&NSString::from_str(msl), None)
         .map_err(|e| Error::Shader(e.to_string()))?;
-    let func = lib
-        .newFunctionWithName(&NSString::from_str(entry))
-        .ok_or_else(|| Error::Shader(format!("entry point `{entry}` not found")))?;
+    let name = NSString::from_str(entry);
+    let func = if msl.contains("function_constant(0)") {
+        let values = MTLFunctionConstantValues::new();
+        // SAFETY: the pointer is valid for the one byte a Metal `bool` takes, and Metal copies it.
+        unsafe {
+            values.setConstantValue_type_atIndex(
+                NonNull::from(&restir_compiled).cast(),
+                MTLDataType::Bool,
+                0,
+            );
+        }
+        lib.newFunctionWithName_constantValues_error(&name, &values)
+            .map_err(|e| Error::Shader(e.to_string()))?
+    } else {
+        lib.newFunctionWithName(&name)
+            .ok_or_else(|| Error::Shader(format!("entry point `{entry}` not found")))?
+    };
     ctx.device
         .newComputePipelineStateWithFunction_error(&func)
         .map_err(|e| Error::Shader(e.to_string()))
@@ -101,7 +128,8 @@ pub struct Renderer {
     multiscatter: bool,
     normals: Obj<dyn MTLComputePipelineState>,
     aov: Obj<dyn MTLComputePipelineState>,
-    pathtrace: Obj<dyn MTLComputePipelineState>,
+    /// Indexed by whether ReSTIR is compiled in (`restirCompiled`); compiled on first use.
+    pathtrace: [OnceCell<Result<Obj<dyn MTLComputePipelineState>, Error>>; 2],
     /// Bound in place of the lighting buffer when an accumulation has none.
     no_lighting: Obj<dyn MTLBuffer>,
     integrator: Integrator,
@@ -110,7 +138,7 @@ pub struct Renderer {
     adaptive: Option<Adaptive>,
     restir: Option<Restir>,
     /// Compiled on first use, so megakernel-only users skip the compile.
-    wavefront: OnceCell<Result<wavefront::Pipelines, Error>>,
+    wavefront: [OnceCell<Result<wavefront::Pipelines, Error>>; 2],
 }
 
 impl Renderer {
@@ -141,14 +169,14 @@ impl Renderer {
             Some(old) => (
                 old.normals.clone(),
                 old.aov.clone(),
-                old.pathtrace.clone(),
+                std::mem::take(&mut old.pathtrace),
                 std::mem::take(&mut old.wavefront),
             ),
             None => (
                 pipeline(ctx, NORMALS_MSL, "normals")?,
                 pipeline(ctx, AOV_MSL, "aov")?,
-                pipeline(ctx, PATHTRACE_MSL, "pathtrace")?,
-                OnceCell::new(),
+                Default::default(),
+                Default::default(),
             ),
         };
 
@@ -358,7 +386,11 @@ impl Accumulation {
 
 impl Renderer {
     /// A command buffer and a compute encoder with the path tracer's bindings 0..19 set.
-    fn open_encoder(&self, acc: &Accumulation) -> Result<(CommandBuffer, Encoder), Error> {
+    fn open_encoder(
+        &self,
+        acc: &Accumulation,
+        pipe: &Obj<dyn MTLComputePipelineState>,
+    ) -> Result<(CommandBuffer, Encoder), Error> {
         let cb = self
             .ctx
             .queue
@@ -367,7 +399,7 @@ impl Renderer {
         let enc = cb
             .computeCommandEncoder()
             .ok_or(Error::Resource("compute encoder"))?;
-        enc.setComputePipelineState(&self.pathtrace);
+        enc.setComputePipelineState(pipe);
         for blas in self.tlas.blases() {
             enc.useResource_usage(ProtocolObject::from_ref(&**blas), MTLResourceUsage::Read);
         }
@@ -802,7 +834,10 @@ impl RayTracingBackend for Renderer {
         if wavefront {
             self.run_wavefront(acc, &mut params, samples)?;
         } else {
-            let (cb, enc) = self.open_encoder(acc)?;
+            let variant = usize::from(self.restir.is_some());
+            let pipe = self.pathtrace[variant]
+                .get_or_init(|| pipeline_with(&self.ctx, PATHTRACE_MSL, "pathtrace", variant == 1));
+            let (cb, enc) = self.open_encoder(acc, pipe.as_ref().map_err(Clone::clone)?)?;
             // SAFETY: `open_encoder` set bindings 0..18.
             unsafe { self.encode_megakernel(&enc, acc, &mut params, samples) };
             enc.endEncoding();
