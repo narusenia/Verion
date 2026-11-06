@@ -11,14 +11,29 @@
 | 2 | `pack` を表ごとの関数に分け、変更種別から更新範囲を決める計画（`UpdatePlan`）を `verion-gpu` に置く。`pack()` の出力は変えない | REQ-ACC-003 | 済（`pack_geometry`・`pack_emitters`・`pack_instances`・`pack_materials`・`pack_lights`、`UpdatePlan`） |
 | 3 | `RayTracingBackend::update`。Metal: 材質・ライト・Emitter・Instance 表の差し替え、変形メッシュだけの BLAS 再構築、TLAS 再構築。形状の追加は表とAS を作り直すが、パイプラインは使い回す | REQ-ACC-003 | 済（`tests/update.rs`: 更新後の画像が完全再構築とビット一致。材質・ライトは BLAS / TLAS を作らず、Transform は TLAS だけ、変形は該当 BLAS と TLAS だけ） |
 | 4 | Vulkan の `update`（同じ計画に従う） | REQ-ACC-003 / REQ-GPU-006 | Windows 待ち（Mac では Vulkan をビルドできないため、Windows 機で実装と確認を行う） |
-| 5 | 検証: 更新後の画像が完全再構築と一致する。Cornell Box の壁の色を変えて反対側の面の間接光まで変わること（遠距離伝播）、更新で BLAS を作り直さないことを数える | REQ-ACC-003 | 未 |
-| 6 | Viewer の IPR: 材質・ライト・Instance の移動の編集を `update` で反映し、First Clean Preview（編集から N spp まで）を計測して記録する | REQ-VIEW-003 | 未 |
+| 5 | 検証: 更新後の画像が完全再構築と一致する。Cornell Box の壁の色を変えて反対側の面の間接光まで変わること（遠距離伝播）、更新で BLAS を作り直さないことを数える | REQ-ACC-003 | 済（`tests/update.rs`。壁の色を変えた更新と再構築の画像がビット一致し、編集していない面の画像が変わることも確かめる。BLAS と TLAS の再構築数は `UpdateReport` で数える） |
+| 6 | Viewer の IPR: 材質・ライト・Instance の移動の編集を `update` で反映し、First Clean Preview（編集から N spp まで）を計測して記録する | REQ-VIEW-003 | 済（Viewer は `rebuild` をやめて `update` を呼び、Instances 欄で位置を動かせる。計測は下の表） |
 | 7 | ReSTIR DI（Emitter 三角形と環境マップ）: 初期候補の RIS、Temporal / Spatial 再利用、最終シェードで可視性を再確認。鏡面・屈折・被写界深度・Lighting AOV では Fallback し、Reference では無効 | REQ-ACC-002 | 未 |
 | 8 | ReSTIR DI の Vulkan 版（同じ Slang を使う） | REQ-ACC-002 / REQ-GPU-006 | Windows 待ち（Slang と共通のホスト側は Mac で済ませ、Vulkan のバインドと実機確認を Windows で行う） |
 | 9 | 多光源の評価シーンと、同画質到達時間の実測（`scripts/eval_restir.sh`） | REQ-ACC-002 / REQ-PERF-001 | 未 |
 | 10 | ReSTIR GI（1 回目の間接光）と検証サンプル | REQ-ACC-002 | 未 |
 | 11 | ReSTIR PT の扱いの決定（ADR-0016 に記録） | REQ-ACC-002 | 未 |
 | 12 | metrics に Reservoir の時間とメモリ、出力メタデータに ReSTIR の有効・非物理の印 | REQ-GPU-004 / REQ-CORE | 未 |
+
+## 差分更新の計測（2026-11-06、Apple M4 Pro、`update_bench`、512×384 の 4 spp）
+
+`cargo run --release -p verion-gpu-metal --example update_bench -- シーン.gltf 4`
+
+| シーン | 編集 | 更新 s | 作り直した BLAS / TLAS | 編集から 4 spp まで s | 全体の再構築 s |
+|---|---|---|---|---|---|
+| scale（500 万三角形・4K×4） | 材質 | 0.0000 | 0 / なし | 0.123 | 0.94 |
+| | ライト | 0.0000 | 0 / なし | 0.001 | |
+| | Transform | 0.0003 | 0 / あり | 0.002 | |
+| | 変形（500 万三角形の 1 メッシュ） | 0.19 | 1 / あり | 0.003 | |
+| showcase（5.5 万三角形） | 材質 | 0.0000 | 0 / なし | 0.014 | 0.014 |
+| | 変形 | 0.0023 | 1 / あり | 0.010 | |
+
+材質の更新は、参照する画像が変わらない限りミップ連鎖を作り直さない。最初の実装は 4K テクスチャを毎回作り直して 0.48 s かかっていた。
 
 ## 決めてあること
 

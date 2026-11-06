@@ -195,7 +195,6 @@ struct Stats {
 }
 
 pub struct App {
-    ctx: <Backend as RayTracingBackend>::Context,
     scene: Scene,
     renderer: Backend,
     acc: Accumulation,
@@ -241,6 +240,7 @@ pub struct App {
     chunk: f32,
     last_upload: Instant,
     material: usize,
+    instance: usize,
     original_materials: Vec<Material>,
     clipboard: Clipboard,
     /// A window size waiting to settle before the render follows it.
@@ -307,7 +307,6 @@ impl App {
             images: scene.images().len(),
         };
         Ok(Self {
-            ctx,
             home: *scene.camera(),
             bounds: Self::scene_bounds(&scene),
             last_move: Instant::now() - MOTION_SETTLE,
@@ -343,6 +342,7 @@ impl App {
             hover: None,
             orbit,
             material: 0,
+            instance: 0,
             clipboard: None,
             pending_size: None,
             stats,
@@ -390,19 +390,16 @@ impl App {
         }
     }
 
-    /// shortcut: a material or light edit rebuilds the whole renderer (acceleration structures
-    /// included); upgrade to a materials / lights buffer update when a scene is big enough to feel it.
-    fn rebuild(&mut self) {
-        match Backend::new(&self.ctx, &self.scene) {
-            Ok(mut r) => {
-                r.set_multiscatter(self.multiscatter);
-                r.set_integrator(self.integrator);
-                r.set_adaptive(self.adaptive_setting());
-                r.set_camera(self.scene.camera());
-                self.renderer = r;
-                self.refresh_aovs();
-            }
-            Err(e) => eprintln!("renderer: {e:?}"),
+    /// Sends the scene edits made since the last call to the renderer, which redoes only what they
+    /// touch (REQ-ACC-003), and starts the accumulation over (IPR, REQ-VIEW-003).
+    fn apply_edits(&mut self) {
+        let changes = self.scene.take_changes();
+        if changes.is_empty() {
+            return;
+        }
+        match self.renderer.update(&self.scene, &changes) {
+            Ok(_) => self.refresh_aovs(),
+            Err(e) => eprintln!("update: {e:?}"),
         }
     }
 
@@ -882,6 +879,9 @@ impl App {
                     section(ui, ICON_LIGHTBULB, "Lights", false, |ui| {
                         self.lights_section(ui)
                     });
+                    section(ui, ICON_LAYERS, "Instances", false, |ui| {
+                        self.instances_section(ui)
+                    });
                     section(ui, ICON_LAYERS, "Scene", false, |ui| self.scene_section(ui));
                 });
             });
@@ -1062,10 +1062,41 @@ impl App {
             let physical = edited.base != current.base;
             self.scene.set_material(id, edited);
             if physical {
-                self.rebuild();
+                self.apply_edits();
             } else {
                 // Stylization is a post pass: no new samples are needed.
                 self.dirty = true;
+            }
+        }
+    }
+
+    /// Moves an instance: only the top-level structure is rebuilt, not the meshes' own.
+    fn instances_section(&mut self, ui: &mut egui::Ui) {
+        let n = self.scene.instances().len();
+        self.instance = self.instance.min(n.saturating_sub(1));
+        egui::ComboBox::from_id_salt("instance")
+            .selected_text(format!("instance {}", self.instance))
+            .show_ui(ui, |ui| {
+                for k in 0..n {
+                    ui.selectable_value(&mut self.instance, k, format!("instance {k}"));
+                }
+            });
+        let Some(id) = self.scene.instance_id(self.instance) else {
+            return;
+        };
+        let mut inst = self.scene.instances()[self.instance];
+        let mut at = [
+            inst.transform[0][3],
+            inst.transform[1][3],
+            inst.transform[2][3],
+        ];
+        let step = self.bounds.map_or(0.05, |b| b.1 * 0.01);
+        if widgets::vec3(ui, &mut at, "position", step) {
+            for (row, v) in inst.transform.iter_mut().zip(at) {
+                row[3] = v;
+            }
+            if self.scene.set_instance(id, inst).is_ok() {
+                self.apply_edits();
             }
         }
     }
@@ -1141,7 +1172,7 @@ impl App {
             }
         }
         if changed {
-            self.rebuild();
+            self.apply_edits();
         }
     }
 

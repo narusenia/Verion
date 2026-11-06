@@ -285,6 +285,11 @@ impl Scene {
         Ok(())
     }
 
+    /// The id of the `index`-th instance, for tools that list instances by position.
+    pub fn instance_id(&self, index: usize) -> Option<InstanceId> {
+        (index < self.instances.len()).then_some(InstanceId(index as u32))
+    }
+
     pub fn add_light(&mut self, light: Light) -> LightId {
         self.revisions.lighting += 1;
         self.changes.lights = true;

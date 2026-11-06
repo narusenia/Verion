@@ -250,10 +250,11 @@ impl Renderer {
             }
         }
         if plan.materials {
-            let m = pack::pack_materials(scene).map_err(Error::Scene)?;
+            let mut m = pack::pack_materials(scene, false).map_err(Error::Scene)?;
             report.bytes_uploaded += size_of_val(&m.materials[..]);
             self.materials = upload(&self.ctx, &m.materials)?;
             if m.images != self.texture_images {
+                m = pack::pack_materials(scene, true).map_err(Error::Scene)?;
                 report.bytes_uploaded += size_of_val(&m.texels[..]) + size_of_val(&m.tex_info[..]);
                 self.texels = upload(&self.ctx, &m.texels)?;
                 self.tex_info = upload(&self.ctx, &m.tex_info)?;

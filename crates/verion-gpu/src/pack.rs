@@ -363,7 +363,9 @@ pub struct Materials {
     pub images: Vec<usize>,
 }
 
-pub fn pack_materials(scene: &Scene) -> Result<Materials, String> {
+/// With `textures` false the mip chains are not built (`texels` and `tex_info` stay empty): an
+/// update compares `images` first and pays for the textures only when they changed.
+pub fn pack_materials(scene: &Scene, textures: bool) -> Result<Materials, String> {
     // Every referenced image becomes one texture with a full mip chain.
     let mut texture_of: HashMap<usize, u32> = HashMap::new();
     let mut texels: Vec<f32> = Vec::new();
@@ -378,15 +380,17 @@ pub fn pack_materials(scene: &Scene) -> Result<Materials, String> {
                     .images()
                     .get(id.index())
                     .ok_or("material refers to a missing image")?;
-                let (chain, levels) = mip_chain(image);
                 let slot = texture_of.len() as u32;
-                tex_info.extend([
-                    (texels.len() / 3) as u32,
-                    image.width(),
-                    image.height(),
-                    levels,
-                ]);
-                texels.extend(chain);
+                if textures {
+                    let (chain, levels) = mip_chain(image);
+                    tex_info.extend([
+                        (texels.len() / 3) as u32,
+                        image.width(),
+                        image.height(),
+                        levels,
+                    ]);
+                    texels.extend(chain);
+                }
                 texture_of.insert(id.index(), slot);
                 images.push(id.index());
                 slot
@@ -542,7 +546,7 @@ pub fn pack(scene: &Scene) -> Result<Packed, String> {
     let g = pack_geometry(scene);
     let emitters = pack_emitters(scene);
     let (instances, tlas) = pack_instances(scene, &g.meshes, &emitters.bases);
-    let m = pack_materials(scene)?;
+    let m = pack_materials(scene, true)?;
     let light_table = pack_lights(scene);
     let env = build_env(scene)?;
     let info = scene_info(&light_table, &emitters, &env);
