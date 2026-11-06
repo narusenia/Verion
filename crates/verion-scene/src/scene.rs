@@ -74,6 +74,11 @@ pub struct Camera {
     pub focus_distance: f32,
     /// 0 = pinhole.
     pub aperture_radius: f32,
+    /// Lens shift: the image center's offset from the optical axis, in half-image extents (x to the
+    /// right, y up). The view direction through NDC point `(x, y)` is that of the unshifted camera
+    /// through `(x + shift.x, y + shift.y)`, so a positive shift looks further right and up. 0 =
+    /// centered. Blender's Shift X/Y (a fraction of the longer side) is twice that value.
+    pub shift: [f32; 2],
 }
 
 impl Default for Camera {
@@ -83,6 +88,7 @@ impl Default for Camera {
             vertical_fov: 0.8,
             focus_distance: 1.0,
             aperture_radius: 0.0,
+            shift: [0.0; 2],
         }
     }
 }

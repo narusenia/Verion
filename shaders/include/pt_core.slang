@@ -22,7 +22,8 @@ StructuredBuffer<uint> params;      // 0 width, 1 height, 2 tan(fov/2), 3 apertu
                                     // 5 light count, 6 sample index, 7 max depth, 8..19 camera-to-world 3x4, 20..22 sky rgb, 23 emitter count, 24 env width (0 = none), 25 env height, 26 env pdf scale w*h / (2 pi^2 W), 27 pixel cone angle, 28 lighting AOV enable, 29 multiple-scattering compensation enable,
                                     // 30 / 31 wavefront depth and path count, 32 adaptive sampling enable, 33 adaptive threshold
                                     // (float), 34 adaptive minimum samples, 35 megakernel samples per dispatch, 36 ReSTIR DI enable,
-                                    // 37 ReSTIR initial candidates per pixel, 38 ReSTIR history cap (samples a reused reservoir counts for)
+                                    // 37 ReSTIR initial candidates per pixel, 38 ReSTIR history cap (samples a reused reservoir counts for),
+                                    // 39 / 40 lens shift x and y (floats, half-image extents)
 RWStructuredBuffer<float> accum;    // running radiance sum, xyz per pixel
 StructuredBuffer<float> emitters;   // 16 words per emissive world-space triangle: p0, p1, p2, radiance rgb, area, selection pdf, 2 pad
 StructuredBuffer<float> emitCdf;    // cumulative selection probability per emitter triangle, last entry 1
@@ -569,8 +570,8 @@ PathState generatePathFor(uint px, uint py, uint sample)
     rng.state = pcg(pixel ^ pcg(sample * 0x9E3779B9u + 0x7F4A7C15u));
     float t = pf(2);
     float aspect = float(w) / float(h);
-    float u = (2.0 * (px + rng.next()) / w - 1.0) * aspect * t;
-    float v = (1.0 - 2.0 * (py + rng.next()) / h) * t;
+    float u = (2.0 * (px + rng.next()) / w - 1.0 + pf(39)) * aspect * t;
+    float v = (1.0 - 2.0 * (py + rng.next()) / h + pf(40)) * t;
     float3 focal = float3(u, v, -1.0) * pf(4);
     float lensR = pf(3) * sqrt(rng.next());
     float lensA = 2.0 * PI * rng.next();

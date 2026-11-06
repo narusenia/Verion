@@ -62,8 +62,8 @@ pub fn view_directions(camera: &Camera, width: usize, height: usize) -> Vec<[f32
         .map(|i| {
             let (x, y) = ((i % width) as f32, (i / width) as f32);
             let d = [
-                (2.0 * (x + 0.5) / width as f32 - 1.0) * aspect * t,
-                (1.0 - 2.0 * (y + 0.5) / height as f32) * t,
+                (2.0 * (x + 0.5) / width as f32 - 1.0 + camera.shift[0]) * aspect * t,
+                (1.0 - 2.0 * (y + 0.5) / height as f32 + camera.shift[1]) * t,
                 -1.0,
             ];
             let n = (d[0] * d[0] + d[1] * d[1] + 1.0).sqrt();
@@ -513,6 +513,18 @@ mod tests {
     }
 
     const PI: f32 = std::f32::consts::PI;
+
+    #[test]
+    fn lens_shift_turns_the_view_toward_the_shift() {
+        let mut cam = Camera::default();
+        let centre = |c: &Camera| view_directions(c, 3, 3)[4];
+        // Unshifted, the middle pixel looks straight along -z: the vector toward the camera is +z.
+        assert!((centre(&cam)[2] - 1.0).abs() < 1e-6);
+        cam.shift = [0.5, -0.25];
+        let v = centre(&cam);
+        // Toward the camera, so a view shifted right and down points the vector left and up.
+        assert!(v[0] < -0.01 && v[1] > 0.01, "{v:?}");
+    }
 
     /// A white surface lit by one unit light in slot 0 at response `r`.
     fn px(r: f32) -> PixelInput {

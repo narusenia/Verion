@@ -473,16 +473,19 @@ impl Scene {
         Ok(())
     }
 
-    /// `transform` is camera-to-world (3x4 or 4x4), looking down -z.
-    #[pyo3(signature = (transform_, vertical_fov, focus_distance = 1.0, aperture_radius = 0.0))]
+    /// `transform` is camera-to-world (3x4 or 4x4), looking down -z. `shift` is the lens shift in
+    /// half-image extents (`Camera::shift`).
+    #[pyo3(signature = (transform_, vertical_fov, focus_distance = 1.0, aperture_radius = 0.0, shift = [0.0; 2]))]
     fn set_camera(
         &self,
         transform_: PyReadonlyArrayDyn<f32>,
         vertical_fov: f32,
         focus_distance: f32,
         aperture_radius: f32,
+        shift: [f32; 2],
     ) -> PyResult<()> {
         let cam = Camera {
+            shift,
             transform: transform(&transform_)?,
             vertical_fov,
             focus_distance,

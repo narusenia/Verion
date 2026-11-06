@@ -61,8 +61,8 @@ void aov(uint3 tid : SV_DispatchThreadID)
 
     float t = camera[2];
     float aspect = camera[0] / camera[1];
-    float u = (2.0 * (tid.x + 0.5) / w - 1.0) * aspect * t;
-    float v = (1.0 - 2.0 * (tid.y + 0.5) / h) * t;
+    float u = (2.0 * (tid.x + 0.5) / w - 1.0 + camera[16]) * aspect * t;
+    float v = (1.0 - 2.0 * (tid.y + 0.5) / h + camera[17]) * t;
     float3 d = normalize(float3(u, v, -1.0));
 
     float3 dir, org;

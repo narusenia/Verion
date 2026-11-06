@@ -135,9 +135,7 @@ class Sync:
 
     def set_camera(self, depsgraph, cam_ob, width, height):
         t, fov, focus, radius, shift = camera_mod.settings(depsgraph, cam_ob, width, height, self.warn)
-        if any(abs(s) > 1e-6 for s in shift):
-            self.warn("Camera shift is not supported yet; rendering without it")
-        self.scene.set_camera(t, fov, focus, radius)
+        self.scene.set_camera(t, fov, focus, radius, shift)
         self.camera = (cam_ob, width, height)
 
     # -- viewport edits ---------------------------------------------------------------------------

@@ -246,7 +246,7 @@ struct RayDesc_0
 
 
     uint _S17 = tid_0.y;
-    float3 d_0 = normalize(float3((2.0f * (float(_S15) + 0.5f) / float(w_2) - 1.0f) * ((&kernelContext_3)->camera_0[int(0)] / (&kernelContext_3)->camera_0[int(1)]) * t_0, (1.0f - 2.0f * (float(_S17) + 0.5f) / float(h_2)) * t_0, -1.0f));
+    float3 d_0 = normalize(float3((2.0f * (float(_S15) + 0.5f) / float(w_2) - 1.0f + (&kernelContext_3)->camera_0[int(16)]) * ((&kernelContext_3)->camera_0[int(0)] / (&kernelContext_3)->camera_0[int(1)]) * t_0, (1.0f - 2.0f * (float(_S17) + 0.5f) / float(h_2) + (&kernelContext_3)->camera_0[int(17)]) * t_0, -1.0f));
 
     thread float3 dir_0;
 

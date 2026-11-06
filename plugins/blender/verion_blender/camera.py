@@ -18,6 +18,7 @@ def settings(depsgraph, cam_ob, width, height, warn):
         warn(f"Camera '{cam_ob.name}' is {cam.type.lower()}: only perspective cameras are supported; rendering it as perspective")
     if abs(rd.pixel_aspect_x - rd.pixel_aspect_y) > 1e-6:
         warn("Non-square pixel aspect is not supported")
+    # x_ndc = P00 * X / -Z - P02, so the shift in half-image extents is +P02 / +P12 (Camera::shift).
     shift = (float(proj[0][2]), float(proj[1][2]))
     # P[1][1] = 1 / tan(vertical fov / 2), with the sensor fit and the pixel aspect already applied.
     fov = 2.0 * math.atan(1.0 / float(proj[1][1])) if proj[1][1] else 0.8

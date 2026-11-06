@@ -6,7 +6,7 @@ RaytracingAccelerationStructure scene;
 StructuredBuffer<float> positions;  // xyz per vertex, all meshes concatenated
 StructuredBuffer<uint> indices;     // triangle vertex indices, all meshes concatenated
 StructuredBuffer<uint> instances;   // 16 words each: vertex offset, index offset, 2 pad, 12 floats (row-major 3x4)
-StructuredBuffer<float> camera;     // width, height, tan(fov/2), pad, 12 floats (camera-to-world 3x4)
+StructuredBuffer<float> camera;     // width, height, tan(fov/2), pad, 12 floats (camera-to-world 3x4), lens shift x and y
 RWStructuredBuffer<float> output;   // xyz per pixel
 StructuredBuffer<float> vnormals;   // xyz per vertex, all meshes concatenated (zero when a mesh has none)
 
@@ -47,8 +47,8 @@ void normals(uint3 tid : SV_DispatchThreadID)
 
     float t = camera[2];
     float aspect = camera[0] / camera[1];
-    float u = (2.0 * (tid.x + 0.5) / w - 1.0) * aspect * t;
-    float v = (1.0 - 2.0 * (tid.y + 0.5) / h) * t;
+    float u = (2.0 * (tid.x + 0.5) / w - 1.0 + camera[16]) * aspect * t;
+    float v = (1.0 - 2.0 * (tid.y + 0.5) / h + camera[17]) * t;
     float3 d = normalize(float3(u, v, -1.0));
 
     // Camera-to-world: rotate the direction, translate the origin.

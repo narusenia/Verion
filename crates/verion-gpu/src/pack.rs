@@ -12,7 +12,7 @@ use crate::{Adaptive, Restir};
 /// Path length limit. Radiance beyond it is dropped, so closed furnaces read slightly dark.
 pub const MAX_DEPTH: u32 = 8;
 /// Words of the parameter block; must match `params` in `shaders/include/pt_core.slang`.
-pub const PARAM_WORDS: usize = 39;
+pub const PARAM_WORDS: usize = 41;
 pub const MATERIAL_WORDS: usize = 22;
 pub const LIGHT_WORDS: usize = 16;
 /// Words per emissive triangle; must match `shaders/include/pt_core.slang`.
@@ -60,6 +60,8 @@ pub struct View {
     pub camera: [f32; 16],
     pub aperture: f32,
     pub focus: f32,
+    /// Lens shift in half-image extents (`Camera::shift`).
+    pub shift: [f32; 2],
 }
 
 impl View {
@@ -73,15 +75,19 @@ impl View {
             camera,
             aperture: cam.aperture_radius,
             focus: cam.focus_distance,
+            shift: cam.shift,
         }
     }
 
-    /// The camera record of the normal and AOV kernels, with the image size filled in.
-    pub fn camera_record(&self, width: u32, height: u32) -> [f32; 16] {
-        let mut camera = self.camera;
-        camera[0] = width as f32;
-        camera[1] = height as f32;
-        camera
+    /// The camera record of the normal and AOV kernels, with the image size filled in and the lens
+    /// shift appended at 16 and 17.
+    pub fn camera_record(&self, width: u32, height: u32) -> [f32; 18] {
+        let mut record = [0.0; 18];
+        record[..16].copy_from_slice(&self.camera);
+        record[0] = width as f32;
+        record[1] = height as f32;
+        record[16..].copy_from_slice(&self.shift);
+        record
     }
 }
 
@@ -670,6 +676,8 @@ pub fn base_params(
     params[26] = info.env_pdf_scale.to_bits();
     // Footprint of one pixel per unit of travelled distance, for texture filtering.
     params[27] = (2.0 * view.camera[2] / height as f32).to_bits();
+    params[39] = view.shift[0].to_bits();
+    params[40] = view.shift[1].to_bits();
     params[28] = lighting as u32;
     params[29] = multiscatter as u32;
     if let Some(a) = adaptive {
