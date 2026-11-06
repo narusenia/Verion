@@ -2570,6 +2570,13 @@ dependencies = [
 [[package]]
 name = "verion-gpu-vulkan"
 version = "0.0.0"
+dependencies = [
+ "ash",
+ "gpu-allocator",
+ "verion-gpu",
+ "verion-render-io",
+ "verion-scene",
+]
 
 [[package]]
 name = "verion-render-cli"
@@ -2580,6 +2587,7 @@ dependencies = [
  "verion-denoise",
  "verion-gpu",
  "verion-gpu-metal",
+ "verion-gpu-vulkan",
  "verion-render-io",
  "verion-scene",
  "verion-stylization",

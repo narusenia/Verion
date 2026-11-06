@@ -1,45 +1,77 @@
-//! Vulkan backend (ADR-0001, M4). For now it only carries the SPIR-V that `scripts/shaders.sh`
-//! compiles from the same Slang sources as the Metal MSL; bindings are descriptor set 0 with the
-//! same numbers as the Metal buffer indices.
+//! Vulkan ray-tracing backend (ADR-0001, M4): compute shaders with ray query over the same Slang
+//! sources as the Metal backend. Empty on macOS, where MoltenVK has no ray tracing.
+#![cfg(not(target_os = "macos"))]
 
-/// SPIR-V of each compute shader, entry point `main`, by shader name.
-pub const SHADERS: [(&str, &[u8]); 7] = [
-    ("aov", include_bytes!("../shaders/aov.spv")),
-    ("normals", include_bytes!("../shaders/normals.spv")),
-    ("pathtrace", include_bytes!("../shaders/pathtrace.spv")),
-    ("wf_args", include_bytes!("../shaders/wf_args.spv")),
-    ("wf_extend", include_bytes!("../shaders/wf_extend.spv")),
-    ("wf_select", include_bytes!("../shaders/wf_select.spv")),
-    ("wf_shade", include_bytes!("../shaders/wf_shade.spv")),
-];
+mod accel;
+mod buffer;
+mod context;
+mod pipeline;
+mod reflect;
+mod renderer;
+mod shaders;
 
-#[cfg(test)]
-mod tests {
-    use super::SHADERS;
+pub use context::{DeviceInfo, SerSupport, VulkanContext};
+pub use renderer::{Accumulation, Renderer};
+pub use shaders::SHADERS;
+pub use verion_gpu::{Adaptive, Aovs, Integrator, LightingAovs, MemoryUsage};
 
-    #[test]
-    fn every_shader_is_spirv_1_5_with_a_main_entry_point() {
-        for (name, spv) in SHADERS {
-            assert_eq!(spv.len() % 4, 0, "{name}");
-            let word = |i: usize| u32::from_le_bytes(spv[4 * i..4 * i + 4].try_into().unwrap());
-            assert_eq!(word(0), 0x0723_0203, "{name}: magic");
-            assert_eq!(word(1), 0x0001_0500, "{name}: version");
-            assert!(
-                spv.windows(5).any(|w| w == b"main\0"),
-                "{name}: entry point"
-            );
+use std::fmt;
+
+use ash::vk;
+
+#[derive(Clone, Debug)]
+pub enum Error {
+    /// The Vulkan loader is missing or has no usable ICD.
+    NoVulkan(String),
+    NoDevice,
+    /// No device has every required extension and feature.
+    Unsupported {
+        device: String,
+        missing: Vec<&'static str>,
+    },
+    Vulkan(vk::Result),
+    Resource(&'static str),
+    /// The scene does not fit in the device's memory (no streaming; REQ-PERF-003).
+    OutOfMemory {
+        needed: u64,
+        available: u64,
+    },
+    /// A shader failed to load or its entry point is missing.
+    Shader(String),
+    /// The scene cannot be rendered (for example, it has no instances).
+    Scene(String),
+}
+
+const GIB: f64 = (1u64 << 30) as f64;
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoVulkan(e) => write!(f, "Vulkan is not available: {e}"),
+            Self::NoDevice => write!(f, "no Vulkan device found"),
+            Self::Unsupported { device, missing } => write!(
+                f,
+                "{device} lacks Vulkan ray tracing support: {}",
+                missing.join(", ")
+            ),
+            Self::Vulkan(r) => write!(f, "Vulkan error: {r}"),
+            Self::Resource(what) => write!(f, "failed to create Vulkan resource: {what}"),
+            Self::OutOfMemory { needed, available } => write!(
+                f,
+                "scene does not fit in GPU memory: needs {:.2} GiB more, {:.2} GiB left of the device's budget",
+                *needed as f64 / GIB,
+                *available as f64 / GIB
+            ),
+            Self::Shader(e) => write!(f, "shader error: {e}"),
+            Self::Scene(e) => write!(f, "scene error: {e}"),
         }
     }
+}
 
-    #[test]
-    fn every_slang_shader_has_its_spirv() {
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../shaders");
-        let mut names: Vec<String> = std::fs::read_dir(dir)
-            .unwrap()
-            .filter_map(|e| e.unwrap().file_name().into_string().ok())
-            .filter_map(|f| f.strip_suffix(".slang").map(str::to_owned))
-            .collect();
-        names.sort();
-        assert_eq!(names, SHADERS.map(|(n, _)| n));
+impl std::error::Error for Error {}
+
+impl From<vk::Result> for Error {
+    fn from(r: vk::Result) -> Self {
+        Self::Vulkan(r)
     }
 }

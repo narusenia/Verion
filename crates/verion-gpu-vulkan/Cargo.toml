@@ -5,5 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
-[lints]
-workspace = true
+# macOS has no Vulkan ray tracing (MoltenVK lacks it, ADR-0001), so the crate is empty there.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+ash = "0.38"
+gpu-allocator = { version = "0.28", default-features = false, features = ["std", "vulkan"] }
+verion-gpu = { version = "0.0.0", path = "../verion-gpu" }
+verion-scene = { version = "0.0.0", path = "../verion-scene" }
+
+[target.'cfg(not(target_os = "macos"))'.dev-dependencies]
+verion-render-io = { version = "0.0.0", path = "../verion-render-io" }
+
+[lints.rust]
+# Direct Vulkan calls need unsafe; only the GPU backend crates may allow it.
+unsafe_code = "allow"

@@ -31,6 +31,10 @@ run = "cargo clippy --workspace --all-targets -- -D warnings"
 description = "Workspace test suite (GPU-free tests only)"
 run = "cargo test --workspace"
 
+[tasks."test:gpu"]
+description = "GPU tests of the Vulkan backend (needs a Vulkan ray tracing GPU; not run in CI)"
+run = "cargo test -p verion-gpu-vulkan --release -- --ignored --test-threads=1"
+
 [tasks.deny]
 description = "License, ban and source checks (deny.toml)"
 run = "cargo deny check"
