@@ -7,14 +7,14 @@
 
 | # | 項目 | REQ | 状態 |
 |---|------|-----|------|
-| 1 | Scene の変更追跡（`Changes`）。Camera / Material / Light / Transform / Mesh Deformation / 形状の追加を区別し、材質は物理（`base`）が変わったときだけ記録する | REQ-ACC-003 / REQ-CORE-001 | 未 |
-| 2 | `pack` を表ごとの関数に分け、変更種別から更新範囲を決める計画（`UpdatePlan`）を `verion-gpu` に置く。`pack()` の出力は変えない | REQ-ACC-003 | 未 |
-| 3 | `RayTracingBackend::update`。Metal: 材質・ライト・Emitter・Instance 表の差し替え、変形メッシュだけの BLAS 再構築、TLAS 再構築。形状の追加は表とAS を作り直すが、パイプラインは使い回す | REQ-ACC-003 | 未 |
-| 4 | Vulkan の `update`（同じ計画に従う） | REQ-ACC-003 / REQ-GPU-006 | 未 |
+| 1 | Scene の変更追跡（`Changes`）。Camera / Material / Light / Transform / Mesh Deformation / 形状の追加を区別し、材質は物理（`base`）が変わったときだけ記録する | REQ-ACC-003 / REQ-CORE-001 | 済（`Scene::take_changes`。テストで種別ごとの記録を確認） |
+| 2 | `pack` を表ごとの関数に分け、変更種別から更新範囲を決める計画（`UpdatePlan`）を `verion-gpu` に置く。`pack()` の出力は変えない | REQ-ACC-003 | 済（`pack_geometry`・`pack_emitters`・`pack_instances`・`pack_materials`・`pack_lights`、`UpdatePlan`） |
+| 3 | `RayTracingBackend::update`。Metal: 材質・ライト・Emitter・Instance 表の差し替え、変形メッシュだけの BLAS 再構築、TLAS 再構築。形状の追加は表とAS を作り直すが、パイプラインは使い回す | REQ-ACC-003 | 済（`tests/update.rs`: 更新後の画像が完全再構築とビット一致。材質・ライトは BLAS / TLAS を作らず、Transform は TLAS だけ、変形は該当 BLAS と TLAS だけ） |
+| 4 | Vulkan の `update`（同じ計画に従う） | REQ-ACC-003 / REQ-GPU-006 | Windows 待ち（Mac では Vulkan をビルドできないため、Windows 機で実装と確認を行う） |
 | 5 | 検証: 更新後の画像が完全再構築と一致する。Cornell Box の壁の色を変えて反対側の面の間接光まで変わること（遠距離伝播）、更新で BLAS を作り直さないことを数える | REQ-ACC-003 | 未 |
 | 6 | Viewer の IPR: 材質・ライト・Instance の移動の編集を `update` で反映し、First Clean Preview（編集から N spp まで）を計測して記録する | REQ-VIEW-003 | 未 |
 | 7 | ReSTIR DI（Emitter 三角形と環境マップ）: 初期候補の RIS、Temporal / Spatial 再利用、最終シェードで可視性を再確認。鏡面・屈折・被写界深度・Lighting AOV では Fallback し、Reference では無効 | REQ-ACC-002 | 未 |
-| 8 | ReSTIR DI の Vulkan 版（同じ Slang を使う） | REQ-ACC-002 / REQ-GPU-006 | 未 |
+| 8 | ReSTIR DI の Vulkan 版（同じ Slang を使う） | REQ-ACC-002 / REQ-GPU-006 | Windows 待ち（Slang と共通のホスト側は Mac で済ませ、Vulkan のバインドと実機確認を Windows で行う） |
 | 9 | 多光源の評価シーンと、同画質到達時間の実測（`scripts/eval_restir.sh`） | REQ-ACC-002 / REQ-PERF-001 | 未 |
 | 10 | ReSTIR GI（1 回目の間接光）と検証サンプル | REQ-ACC-002 | 未 |
 | 11 | ReSTIR PT の扱いの決定（ADR-0016 に記録） | REQ-ACC-002 | 未 |
