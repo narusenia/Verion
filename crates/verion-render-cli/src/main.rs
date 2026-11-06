@@ -1,9 +1,6 @@
 //! `render-cli scene.gltf -o out.exr`: headless render (REQ-VIEW-001).
 //! `--mode reference` (default) is physical only (REQ-CORE-006); `--mode stylized` adds the Stylization Pass.
 
-// shortcut: the render path is macOS-only, so off macOS its helpers look dead; gate them individually once a second backend exists.
-#![cfg_attr(not(target_os = "macos"), allow(dead_code, unused_imports))]
-
 use std::{fs, path::PathBuf, time::Instant};
 
 use clap::Parser;
@@ -84,6 +81,9 @@ struct Args {
     height: u32,
     #[arg(long, value_enum, default_value_t = Mode::Reference)]
     mode: Mode,
+    /// GPU API (default: Metal on macOS, Vulkan elsewhere)
+    #[arg(long, value_enum)]
+    backend: Option<BackendArg>,
     /// Samples per pixel
     #[arg(long, default_value_t = 64)]
     spp: u32,
@@ -178,14 +178,45 @@ fn json_str(s: &str) -> String {
 }
 
 /// Samples per GPU dispatch; the progress bar advances once per dispatch.
-#[cfg(target_os = "macos")]
 const CHUNK_SPP: u32 = 8;
 
-#[cfg(target_os = "macos")]
+/// The GPU API to render with (REQ-GPU-003). Each platform builds one: Metal on macOS, Vulkan elsewhere.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum BackendArg {
+    Metal,
+    Vulkan,
+}
+
+impl BackendArg {
+    /// The backend this platform builds.
+    fn native() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Metal
+        } else {
+            Self::Vulkan
+        }
+    }
+}
+
 fn run(args: &Args) -> Result<(), String> {
+    match args.backend.unwrap_or(BackendArg::native()) {
+        #[cfg(target_os = "macos")]
+        BackendArg::Metal => run_with::<verion_gpu_metal::Renderer>(args, "metal"),
+        #[cfg(not(target_os = "macos"))]
+        BackendArg::Vulkan => run_with::<verion_gpu_vulkan::Renderer>(args, "vulkan"),
+        other => Err(format!(
+            "the {other:?} backend is not built for this platform (use --backend {:?})",
+            BackendArg::native()
+        )),
+    }
+}
+
+fn run_with<Backend: verion_gpu::RayTracingBackend>(
+    args: &Args,
+    backend: &str,
+) -> Result<(), String> {
     use indicatif::{ProgressBar, ProgressStyle};
-    use verion_gpu::{Accumulation as _, Adaptive, Integrator, RayTracingBackend};
-    type Backend = verion_gpu_metal::Renderer;
+    use verion_gpu::{Accumulation as _, Adaptive, Integrator};
     use verion_render_io::{
         ExrAovs, ExrFrame, ExrLighting, GradeInfo, RenderInfo, load_gltf_in, load_hdri, write_exr,
     };
@@ -397,9 +428,10 @@ fn run(args: &Args) -> Result<(), String> {
 
     if let Some(path) = &args.metrics {
         let json = format!(
-            "{{\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\"integrator\":\"{:?}\",\"adaptive\":{},\"mean_spp\":{mean_spp},\"wavefront_bytes\":{wavefront_bytes},\"gpu_budget_bytes\":{},\"gpu_peak_bytes\":{peak},\"upload_bytes\":{},\
+            "{{\"backend\":{},\"scene\":{},\"output\":{},\"width\":{w},\"height\":{h},\"spp\":{},\"mode\":{},\"integrator\":\"{:?}\",\"adaptive\":{},\"mean_spp\":{mean_spp},\"wavefront_bytes\":{wavefront_bytes},\"gpu_budget_bytes\":{},\"gpu_peak_bytes\":{peak},\"upload_bytes\":{},\
 \"load_s\":{load_s},\"build_s\":{build_s},\"render_s\":{render_s},\"gpu_s\":{gpu_s},{stages}\"aov_s\":{aov_s},\"denoise_s\":{denoise_s},\"stylize_s\":{stylize_s},\
 \"write_s\":{write_s},\"total_s\":{}}}\n",
+            json_str(backend),
             json_str(&args.scene.display().to_string()),
             json_str(&args.output.display().to_string()),
             args.spp,
@@ -413,11 +445,6 @@ fn run(args: &Args) -> Result<(), String> {
         fs::write(path, json).map_err(|e| format!("write {}: {e}", path.display()))?;
     }
     Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn run(_: &Args) -> Result<(), String> {
-    Err("render-cli requires macOS (Metal)".into())
 }
 
 fn main() {
