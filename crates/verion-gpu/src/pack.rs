@@ -678,7 +678,7 @@ pub fn base_params(
         params[34] = a.min_spp;
     }
     if let Some(r) = restir {
-        params[36] = 1;
+        params[36] = u32::from(r.di) | (u32::from(r.gi) << 1);
         params[37] = r.candidates;
         params[38] = r.history;
     }
@@ -743,6 +743,12 @@ mod tests {
         assert_eq!((p[28], p[29], p[32], p[34]), (1, 0, 1, 16));
         assert_eq!((p[6], p[30], p[31], p[35]), (0, 0, 0, 0));
         assert_eq!((p[36], p[37], p[38]), (1, 4, 20));
+        let gi = Restir {
+            gi: true,
+            ..Restir::default()
+        };
+        let p = base_params(&info, &view, (64, 32), false, false, None, Some(gi));
+        assert_eq!(p[36], 3);
         assert_eq!(f32::from_bits(p[21]), 0.2);
     }
 }

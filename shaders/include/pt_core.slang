@@ -45,10 +45,15 @@ RWStructuredBuffer<float> lighting; // used only when params[28] != 0; 65 floats
 RWStructuredBuffer<float> pixelStats; // used only when params[32] != 0; 3 floats per pixel: samples taken, sum of
                                       // luminance, sum of squared luminance (adaptive sampling, REQ-ACC-007)
 
-RWStructuredBuffer<float> restir;   // used only when params[36] != 0 (ReSTIR DI, REQ-ACC-002): two halves of 16 floats per
-                                    // pixel, the current frame's and the previous one's, swapped by sample parity. Per pixel:
-                                    // 0 emitter + 1 (bits, 0 = none), 1..3 sample point, 4 contribution weight W, 5 sample count M,
-                                    // 8..10 shading point, 11..13 shading normal, 14 usable as a neighbour (bits, 1 or 0)
+RWStructuredBuffer<float> restir;   // used only when params[36] != 0 (ReSTIR, REQ-ACC-002): 80 floats per pixel: two halves of
+                                    // 28, the current frame's and the previous one's, swapped by sample parity, then 24 of scratch.
+                                    // A half: 0 emitter + 1 (bits, 0 = none), 1..3 DI sample point, 4 DI contribution weight W,
+                                    // 5 DI sample count M, 8..10 shading point, 11..13 shading normal, 14 usable as a neighbour
+                                    // (bits, 1 or 0); GI: 16..18 the second hit's point, 19..21 its normal, 22..24 the radiance
+                                    // leaving it toward the shading point, 25 W, 26 M, 27 valid (bits).
+                                    // Scratch (GI, this frame): 0 resampled weight sum, 1 its count, 2 its target, 3..5 its contribution,
+                                    // 6..8 point, 9..11 normal, 12..14 radiance, 15..17 throughput after the first bounce, 18..20 radiance
+                                    // gathered at the first hit, 21 the first bounce's density, 22 the path hit a surface at depth 1 (bits)
 
 static const float PI = 3.14159265358979;
 static const uint LIGHTING_STRIDE = 65;
@@ -533,6 +538,7 @@ struct PathState
     int chan;      // color channel this path follows after its first dispersive hit, -1 until then
     float pathLen; // distance travelled so far, widens the texture-filter cone
     bool misPrev;  // the previous bounce was a reflection that light sampling also covers
+    bool gi;       // the first hit takes part in ReSTIR GI: the rest of the path is resampled when it ends
     bool restir;   // the first hit took its emitter sample from ReSTIR: light sampling then has probability 1 at the next hit
     float qPrev;   // its density
     float visLit;
@@ -580,6 +586,7 @@ PathState generatePathFor(uint px, uint py, uint sample)
     s.pathLen = 0.0;
     s.misPrev = false;
     s.restir = false;
+    s.gi = false;
     s.qPrev = 0.0;
     s.visLit = 0.0;
     s.visTotal = 0.0;
@@ -611,7 +618,12 @@ static const float RESTIR_MIN_ALPHA = 0.15;
 static const int RESTIR_RADIUS = 6;   // pixels, for the neighbours of the previous frame
 static const uint RESTIR_NEIGHBOURS = 2;
 
-uint restirBase(uint pixel, uint which) { return (which * params[0] * params[1] + pixel) * 16; }
+static const uint RESTIR_HALF = 28;
+static const uint RESTIR_STRIDE = 80;
+static const float RESTIR_MAX_JACOBIAN = 10.0;
+
+uint restirBase(uint pixel, uint which) { return pixel * RESTIR_STRIDE + which * RESTIR_HALF; }
+uint restirScratch(uint pixel) { return pixel * RESTIR_STRIDE + 2 * RESTIR_HALF; }
 
 // The light arriving from point `x` of emitter `e` at `p` without the BSDF: Le cos(light) / d^2,
 // and the density plain light sampling has for it.
@@ -778,6 +790,13 @@ RestirPick restirDI(uint pixel, float3 p, float3 n, float pHitT, Surface surf, f
     restir[co + 3] = selX.z;
     restir[co + 4] = r.occ ? 0.0 : r.W;
     restir[co + 5] = mTotal;
+    return r;
+}
+
+// The shading point other pixels compare their own with before reusing this pixel's samples.
+void restirGbuffer(uint pixel, float3 p, float3 n)
+{
+    uint co = restirBase(pixel, params[6] & 1u);
     restir[co + 8] = p.x;
     restir[co + 9] = p.y;
     restir[co + 10] = p.z;
@@ -785,13 +804,99 @@ RestirPick restirDI(uint pixel, float3 p, float3 n, float pHitT, Surface surf, f
     restir[co + 12] = n.y;
     restir[co + 13] = n.z;
     restir[co + 14] = asfloat(1u);
-    return r;
+}
+
+// ReSTIR GI, first half (REQ-ACC-002): the previous frame's second-hit samples of this pixel and
+// its neighbours, moved to this shading point (reconnection: the sample keeps its point and
+// radiance, and its weight follows the change of solid angle). A candidate must see the point.
+// The pixel's own path adds its candidate when it ends (`finishGI`).
+void restirGIPrepare(uint pixel, float3 p, float3 n, float pHitT, Surface surf, float3 T, float3 B, float3 woL, inout Rng rng)
+{
+    uint w = params[0];
+    uint cur = params[6] & 1u;
+    float cap = float(max(params[38], 1u));
+    float wsum = 0.0;
+    float mTotal = 0.0;
+    float pSel = 0.0;
+    float3 cSel = float3(0.0);
+    float3 xSel = float3(0.0);
+    float3 nSel = float3(0.0);
+    float3 lSel = float3(0.0);
+    if (params[6] > 0)
+    {
+        int px = int(pixel % w);
+        int py = int(pixel / w);
+        for (uint k = 0; k < 1 + RESTIR_NEIGHBOURS; k++)
+        {
+            int nx = px;
+            int ny = py;
+            if (k > 0)
+            {
+                nx += int(rng.next() * float(2 * RESTIR_RADIUS + 1)) - RESTIR_RADIUS;
+                ny += int(rng.next() * float(2 * RESTIR_RADIUS + 1)) - RESTIR_RADIUS;
+                if (nx < 0 || ny < 0 || nx >= int(w) || ny >= int(params[1]))
+                    continue;
+            }
+            uint ro = restirBase(uint(ny) * w + uint(nx), cur ^ 1u);
+            if (asuint(restir[ro + 14]) == 0 || asuint(restir[ro + 27]) == 0)
+                continue;
+            float3 pq = float3(restir[ro + 8], restir[ro + 9], restir[ro + 10]);
+            float3 nq = float3(restir[ro + 11], restir[ro + 12], restir[ro + 13]);
+            if (dot(nq, n) < 0.9 || length(pq - p) > 0.05 * max(pHitT, 0.01))
+                continue;
+            float3 x2 = float3(restir[ro + 16], restir[ro + 17], restir[ro + 18]);
+            float3 n2 = float3(restir[ro + 19], restir[ro + 20], restir[ro + 21]);
+            float3 l2 = float3(restir[ro + 22], restir[ro + 23], restir[ro + 24]);
+            float mq = min(restir[ro + 26], cap);
+            mTotal += mq;
+            float3 toX = x2 - p;
+            float dR = length(toX);
+            float3 wi = toX / max(dR, 1.0e-6);
+            float dQ = length(x2 - pq);
+            float cosT = dot(n, wi);
+            float cosR = abs(dot(n2, wi));
+            float cosQ = abs(dot(n2, normalize(pq - x2)));
+            if (cosT <= 0.0 || dR < 1.0e-3 || cosR < 1.0e-3 || cosQ < 1.0e-3)
+                continue;
+            float jac = (cosR / cosQ) * (dQ * dQ) / (dR * dR);
+            if (jac > RESTIR_MAX_JACOBIAN || jac < 1.0 / RESTIR_MAX_JACOBIAN)
+                continue;
+            float3 c = evalReflective(surf, woL, float3(dot(wi, T), dot(wi, B), cosT)) * l2;
+            float phat = lum(c);
+            if (phat <= 0.0 || occluded(p, wi, dR * (1.0 - 1.0e-3)))
+                continue;
+            float wgt = phat * restir[ro + 25] * mq * jac;
+            wsum += wgt;
+            if (rng.next() * wsum < wgt)
+            {
+                pSel = phat;
+                cSel = c;
+                xSel = x2;
+                nSel = n2;
+                lSel = l2;
+            }
+        }
+    }
+    uint so = restirScratch(pixel);
+    restir[so] = wsum;
+    restir[so + 1] = mTotal;
+    restir[so + 2] = pSel;
+    for (uint k = 0; k < 3; k++)
+    {
+        restir[so + 3 + k] = cSel[k];
+        restir[so + 6 + k] = xSel[k];
+        restir[so + 9 + k] = nSel[k];
+        restir[so + 12 + k] = lSel[k];
+    }
+    restir[so + 22] = asfloat(0u);
 }
 
 // A pixel that takes no ReSTIR sample this frame must not look like a neighbour to the next one.
 void restirClear(uint pixel)
 {
-    restir[restirBase(pixel, params[6] & 1u) + 14] = asfloat(0u);
+    uint co = restirBase(pixel, params[6] & 1u);
+    restir[co + 14] = asfloat(0u);
+    restir[co + 27] = asfloat(0u);
 }
 
 // One bounce at `depth`: the miss or the hit's emission, light sampling and the next direction.
@@ -851,6 +956,17 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
         float3 hit = org + dir * pHitT;
         // shortcut: fixed 1e-4 ray offset assumes unit-scale scenes, scale it with scene bounds later.
         float3 p = hit + ng * 1.0e-4;
+        if (depth == 1 && st.gi)
+        {
+            // The first bounce reached a surface: its point and facing normal are ReSTIR GI's candidate.
+            uint co = restirBase(pixel, params[6] & 1u);
+            for (uint k = 0; k < 3; k++)
+            {
+                restir[co + 16 + k] = hit[k];
+                restir[co + 19 + k] = ng[k];
+            }
+            restir[restirScratch(pixel) + 22] = asfloat(1u);
+        }
 
         // Barycentric weights of vertices 1 and 2 at the hit.
         float3 e1 = p1 - p0;
@@ -1044,10 +1160,20 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
         bool reDI = false;
         if (depth == 0 && params[36] != 0)
         {
-            reDI = emitterCount > 0 && pf(3) == 0.0 && transmission == 0.0 && surf.alpha >= RESTIR_MIN_ALPHA
+            bool suits = pf(3) == 0.0 && transmission == 0.0 && surf.alpha >= RESTIR_MIN_ALPHA
                 && (surf.coat == 0.0 || surf.coatAlpha >= RESTIR_MIN_ALPHA);
+            reDI = suits && (params[36] & 1u) != 0 && emitterCount > 0;
+            // ReSTIR GI replaces the path's own indirect light, which the lighting split cannot follow.
+            bool reGI = suits && (params[36] & 2u) != 0 && !lightingOn;
             st.restir = reDI;
-            if (!reDI)
+            st.gi = reGI;
+            if (suits)
+            {
+                restirGbuffer(pixel, p, n);
+                if (reGI)
+                    restirGIPrepare(pixel, p, n, pHitT, surf, T, B, woL, rng);
+            }
+            else
                 restirClear(pixel);
         }
         if (reDI)
@@ -1274,6 +1400,17 @@ bool shadePath(inout PathState st, Hit hq, uint depth, uint pixel)
     st.thr = thr;
     st.cls = cls;
     st.chan = chan;
+    if (depth == 0 && st.gi)
+    {
+        // What the first hit gathered and what the first bounce carries on, for `giFinish`.
+        uint so = restirScratch(pixel);
+        for (uint k = 0; k < 3; k++)
+        {
+            restir[so + 15 + k] = thr[k];
+            restir[so + 18 + k] = st.parts.total[k];
+        }
+        restir[so + 21] = st.qPrev;
+    }
     return alive;
 }
 
@@ -1293,6 +1430,64 @@ bool pixelActive(uint p)
     return sqrt(var / n) > pf(33) * max(mean, 0.05);
 }
 
+// ReSTIR GI, second half: adds the path's own candidate (the surface its first bounce reached, with
+// the radiance the rest of the path gathered there) to the resampled neighbours', picks one, and
+// returns the pixel's radiance with the indirect light of the pick in place of the path's own.
+// The new reservoir goes to this frame's half for the next frame to reuse. A path that left the
+// scene keeps its sky light as it is; it is not a surface sample.
+float3 giFinish(float3 pathTotal, uint pixel)
+{
+    uint co = restirBase(pixel, params[6] & 1u);
+    uint so = restirScratch(pixel);
+    float wsum = restir[so];
+    float m = restir[so + 1] + 1.0;
+    float pSel = restir[so + 2];
+    float3 cSel = float3(restir[so + 3], restir[so + 4], restir[so + 5]);
+    float3 xSel = float3(restir[so + 6], restir[so + 7], restir[so + 8]);
+    float3 nSel = float3(restir[so + 9], restir[so + 10], restir[so + 11]);
+    float3 lSel = float3(restir[so + 12], restir[so + 13], restir[so + 14]);
+    float3 thr1 = float3(restir[so + 15], restir[so + 16], restir[so + 17]);
+    float3 d0 = float3(restir[so + 18], restir[so + 19], restir[so + 20]);
+    float qPrev = restir[so + 21];
+    bool own = asuint(restir[so + 22]) != 0 && qPrev > 0.0;
+    float3 giTotal = pathTotal - d0;
+    float3 result = d0;
+    if (own)
+    {
+        float3 cOwn = giTotal * qPrev;
+        float pOwn = lum(cOwn);
+        if (pOwn > 0.0)
+        {
+            float wOwn = pOwn / qPrev;
+            wsum += wOwn;
+            Rng r;
+            r.state = pcg(pixel ^ pcg(params[6] * 0x85EBCA6Bu + 0x1234u));
+            if (r.next() * wsum < wOwn)
+            {
+                pSel = pOwn;
+                cSel = cOwn;
+                xSel = float3(restir[co + 16], restir[co + 17], restir[co + 18]);
+                nSel = float3(restir[co + 19], restir[co + 20], restir[co + 21]);
+                lSel = float3(thr1.x > 1.0e-6 ? giTotal.x / thr1.x : 0.0, thr1.y > 1.0e-6 ? giTotal.y / thr1.y : 0.0, thr1.z > 1.0e-6 ? giTotal.z / thr1.z : 0.0);
+            }
+        }
+    }
+    else
+        result += giTotal;
+    float W = pSel > 0.0 ? wsum / (m * pSel) : 0.0;
+    result += cSel * W;
+    for (uint k = 0; k < 3; k++)
+    {
+        restir[co + 16 + k] = xSel[k];
+        restir[co + 19 + k] = nSel[k];
+        restir[co + 22 + k] = lSel[k];
+    }
+    restir[co + 25] = W;
+    restir[co + 26] = m;
+    restir[co + 27] = asfloat(pSel > 0.0 ? 1u : 0u);
+    return result;
+}
+
 // Adds the finished path to the running sums of its pixel.
 void finishPath(PathState st, uint pixel)
 {
@@ -1300,6 +1495,8 @@ void finishPath(PathState st, uint pixel)
     float visLit = st.visLit;
     float visTotal = st.visTotal;
     float3 radiance = parts.total;
+    if (st.gi)
+        radiance = giFinish(radiance, pixel);
     if (any(isnan(radiance)) || any(isinf(radiance)))
     {
         radiance = float3(0.0); // one bad sample must not poison the running sum

@@ -30,7 +30,7 @@ void put3(uint f, uint p, float3 v) { putF(f, p, v.x); putF(f + 1, p, v.y); putF
 float3 get3(uint f, uint p) { return float3(getF(f, p), getF(f + 1, p), getF(f + 2, p)); }
 
 // Words: 0 org, 3 dir, 6 throughput, 9 rng, 10 flags (cls in bits 0-1, chan + 1 in bits 2-3, misPrev
-// in bit 4, restir in bit 5), 11 pathLen, 12 qPrev, 13 radiance total; with the lighting AOVs 16 the five parts, 31 visLit,
+// in bit 4, restir in bit 5, gi in bit 6), 11 pathLen, 12 qPrev, 13 radiance total; with the lighting AOVs 16 the five parts, 31 visLit,
 // 32 visTotal. Depth 0 keeps no state: its camera path is generated again from the pixel.
 void storePath(PathState s, uint p)
 {
@@ -39,7 +39,7 @@ void storePath(PathState s, uint p)
     put3(3, p, s.dir);
     put3(6, p, s.thr);
     state[9 * n + p] = s.rng;
-    state[10 * n + p] = s.cls | (uint(s.chan + 1) << 2) | (s.misPrev ? 16u : 0u) | (s.restir ? 32u : 0u);
+    state[10 * n + p] = s.cls | (uint(s.chan + 1) << 2) | (s.misPrev ? 16u : 0u) | (s.restir ? 32u : 0u) | (s.gi ? 64u : 0u);
     putF(11, p, s.pathLen);
     putF(12, p, s.qPrev);
     put3(13, p, s.parts.total);
@@ -70,6 +70,7 @@ PathState loadPath(uint p, uint depth)
     s.chan = int((flags >> 2) & 3u) - 1;
     s.misPrev = (flags & 16u) != 0;
     s.restir = (flags & 32u) != 0;
+    s.gi = (flags & 64u) != 0;
     s.pathLen = getF(11, p);
     s.qPrev = getF(12, p);
     s.parts = (Parts)0;

@@ -156,6 +156,10 @@ struct Args {
     /// surfaces use plain light sampling
     #[arg(long)]
     restir: bool,
+    /// ReSTIR GI on top of DI: the first bounce's indirect light is reused between frames and
+    /// neighbouring pixels. Beauty only (skipped under the lighting split). Implies --restir
+    #[arg(long)]
+    restir_gi: bool,
     /// Light samples drawn per pixel and frame before ReSTIR's reuse
     #[arg(long, default_value_t = 4)]
     restir_candidates: u32,
@@ -254,7 +258,7 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
         return Err("width, height and spp must be at least 1".into());
     }
     let grade = args.color_grade()?;
-    let restir = args.restir || args.mode == Mode::Interactive;
+    let restir = args.restir || args.restir_gi || args.mode == Mode::Interactive;
     if restir && args.mode.physical() {
         return Err("--restir is not allowed in reference mode (its reuse is biased)".into());
     }
@@ -293,6 +297,8 @@ fn run_with<Backend: verion_gpu::RayTracingBackend>(
     });
     renderer.set_stage_timing(args.stage_timing);
     renderer.set_restir(restir.then_some(Restir {
+        di: true,
+        gi: args.restir_gi,
         candidates: args.restir_candidates,
         history: args.restir_history,
     }));

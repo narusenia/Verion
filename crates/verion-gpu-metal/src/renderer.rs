@@ -765,10 +765,13 @@ impl RayTracingBackend for Renderer {
             ));
         }
         if acc.samples == 0 {
-            // Two frames of reservoirs; Metal zero-fills them, which marks every pixel unusable.
+            // Two frames of reservoirs and the scratch; Metal zero-fills them, which marks every pixel unusable.
             acc.restir = match self.restir {
                 Some(r) => {
-                    let len = acc.width as usize * acc.height as usize * 2 * 16 * size_of::<f32>();
+                    let len = acc.width as usize
+                        * acc.height as usize
+                        * verion_gpu::RESTIR_FLOATS_PER_PIXEL
+                        * size_of::<f32>();
                     self.ctx.check_fits(len)?;
                     let buffer = self
                         .ctx

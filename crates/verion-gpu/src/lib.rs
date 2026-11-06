@@ -57,6 +57,9 @@ pub trait RayTracingBackend: Sized {
     fn render_aovs(&self, width: u32, height: u32) -> Result<Aovs, Self::Error>;
 }
 
+/// Floats of ReSTIR reservoir data per pixel (two frames and the scratch of the current one).
+pub const RESTIR_FLOATS_PER_PIXEL: usize = 80;
+
 /// What one `update` redid.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct UpdateReport {
@@ -118,21 +121,27 @@ impl Default for Adaptive {
     }
 }
 
-/// ReSTIR DI settings (REQ-ACC-002, ADR-0016): the first hit's emissive-triangle light sample comes
-/// from reservoirs that reuse the previous frame's samples of the pixel and its neighbours. The
-/// reuse is biased near shadow edges, so the image is non-physical. Surfaces that are sharp,
-/// transmissive or seen through a lens use plain light sampling instead.
+/// ReSTIR settings (REQ-ACC-002, ADR-0016). DI: the first hit's emissive-triangle light sample comes
+/// from reservoirs that reuse the previous frame's samples of the pixel and its neighbours. GI: the
+/// first bounce's indirect light is reused the same way (a second-hit point and its radiance,
+/// reconnected to the new shading point). The reuse is biased, so the image is non-physical.
+/// Surfaces that are sharp, transmissive or seen through a lens use plain sampling instead, and GI
+/// is skipped when the lighting split is on (Stylized).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Restir {
-    /// Light samples drawn per pixel and frame before the reuse.
+    pub di: bool,
+    pub gi: bool,
+    /// DI: light samples drawn per pixel and frame before the reuse.
     pub candidates: u32,
-    /// Most samples a reused reservoir counts for; a larger cap reuses more but follows change slower.
+    /// Most samples a reused reservoir (DI or GI) counts for; a larger cap reuses more but follows change slower.
     pub history: u32,
 }
 
 impl Default for Restir {
     fn default() -> Self {
         Self {
+            di: true,
+            gi: false,
             candidates: 4,
             history: 20,
         }

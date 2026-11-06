@@ -210,6 +210,8 @@ pub struct App {
     /// Per-pixel adaptive sampling (REQ-ACC-007), with its threshold kept while off.
     adaptive: bool,
     adaptive_threshold: f32,
+    /// ReSTIR DI (REQ-ACC-002): faster to a clean image with many emitters; biased, so not physical.
+    restir: bool,
     /// Pixels that still take samples, counted after each accumulate.
     active: usize,
     /// Denoise the finished (or paused) accumulation with OIDN (ADR-0013).
@@ -329,6 +331,7 @@ impl App {
             integrator: Integrator::Megakernel,
             adaptive: false,
             adaptive_threshold: Adaptive::default().threshold,
+            restir: false,
             active: (w * h) as usize,
             denoise: false,
             denoiser: None,
@@ -991,6 +994,18 @@ impl App {
             self.renderer.set_adaptive(self.adaptive_setting());
             self.restart();
         }
+        if widgets::checkbox(ui, &mut self.restir, "ReSTIR DI (many emitters)") {
+            self.renderer
+                .set_restir(self.restir.then(verion_gpu::Restir::default));
+            self.restart();
+        }
+        ui.label(
+            RichText::new(
+                "Reuses light samples between frames. Biased near shadow edges, so not physical",
+            )
+            .small()
+            .color(MUTED),
+        );
         if widgets::checkbox(ui, &mut self.denoise, "Denoise when done (OIDN)") {
             self.dirty = true;
         }

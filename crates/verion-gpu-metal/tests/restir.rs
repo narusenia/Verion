@@ -135,3 +135,114 @@ fn switching_mid_accumulation_is_an_error() {
     r.set_restir(Some(Restir::default()));
     assert!(r.accumulate(&mut acc, 1).is_err());
 }
+
+fn cube(half: f32) -> Mesh {
+    let h = half;
+    let positions = vec![
+        [-h, -h, -h],
+        [h, -h, -h],
+        [h, h, -h],
+        [-h, h, -h],
+        [-h, -h, h],
+        [h, -h, h],
+        [h, h, h],
+        [-h, h, h],
+    ];
+    #[rustfmt::skip]
+    let indices = vec![
+        0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4,
+        2, 3, 7, 2, 7, 6, 1, 2, 6, 1, 6, 5, 0, 3, 7, 0, 7, 4,
+    ];
+    Mesh::new(positions, None, None, indices).unwrap()
+}
+
+/// A closed room of rough walls lit by 16 small panels and a rough ball, seen from inside:
+/// most of what the camera sees is indirect light.
+fn closed_room(roughness: f32) -> Scene {
+    let mut s = Scene::new();
+    let room = s.add_mesh(cube(1.5));
+    let ball = s.add_mesh(cube(0.4));
+    let panels: Vec<_> = (0..16)
+        .map(|k| {
+            let (gx, gz) = ((k % 4) as f32, (k / 4) as f32);
+            let mut q = quads(&[([-0.6 + gx * 0.4, -0.6 + gz * 0.4, 0.0], 0.06)]);
+            // Lay the panel flat under the ceiling.
+            let p: Vec<[f32; 3]> = q.positions().iter().map(|v| [v[0], 1.45, v[1]]).collect();
+            q = Mesh::new(p, None, None, q.indices().to_vec()).unwrap();
+            q
+        })
+        .collect();
+    let mut positions = Vec::new();
+    let mut indices = Vec::new();
+    for q in &panels {
+        let b = positions.len() as u32;
+        positions.extend_from_slice(q.positions());
+        indices.extend(q.indices().iter().map(|i| i + b));
+    }
+    let lamps = s.add_mesh(Mesh::new(positions, None, None, indices).unwrap());
+    let mat = |base: BaseBsdf| Material {
+        base,
+        ..Material::default()
+    };
+    let walls = s.add_material(mat(BaseBsdf {
+        base_color: [0.7, 0.65, 0.6],
+        roughness,
+        ior: 1.0,
+        ..BaseBsdf::default()
+    }));
+    let glow = s.add_material(mat(BaseBsdf {
+        base_color: [0.0; 3],
+        emission: [30.0; 3],
+        roughness,
+        ..BaseBsdf::default()
+    }));
+    for (mesh, material) in [(room, walls), (ball, walls), (lamps, glow)] {
+        s.add_instance(Instance {
+            mesh,
+            material,
+            transform: IDENTITY,
+        })
+        .unwrap();
+    }
+    let mut cam = Camera::default();
+    cam.transform[2][3] = 1.4;
+    s.set_camera(cam);
+    s
+}
+
+fn gi() -> Restir {
+    Restir {
+        gi: true,
+        ..Restir::default()
+    }
+}
+
+#[test]
+fn gi_converges_to_the_path_traced_image() {
+    let Some(ctx) = context() else { return };
+    let mut r = Renderer::new(&ctx, &closed_room(0.9)).unwrap();
+    let plain = mean(&render(&r, 1024));
+    r.set_restir(Some(gi()));
+    let resampled = mean(&render(&r, 1024));
+    let err = (resampled - plain).abs() / plain;
+    assert!(err < 0.03, "plain {plain}, gi {resampled}, error {err}");
+}
+
+#[test]
+fn gi_draws_the_same_image_with_both_integrators() {
+    let Some(ctx) = context() else { return };
+    let mut r = Renderer::new(&ctx, &closed_room(0.9)).unwrap();
+    r.set_restir(Some(gi()));
+    let mega = render(&r, 16);
+    r.set_integrator(Integrator::Wavefront);
+    assert_eq!(mega, render(&r, 16));
+}
+
+#[test]
+fn gi_leaves_sharp_surfaces_alone() {
+    let Some(ctx) = context() else { return };
+    let mut r = Renderer::new(&ctx, &closed_room(0.05)).unwrap();
+    let plain = render(&r, 8);
+    r.set_restir(Some(gi()));
+    assert_eq!(plain, render(&r, 8));
+}
