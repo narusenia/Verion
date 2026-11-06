@@ -55,6 +55,15 @@ class NodeTests(unittest.TestCase):
         b = self.render({"Roughness": 0.9})
         self.assertGreater(np.abs(a - b).mean() / a.mean(), 0.02)
 
+    def test_sliders_have_ranges(self):
+        lit_scene()
+        ob, mat = sphere()
+        surf = next(n for n in verion_tree(mat).nodes if n.bl_idname == "VerionNodeSurface")
+        surf.inputs["Metallic"].default_value = 5.0
+        surf.inputs["IOR"].default_value = 0.2
+        self.assertEqual(surf.inputs["Metallic"].default_value, 1.0)
+        self.assertEqual(surf.inputs["IOR"].default_value, 1.0)
+
     def test_image_node_feeds_a_texture(self):
         lit_scene()
         ob, mat = sphere()

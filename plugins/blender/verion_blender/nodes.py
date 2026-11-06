@@ -8,7 +8,7 @@ Nothing here is shown to Cycles or EEVEE: they ignore the tree.
 """
 import bpy
 import nodeitems_utils
-from bpy.props import PointerProperty
+from bpy.props import FloatProperty, FloatVectorProperty, PointerProperty
 from nodeitems_utils import NodeCategory, NodeItem
 
 TREE = "VerionNodeTree"
@@ -54,6 +54,56 @@ class VerionSocketSurface(bpy.types.NodeSocket):
         return (0.39, 0.78, 0.39, 1.0)
 
 
+class _ValueSocket:
+    """A socket with a slider (builtin socket types cannot be given a range from Python)."""
+
+    def draw(self, context, layout, node, text):
+        if self.is_output or self.is_linked:
+            layout.label(text=text)
+        else:
+            layout.prop(self, "default_value", text=text)
+
+
+class VerionSocketFactor(_ValueSocket, bpy.types.NodeSocket):
+    bl_idname = "VerionSocketFactor"
+    bl_label = "Factor"
+    default_value: FloatProperty(default=0.0, min=0.0, max=1.0, subtype="FACTOR")
+
+    @classmethod
+    def draw_color_simple(cls):
+        return (0.63, 0.63, 0.63, 1.0)
+
+
+class VerionSocketPositive(_ValueSocket, bpy.types.NodeSocket):
+    bl_idname = "VerionSocketPositive"
+    bl_label = "Value"
+    default_value: FloatProperty(default=0.0, min=0.0, soft_max=10.0)
+
+    @classmethod
+    def draw_color_simple(cls):
+        return (0.63, 0.63, 0.63, 1.0)
+
+
+class VerionSocketIOR(_ValueSocket, bpy.types.NodeSocket):
+    bl_idname = "VerionSocketIOR"
+    bl_label = "IOR"
+    default_value: FloatProperty(default=1.5, min=1.0, soft_max=3.0)
+
+    @classmethod
+    def draw_color_simple(cls):
+        return (0.63, 0.63, 0.63, 1.0)
+
+
+class VerionSocketColor(_ValueSocket, bpy.types.NodeSocket):
+    bl_idname = "VerionSocketColor"
+    bl_label = "Color"
+    default_value: FloatVectorProperty(default=(0.8, 0.8, 0.8, 1.0), size=4, min=0.0, soft_max=1.0, subtype="COLOR")
+
+    @classmethod
+    def draw_color_simple(cls):
+        return (0.78, 0.78, 0.16, 1.0)
+
+
 class _Node:
     @classmethod
     def poll(cls, ntree):
@@ -70,21 +120,21 @@ class VerionNodeOutput(_Node, bpy.types.Node):
 
 # (socket type, name, default): the parameters of `scene.add_material`, in panel order.
 SURFACE_INPUTS = (
-    ("NodeSocketColor", "Base Color", (0.8, 0.8, 0.8, 1.0)),
-    ("NodeSocketFloatFactor", "Metallic", 0.0),
-    ("NodeSocketFloatFactor", "Roughness", 0.5),
-    ("NodeSocketFloatFactor", "Transmission", 0.0),
-    ("NodeSocketFloat", "IOR", 1.5),
-    ("NodeSocketFloat", "Dispersion", 0.0),
-    ("NodeSocketFloatFactor", "Opacity", 1.0),
-    ("NodeSocketFloatFactor", "Clearcoat", 0.0),
-    ("NodeSocketFloatFactor", "Clearcoat Roughness", 0.0),
-    ("NodeSocketColor", "Sheen Color", (0.0, 0.0, 0.0, 1.0)),
-    ("NodeSocketFloatFactor", "Sheen Roughness", 0.0),
-    ("NodeSocketColor", "Emission", (0.0, 0.0, 0.0, 1.0)),
-    ("NodeSocketFloat", "Emission Strength", 1.0),
-    ("NodeSocketColor", "Normal Map", (0.5, 0.5, 1.0, 1.0)),
-    ("NodeSocketFloat", "Normal Scale", 1.0),
+    ("VerionSocketColor", "Base Color", (0.8, 0.8, 0.8, 1.0)),
+    ("VerionSocketFactor", "Metallic", 0.0),
+    ("VerionSocketFactor", "Roughness", 0.5),
+    ("VerionSocketFactor", "Transmission", 0.0),
+    ("VerionSocketIOR", "IOR", 1.5),
+    ("VerionSocketPositive", "Dispersion", 0.0),
+    ("VerionSocketFactor", "Opacity", 1.0),
+    ("VerionSocketFactor", "Clearcoat", 0.0),
+    ("VerionSocketFactor", "Clearcoat Roughness", 0.0),
+    ("VerionSocketColor", "Sheen Color", (0.0, 0.0, 0.0, 1.0)),
+    ("VerionSocketFactor", "Sheen Roughness", 0.0),
+    ("VerionSocketColor", "Emission", (0.0, 0.0, 0.0, 1.0)),
+    ("VerionSocketPositive", "Emission Strength", 1.0),
+    ("VerionSocketColor", "Normal Map", (0.5, 0.5, 1.0, 1.0)),
+    ("VerionSocketPositive", "Normal Scale", 1.0),
 )
 
 
@@ -107,7 +157,7 @@ class VerionNodeImage(_Node, bpy.types.Node):
     image: PointerProperty(type=bpy.types.Image)
 
     def init(self, context):
-        self.outputs.new("NodeSocketColor", "Color")
+        self.outputs.new("VerionSocketColor", "Color")
 
     def draw_buttons(self, context, layout):
         layout.template_ID(self, "image", open="image.open")
@@ -146,7 +196,7 @@ CATEGORIES = [
     _Category("VERION_INPUT", "Input", items=[NodeItem(IMAGE)]),
 ]
 
-classes = (VerionNodeTree, VerionSocketSurface, VerionNodeOutput, VerionNodeSurface, VerionNodeImage, VERION_OT_node_tree_new)
+classes = (VerionNodeTree, VerionSocketSurface, VerionSocketFactor, VerionSocketPositive, VerionSocketIOR, VerionSocketColor, VerionNodeOutput, VerionNodeSurface, VerionNodeImage, VERION_OT_node_tree_new)
 
 
 def register():
